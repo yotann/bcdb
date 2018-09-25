@@ -1,0 +1,9 @@
+set(LLVM_LINK_COMPONENTS
+  IRReader
+  LTO
+  Support
+  TransformUtils
+)
+add_llvm_tool(bc-split
+  bc-split.cpp
+)

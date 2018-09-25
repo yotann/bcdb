@@ -1,0 +1,48 @@
+cmake_minimum_required(VERSION 3.4)
+
+project(BCDB CXX)
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+add_definitions(-Wall)
+
+find_package(LLVM REQUIRED CONFIG)
+
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+if( ${LLVM_PACKAGE_VERSION} VERSION_LESS 4.0 )
+  message(FATAL_ERROR "LLVM 4.0 or newer is required")
+endif()
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+set(Python_ADDITIONAL_VERSIONS 2.7)
+include(FindPythonInterp)
+if( NOT PYTHONINTERP_FOUND )
+  message(FATAL_ERROR
+"Unable to find Python interpreter, required for builds and testing.
+Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
+endif()
+if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
+  message(FATAL_ERROR "Python 2.7 or newer is required")
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
+include(AddLLVM)
+include(HandleLLVMOptions)
+
+set(LLVM_BUILD_TOOLS ON)
+
+# Put libs and bins in expected place.
+# XXX: We don't setup CMAKE_CFG_INTDIR to distinguish Release/Debug/etc.
+set(LLVM_RUNTIME_OUTPUT_INTDIR
+    ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
+set(LLVM_LIBRARY_OUTPUT_INTDIR
+    ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
+
+link_directories(${LLVM_LIBRARY_DIR})
+include_directories(${LLVM_INCLUDE_DIR})
+
+
+
+add_subdirectory(test)
+add_subdirectory(tools)

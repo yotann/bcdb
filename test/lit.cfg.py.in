@@ -1,0 +1,15 @@
+import os
+import lit.formats
+
+config.name = "bcdb"
+config.test_format = lit.formats.ShTest(True)
+config.suffixes = [".ll",".test"]
+config.test_source_root = "@CMAKE_SOURCE_DIR@/test"
+config.test_exec_root = "@CMAKE_BINARY_DIR@/test"
+
+# Add our newly-built tools to the path
+newpath = "@LLVM_RUNTIME_OUTPUT_INTDIR@"
+curpath = os.environ.get("PATH", "")
+if curpath:
+    newpath += ":" + curpath
+config.environment["PATH"] = newpath
