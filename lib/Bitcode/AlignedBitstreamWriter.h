@@ -410,8 +410,7 @@ private:
 
 public:
   /// Emit a blob, including flushing before and tail-padding.
-  template <class UIntTy>
-  void emitBlob(ArrayRef<UIntTy> Bytes) {
+  template <class UIntTy> void emitBlob(ArrayRef<UIntTy> Bytes) {
     // Emit a vbr6 to indicate the number of elements present.
     EmitVBR(static_cast<uint32_t>(Bytes.size()), 6);
 
