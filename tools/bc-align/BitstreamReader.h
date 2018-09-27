@@ -502,7 +502,7 @@ public:
   //===--------------------------------------------------------------------===//
   // Abbrev Processing
   //===--------------------------------------------------------------------===//
-  const BitCodeAbbrev *ReadAbbrevRecord();
+  unsigned ReadAbbrevRecord();
 
   /// Read and return a block info block from the bitstream. If an error was
   /// encountered, return None.

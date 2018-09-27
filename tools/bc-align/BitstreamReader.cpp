@@ -286,7 +286,7 @@ unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
   return Code;
 }
 
-const BitCodeAbbrev *BitstreamCursor::ReadAbbrevRecord() {
+unsigned BitstreamCursor::ReadAbbrevRecord() {
   auto Abbv = std::make_shared<BitCodeAbbrev>();
   unsigned NumOpInfo = ReadVBR(5);
   for (unsigned i = 0; i != NumOpInfo; ++i) {
@@ -322,7 +322,7 @@ const BitCodeAbbrev *BitstreamCursor::ReadAbbrevRecord() {
   if (Abbv->getNumOperandInfos() == 0)
     report_fatal_error("Abbrev record with no operands");
   CurAbbrevs.push_back(std::move(Abbv));
-  return CurAbbrevs.back().get();
+  return CurAbbrevs.size() - 1 + bitc::FIRST_APPLICATION_ABBREV;
 }
 
 Optional<BitstreamBlockInfo>

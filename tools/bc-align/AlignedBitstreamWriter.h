@@ -1,4 +1,4 @@
-//===- BitstreamWriter.h - Low-level bitstream writer interface -*- C++ -*-===//
+//===- AlignedBitstreamWriter.h - Low-level bitstream writer ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,13 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This header defines the BitstreamWriter class.  This class can be used to
-// write an arbitrary bitstream, regardless of its contents.
+// This header defines the AlignedBitstreamWriter class.  This class can be used
+// to write an arbitrary bitstream, regardless of its contents, while
+// maintaining byte-alignment when possible.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_BITCODE_BITSTREAMWRITER_H
-#define LLVM_BITCODE_BITSTREAMWRITER_H
+#ifndef BCDB_ALIGNEDBITSTREAMWRITER_H
+#define BCDB_ALIGNEDBITSTREAMWRITER_H
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
@@ -25,7 +26,9 @@
 
 namespace bcdb {
 
-class BitstreamWriter {
+using namespace llvm;
+
+class AlignedBitstreamWriter {
   SmallVectorImpl<char> &Out;
 
   /// CurBit - Always between 0 and 31 inclusive, specifies the next bit to use.
@@ -80,10 +83,10 @@ class BitstreamWriter {
   }
 
 public:
-  explicit BitstreamWriter(SmallVectorImpl<char> &O)
+  explicit AlignedBitstreamWriter(SmallVectorImpl<char> &O)
       : Out(O), CurBit(0), CurValue(0), CurCodeSize(2) {}
 
-  ~BitstreamWriter() {
+  ~AlignedBitstreamWriter() {
     assert(CurBit == 0 && "Unflushed data remaining");
     assert(BlockScope.empty() && CurAbbrevs.empty() && "Block imbalance");
   }
@@ -170,6 +173,35 @@ public:
     }
 
     Emit((uint32_t)Val, NumBits);
+  }
+
+  void EmitVBRAligned(uint64_t Val, unsigned NumBits, unsigned ExtraBits = 0) {
+    // Emit a VBR value in such a way that after the value is emitted, and
+    // ExtraBits additional bits have been emitted, the stream is byte-aligned.
+    assert(NumBits <= 32 && "Too many bits to emit!");
+    uint32_t Threshold = 1U << (NumBits - 1);
+
+    // Is alignment impossible? (e.g. NumBits is even but position is odd.)
+    uint64_t MA = MinAlign(NumBits, 8);
+    if (CurBit & (MA - 1))
+      return EmitVBR64(Val, NumBits);
+
+    while (Val >= Threshold || (CurBit + NumBits + ExtraBits) % 8) {
+      Emit(((uint32_t)Val & (Threshold - 1)) | Threshold, NumBits);
+      Val >>= NumBits - 1;
+    }
+    Emit((uint32_t)Val, NumBits);
+  }
+
+  unsigned CalculateVBRSize(uint64_t Val, unsigned NumBits) {
+    // Calculate how many bits will be used to emit a VBR value.
+    unsigned Result = NumBits;
+    uint32_t Threshold = 1U << (NumBits - 1);
+    while (Val >= Threshold) {
+      Result += NumBits;
+      Val >>= NumBits - 1;
+    }
+    return Result;
   }
 
   /// EmitCode - Emit the specified code.
@@ -283,9 +315,7 @@ private:
     }
   }
 
-protected:
-  virtual void EmitArrayLen(uint32_t Val) { EmitVBR(Val, 6); }
-
+private:
   /// EmitRecordWithAbbrevImpl - This is the core implementation of the record
   /// emission code.  If BlobData is non-null, then it specifies an array of
   /// data that should be emitted as part of the Blob or Array operand that is
@@ -336,7 +366,7 @@ protected:
           assert(RecordIdx == Vals.size() &&
                  "Blob data and record entries specified for array!");
           // Emit a vbr6 to indicate the number of elements present.
-          EmitArrayLen(static_cast<uint32_t>(BlobLen));
+          EmitVBRAligned(BlobLen, 6);
 
           // Emit each field.
           for (unsigned i = 0; i != BlobLen; ++i)
@@ -346,7 +376,7 @@ protected:
           BlobData = nullptr;
         } else {
           // Emit a vbr6 to indicate the number of elements present.
-          EmitArrayLen(static_cast<uint32_t>(Vals.size() - RecordIdx));
+          EmitVBRAligned(Vals.size() - RecordIdx, 6);
 
           // Emit each field.
           for (unsigned e = Vals.size(); RecordIdx != e; ++RecordIdx)
@@ -362,7 +392,7 @@ protected:
 
           assert(Blob.data() == BlobData && "BlobData got moved");
           assert(Blob.size() == BlobLen && "BlobLen got changed");
-          emitBlob(Blob);
+          emitBlob(makeArrayRef((const uint8_t *)Blob.data(), Blob.size()));
           BlobData = nullptr;
         } else {
           emitBlob(Vals.slice(RecordIdx));
@@ -381,10 +411,9 @@ protected:
 public:
   /// Emit a blob, including flushing before and tail-padding.
   template <class UIntTy>
-  void emitBlob(ArrayRef<UIntTy> Bytes, bool ShouldEmitSize = true) {
+  void emitBlob(ArrayRef<UIntTy> Bytes) {
     // Emit a vbr6 to indicate the number of elements present.
-    if (ShouldEmitSize)
-      EmitVBR(static_cast<uint32_t>(Bytes.size()), 6);
+    EmitVBR(static_cast<uint32_t>(Bytes.size()), 6);
 
     // Flush to a 32-bit alignment boundary.
     FlushToWord();
@@ -399,80 +428,56 @@ public:
     while (GetBufferOffset() & 3)
       WriteByte(0);
   }
-  void emitBlob(StringRef Bytes, bool ShouldEmitSize = true) {
-    emitBlob(makeArrayRef((const uint8_t *)Bytes.data(), Bytes.size()),
-             ShouldEmitSize);
+
+  /// EmitUnabbrevRecord - Emit the specified record to the stream.
+  template <typename Container>
+  void EmitUnabbrevRecord(unsigned Code, const Container &Vals) {
+    auto Count = static_cast<uint32_t>(makeArrayRef(Vals).size());
+    EmitCode(bitc::UNABBREV_RECORD);
+    EmitVBR(Code, 6);
+    EmitVBR(Count, 6);
+    for (unsigned i = 0, e = Count; i != e; ++i)
+      EmitVBR64(Vals[i], 6);
   }
 
-  /// EmitRecord - Emit the specified record to the stream, using an abbrev if
-  /// we have one to compress the output.
-  template <typename Container>
-  void EmitRecord(unsigned Code, const Container &Vals, unsigned Abbrev = 0) {
+  /// Emit the specified record to the stream, maintaining byte alignment.
+  /// Unabbreviated records may break alignment.
+  void EmitRecordAligned(unsigned Abbrev, unsigned Code,
+                         SmallVectorImpl<uint64_t> &Vals, StringRef Blob) {
     if (!Abbrev) {
-      // If we don't have an abbrev to use, emit this in its fully unabbreviated
-      // form.
-      auto Count = static_cast<uint32_t>(makeArrayRef(Vals).size());
-      EmitCode(bitc::UNABBREV_RECORD);
-      EmitVBR(Code, 6);
-      EmitVBR(Count, 6);
-      for (unsigned i = 0, e = Count; i != e; ++i)
-        EmitVBR64(Vals[i], 6);
-      return;
+      assert(Blob.empty() && "Records with blobs must use an abbreviation");
+      return EmitUnabbrevRecord(Code, Vals);
     }
-
-    EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals), StringRef(), Code);
-  }
-
-  /// EmitRecordWithAbbrev - Emit a record with the specified abbreviation.
-  /// Unlike EmitRecord, the code for the record should be included in Vals as
-  /// the first entry.
-  template <typename Container>
-  void EmitRecordWithAbbrev(unsigned Abbrev, const Container &Vals) {
-    EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals), StringRef(), None);
-  }
-
-  /// EmitRecordWithBlob - Emit the specified record to the stream, using an
-  /// abbrev that includes a blob at the end.  The blob data to emit is
-  /// specified by the pointer and length specified at the end.  In contrast to
-  /// EmitRecord, this routine expects that the first entry in Vals is the code
-  /// of the record.
-  template <typename Container>
-  void EmitRecordWithBlob(unsigned Abbrev, const Container &Vals,
-                          StringRef Blob) {
-    EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals), Blob, None);
-  }
-  template <typename Container>
-  void EmitRecordWithBlob(unsigned Abbrev, const Container &Vals,
-                          const char *BlobData, unsigned BlobLen) {
-    return EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals),
-                                    StringRef(BlobData, BlobLen), None);
-  }
-
-  /// EmitRecordWithArray - Just like EmitRecordWithBlob, works with records
-  /// that end with an array.
-  template <typename Container>
-  void EmitRecordWithArray(unsigned Abbrev, const Container &Vals,
-                           StringRef Array) {
-    EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals), Array, None);
-  }
-  template <typename Container>
-  void EmitRecordWithArray(unsigned Abbrev, const Container &Vals,
-                           const char *ArrayData, unsigned ArrayLen) {
-    return EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals),
-                                    StringRef(ArrayData, ArrayLen), None);
+    EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals), Blob, Code);
   }
 
   //===--------------------------------------------------------------------===//
   // Abbrev Emission
   //===--------------------------------------------------------------------===//
 
-protected:
+private:
   // Emit the abbreviation as a DEFINE_ABBREV record.
-  virtual void EncodeAbbrev(const BitCodeAbbrev &Abbv) {
+  void EncodeAbbrev(const BitCodeAbbrev &Abbv) {
+    // Calculate the ExtraBits (the number of bits that will be emitted after
+    // numabbrevops).
+    unsigned e = static_cast<unsigned>(Abbv.getNumOperandInfos());
+    unsigned ExtraBits = 0;
+    for (unsigned i = 0; i != e; ++i) {
+      const BitCodeAbbrevOp &Op = Abbv.getOperandInfo(i);
+      ExtraBits += 1;
+      if (Op.isEncoding()) {
+        ExtraBits += 3;
+        if (Op.hasEncodingData())
+          ExtraBits += CalculateVBRSize(Op.getEncodingData(), 5);
+      }
+      // Literals add a multiple of 8 bits, so they don't matter.
+    }
+
     EmitCode(bitc::DEFINE_ABBREV);
-    EmitVBR(Abbv.getNumOperandInfos(), 5);
-    for (unsigned i = 0, e = static_cast<unsigned>(Abbv.getNumOperandInfos());
-         i != e; ++i) {
+    // Emit numabbrevops so that, after the rest of the abbreviation is written
+    // (ExtraBits more bits), the stream will be byte-aligned.
+    EmitVBRAligned(Abbv.getNumOperandInfos(), 5, ExtraBits);
+    for (unsigned i = 0; i != e; ++i) {
       const BitCodeAbbrevOp &Op = Abbv.getOperandInfo(i);
       Emit(Op.isLiteral(), 1);
       if (Op.isLiteral()) {
@@ -515,7 +520,7 @@ private:
       return;
     SmallVector<unsigned, 2> V;
     V.push_back(BlockID);
-    EmitRecord(bitc::BLOCKINFO_CODE_SETBID, V);
+    EmitUnabbrevRecord(bitc::BLOCKINFO_CODE_SETBID, V);
     BlockInfoCurBID = BlockID;
   }
 
@@ -545,6 +550,6 @@ public:
   }
 };
 
-} // End llvm namespace
+} // End bcdb namespace
 
 #endif

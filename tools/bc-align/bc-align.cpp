@@ -1,17 +1,20 @@
 #include <string>
 #include <utility>
 
+#include <llvm/ADT/IndexedMap.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/LLVMBitCodes.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/MathExtras.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SystemUtils.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "AlignedBitstreamWriter.h"
 #include "BitstreamReader.h"
-#include "BitstreamWriter.h"
 
 // WARNING: this code could break (generate invalid modules) if LLVM ever adds
 // more file offsets!
@@ -55,10 +58,26 @@ static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
   Out->keep();
 }
 
-static unsigned AlignSize(unsigned size) {
-  while (size % 8)
-    size++;
-  return size;
+static bool AbbrevWorthKeeping(const BitCodeAbbrev *Abbrev) {
+  for (unsigned i = 0; i < Abbrev->getNumOperandInfos(); i++) {
+    BitCodeAbbrevOp Op = Abbrev->getOperandInfo(i);
+    if (Op.isEncoding()) {
+      switch (Op.getEncoding()) {
+      case BitCodeAbbrevOp::Fixed:
+        // also used for backpatching
+        if (Op.getEncodingData() >= 8) return true;
+        break;
+      case BitCodeAbbrevOp::Blob:
+        // required
+        return true;
+      case BitCodeAbbrevOp::Array:
+        return false;
+      default:
+        break;
+      }
+    }
+  }
+  return false;
 }
 
 static std::shared_ptr<BitCodeAbbrev> AlignAbbrev(const BitCodeAbbrev *Abbrev) {
@@ -72,11 +91,11 @@ static std::shared_ptr<BitCodeAbbrev> AlignAbbrev(const BitCodeAbbrev *Abbrev) {
         // adjust one of them for alignment, but that wouldn't work well for
         // LLVM's abbrevs in practice.
         Op = BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed,
-                             AlignSize(Op.getEncodingData()));
+                             alignTo<8>(Op.getEncodingData()));
         break;
       case BitCodeAbbrevOp::VBR:
         Op = BitCodeAbbrevOp(BitCodeAbbrevOp::VBR,
-                             AlignSize(Op.getEncodingData()));
+                             alignTo<8>(Op.getEncodingData()));
         break;
       case BitCodeAbbrevOp::Array:
         // Arrays have a vbr6 length field, which is forced to be aligned by
@@ -95,106 +114,13 @@ static std::shared_ptr<BitCodeAbbrev> AlignAbbrev(const BitCodeAbbrev *Abbrev) {
   return std::move(Result);
 }
 
-namespace {
-class AlignedBitstreamWriter : public BitstreamWriter {
-protected:
-  void EmitArrayLen(uint32_t Val) override { EmitVBRAligned(Val, 6, 8); }
-
-public:
-  AlignedBitstreamWriter(SmallVectorImpl<char> &O) : BitstreamWriter(O) {}
-
-  unsigned CalculateVBRSize(uint64_t Val, unsigned NumBits) {
-    // Calculate how many bits will be used to emit a VBR value.
-    unsigned Result = NumBits;
-    uint32_t Threshold = 1U << (NumBits - 1);
-    while (Val >= Threshold) {
-      Result += NumBits;
-      Val >>= NumBits - 1;
-    }
-    return Result;
-  }
-
-  void EmitVBRAligned(uint64_t Val, unsigned NumBits, unsigned ExtraBits = 0) {
-    // Emit a VBR value in such a way that after the value is emitted, and
-    // ExtraBits additional bits have been emitted, the stream is byte-aligned.
-    assert(NumBits <= 32 && "Too many bits to emit!");
-    uint32_t Threshold = 1U << (NumBits - 1);
-    uint32_t Mask = Threshold - 1;
-    while (Val >= Threshold) {
-      Emit(((uint32_t)Val & Mask) | Threshold, NumBits);
-      Val >>= NumBits - 1;
-    }
-    int Attempts = 0;
-    while ((GetCurrentBitNo() + NumBits + ExtraBits) % 8) {
-      Emit(((uint32_t)Val & Mask) | Threshold, NumBits);
-      Val >>= NumBits - 1;
-      if (++Attempts >= 7) {
-        // Failed to align the value. This can happen e.g. if NumBits is even
-        // but we started at an odd bit position.
-        break;
-      }
-    }
-    Emit((uint32_t)Val, NumBits);
-  }
-
-  void EncodeAbbrev(const BitCodeAbbrev &Abbv) override {
-    // Emit a DEFINE_ABBREV so that the stream is byte-aligned afterwards. The
-    // only fully general way to do this is to emit numabbrevops using
-    // EmitVBRAligned with an ExtraBits value that accounts for the remainder
-    // of the DEFINE_ABBREV.
-
-    // Calculate the ExtraBits (the number of bits that will be emitted after
-    // numabbrevops).
-    unsigned e = static_cast<unsigned>(Abbv.getNumOperandInfos());
-    unsigned ExtraBits = 0;
-    for (unsigned i = 0; i != e; ++i) {
-      const BitCodeAbbrevOp &Op = Abbv.getOperandInfo(i);
-      ExtraBits += 1;
-      if (Op.isEncoding()) {
-        ExtraBits += 3;
-        if (Op.hasEncodingData())
-          ExtraBits += CalculateVBRSize(Op.getEncodingData(), 5);
-      }
-      // Literals add a multiple of 8 bits, so they don't matter.
-    }
-
-    EmitCode(bitc::DEFINE_ABBREV);
-    EmitVBRAligned(Abbv.getNumOperandInfos(), 5, ExtraBits);
-    for (unsigned i = 0; i != e; ++i) {
-      const BitCodeAbbrevOp &Op = Abbv.getOperandInfo(i);
-      Emit(Op.isLiteral(), 1);
-      if (Op.isLiteral()) {
-        EmitVBR64(Op.getLiteralValue(), 8);
-      } else {
-        Emit(Op.getEncoding(), 3);
-        if (Op.hasEncodingData())
-          EmitVBR64(Op.getEncodingData(), 5);
-      }
-    }
-  }
-
-  void EmitRecordAligned(unsigned Abbrev, unsigned Code,
-                         SmallVectorImpl<uint64_t> &Vals, StringRef Blob) {
-    if (!Blob.empty()) {
-      BitstreamWriter::EmitRecordWithAbbrevImpl(Abbrev, makeArrayRef(Vals),
-                                                Blob, Code);
-      return;
-    }
-
-    if (!Abbrev) {
-      auto Count = static_cast<uint32_t>(Vals.size());
-      EmitCode(bitc::UNABBREV_RECORD);
-      EmitVBR(Code, 6);
-      EmitVBRAligned(Count, 6);
-      for (unsigned i = 0, e = Count; i != e; ++i)
-        EmitVBRAligned(Vals[i], 6);
-      return;
-    }
-
-    BitstreamWriter::EmitRecord(Code, Vals, Abbrev);
-  }
-};
-} // end anonymous namespace
+static std::shared_ptr<BitCodeAbbrev> MakeGeneralAbbrev() {
+  auto Result = std::make_shared<BitCodeAbbrev>();
+  Result->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
+  Result->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
+  Result->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
+  return std::move(Result);
+}
 
 namespace {
 class BitcodeAligner {
@@ -206,6 +132,13 @@ private:
   BitstreamCursor Reader;
   AlignedBitstreamWriter Writer;
   BitstreamBlockInfo BlockInfo;
+
+  struct Block {
+    IndexedMap<unsigned> AbbrevIDMap;
+    unsigned GeneralAbbrevID = 0;
+  };
+  SmallVector<Block, 0> Blocks;
+
   uint64_t VSTOffsetPlaceholder = 0;
   uint32_t VSTOffsetOldValue = 0;
   DenseMap<uint64_t, uint64_t> OffsetMap;
@@ -246,10 +179,28 @@ void BitcodeAligner::HandleStartBlock(unsigned ID) {
   }
   if (Reader.EnterSubBlock(ID, nullptr))
     report_fatal_error("Malformed block record");
-  Writer.EnterSubblock(ID, AlignSize(Reader.getAbbrevIDWidth()));
+  Writer.EnterSubblock(ID, alignTo<8>(Reader.getAbbrevIDWidth() + 1)); // +1 to accomodate the general abbrev if we add it
+
+  Blocks.emplace_back();
+  const auto *BI = BlockInfo.getBlockInfo(ID);
+  Blocks.back().AbbrevIDMap.grow(bitc::FIRST_APPLICATION_ABBREV - 1);
+  if (BI) {
+    unsigned i = bitc::FIRST_APPLICATION_ABBREV;
+    unsigned e = bitc::FIRST_APPLICATION_ABBREV + BI->Abbrevs.size();
+    Blocks.back().AbbrevIDMap.grow(e - 1);
+    unsigned j = i;
+    for(; i != e; i++)
+      if (AbbrevWorthKeeping(BI->Abbrevs[i - bitc::FIRST_APPLICATION_ABBREV].get()))
+        Blocks.back().AbbrevIDMap[i] = j++;
+  }
+
+  Blocks.back().GeneralAbbrevID = Writer.EmitAbbrev(MakeGeneralAbbrev());
 }
 
-void BitcodeAligner::HandleEndBlock() { Writer.ExitBlock(); }
+void BitcodeAligner::HandleEndBlock() {
+  Writer.ExitBlock();
+  Blocks.pop_back();
+}
 
 void BitcodeAligner::HandleBlockinfoBlock() {
   Optional<BitstreamBlockInfo> NewBlockInfo = Reader.ReadBlockInfoBlock();
@@ -261,21 +212,31 @@ void BitcodeAligner::HandleBlockinfoBlock() {
   for (size_t i = 0, e = BlockInfo.getNumBlockInfos(); i != e; i++) {
     const BitstreamBlockInfo::BlockInfo *BI = BlockInfo.getBlockInfoByIndex(i);
     for (const auto &Abbrev : BI->Abbrevs)
-      Writer.EmitBlockInfoAbbrev(BI->BlockID, AlignAbbrev(Abbrev.get()));
+      if (AbbrevWorthKeeping(Abbrev.get()))
+        Writer.EmitBlockInfoAbbrev(BI->BlockID, AlignAbbrev(Abbrev.get()));
   }
   Writer.ExitBlock();
 }
 
 void BitcodeAligner::HandleDefineAbbrev() {
-  const BitCodeAbbrev *Abbrev = Reader.ReadAbbrevRecord();
-  Writer.EmitAbbrev(AlignAbbrev(Abbrev));
+  unsigned InAbbrevID = Reader.ReadAbbrevRecord();
+  const BitCodeAbbrev *Abbrev = Reader.getAbbrev(InAbbrevID);
+  Blocks.back().AbbrevIDMap.grow(InAbbrevID);
+  if (!AbbrevWorthKeeping(Abbrev)) return;
+  unsigned OutAbbrevID = Writer.EmitAbbrev(AlignAbbrev(Abbrev));
+  Blocks.back().AbbrevIDMap[InAbbrevID] = OutAbbrevID;
 }
 
 void BitcodeAligner::HandleRecord(unsigned ID) {
   SmallVector<uint64_t, 64> Record;
   StringRef Blob;
   unsigned Code = Reader.readRecord(ID, Record, &Blob);
-  unsigned Abbrev = ID != bitc::UNABBREV_RECORD ? ID : 0;
+  unsigned Abbrev = Blocks.back().AbbrevIDMap[ID];
+  if (!Abbrev) {
+    if (!Blocks.back().GeneralAbbrevID)
+      Blocks.back().GeneralAbbrevID = Writer.EmitAbbrev(MakeGeneralAbbrev());
+    Abbrev = Blocks.back().GeneralAbbrevID;
+  }
 
   // Fix FNENTRY offsets to point to the new offset.
   if (Reader.getBlockID() == bitc::VALUE_SYMTAB_BLOCK_ID &&
