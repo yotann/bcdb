@@ -3,6 +3,7 @@
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -18,6 +19,10 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 
 using namespace llvm;
+
+#if LLVM_VERSION_MAJOR <= 5
+using ToolOutputFile = tool_output_file;
+#endif
 
 static cl::opt<std::string> InputFilename(cl::Positional, cl::Required,
                                           cl::desc("<input bitcode file>"));
@@ -41,8 +46,13 @@ static void SplitModule(
     if (!F.isDeclaration()) {
       // Create a new module containing only this function.
       ValueToValueMapTy VMap;
+#if LLVM_VERSION_MAJOR >= 7
+      const Module &MArg = *M;
+#else
+      const Module *MArg = M.get();
+#endif
       std::unique_ptr<Module> MPart(CloneModule(
-          M.get(), VMap, [&](const GlobalValue *GV) { return GV == &F; }));
+          MArg, VMap, [&](const GlobalValue *GV) { return GV == &F; }));
 
       // Clear unneeded data from the new module.
       VMap[&F]->setName("");
@@ -80,15 +90,19 @@ int main(int argc, const char **argv) {
 
     std::error_code EC;
     std::string Filename = (OutputDirectory + "/" + dir + "/" + file).str();
-    std::unique_ptr<tool_output_file> Out(
-        new tool_output_file(Filename, EC, sys::fs::F_None));
+    std::unique_ptr<ToolOutputFile> Out(
+        new ToolOutputFile(Filename, EC, sys::fs::F_None));
     if (EC) {
       errs() << EC.message() << '\n';
       exit(1);
     }
 
     verifyModule(*MPart);
+#if LLVM_VERSION_MAJOR >= 7
+    WriteBitcodeToFile(*MPart, Out->os());
+#else
     WriteBitcodeToFile(MPart.get(), Out->os());
+#endif
     Out->keep();
   });
 

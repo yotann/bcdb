@@ -2,6 +2,7 @@
 #include <utility>
 
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -13,6 +14,10 @@
 
 using namespace bcdb;
 using namespace llvm;
+
+#if LLVM_VERSION_MAJOR <= 5
+using ToolOutputFile = tool_output_file;
+#endif
 
 static cl::opt<std::string>
     InputFilename(cl::Positional, cl::desc("<input bitcode>"), cl::init("-"));
@@ -36,8 +41,8 @@ static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
   }
 
   std::error_code EC;
-  std::unique_ptr<tool_output_file> Out(
-      new tool_output_file(OutputFilename, EC, sys::fs::F_None));
+  std::unique_ptr<ToolOutputFile> Out(
+      new ToolOutputFile(OutputFilename, EC, sys::fs::F_None));
   if (EC) {
     errs() << EC.message() << '\n';
     exit(1);

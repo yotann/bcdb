@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.4)
 
-project(BCDB CXX)
+project(BCDB C CXX)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,6 +41,23 @@ set(LLVM_LIBRARY_OUTPUT_INTDIR
 
 link_directories(${LLVM_LIBRARY_DIR})
 include_directories(${LLVM_INCLUDE_DIR})
+
+
+
+# LLVM started using PRIVATE in version 6. We must use it when LLVM does for
+# compatibility.
+function(tool_link_libraries binary)
+  if( ${LLVM_VERSION_MAJOR} GREATER_EQUAL 6 )
+    target_link_libraries(${binary}
+      PRIVATE
+      ${ARGN}
+    )
+  else()
+    target_link_libraries(${binary}
+      ${ARGN}
+    )
+  endif()
+endfunction()
 
 
 
