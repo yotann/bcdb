@@ -7,6 +7,9 @@ config.suffixes = [".ll",".test"]
 config.test_source_root = "@CMAKE_SOURCE_DIR@/test"
 config.test_exec_root = "@CMAKE_BINARY_DIR@/test"
 
+for i in range(3, 1 + @LLVM_VERSION_MAJOR@):
+    config.available_features.add('llvm' + str(i))
+
 # Add our newly-built tools to the path
 newpath = "@LLVM_RUNTIME_OUTPUT_INTDIR@"
 curpath = os.environ.get("PATH", "")

@@ -1,0 +1,3 @@
+; RUN: llvm-dis < %p/compatibility-3.8.ll.bc            > %t1
+; RUN: bc-align < %p/compatibility-3.8.ll.bc | llvm-dis > %t2
+; RUN: diff %t1 %t2

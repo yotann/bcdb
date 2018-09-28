@@ -1,0 +1,6 @@
+; For some reason, llvm5 can't handle this module, only llvm6.
+
+; REQUIRES: llvm6
+; RUN: llvm-dis < %p/compatibility-5.0.ll.bc            > %t1
+; RUN: bc-align < %p/compatibility-5.0.ll.bc | llvm-dis > %t2
+; RUN: diff %t1 %t2

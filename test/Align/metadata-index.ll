@@ -1,6 +1,10 @@
-; RUN: llvm-as < %s | llvm-dis > %t1
+; RUN: llvm-as < %s            | llvm-dis > %t1
 ; RUN: llvm-as < %s | bc-align | llvm-dis > %t2
 ; RUN: diff %t1 %t2
+
+; RUN: llvm-as < %s            | llvm-dis -materialize-metadata > %t3
+; RUN: llvm-as < %s | bc-align | llvm-dis -materialize-metadata > %t4
+; RUN: diff %t3 %t4
 
 ; bc-align should remove the metadata index.
 ; RUN: llvm-as < %s            | llvm-bcanalyzer -dump | FileCheck -check-prefix=ORIG    %s
