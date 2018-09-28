@@ -6,6 +6,7 @@ config.test_format = lit.formats.ShTest(True)
 config.suffixes = [".ll",".test"]
 config.test_source_root = "@CMAKE_SOURCE_DIR@/test"
 config.test_exec_root = "@CMAKE_BINARY_DIR@/test"
+config.excludes = [ "Inputs" ]
 
 for i in range(3, 1 + @LLVM_VERSION_MAJOR@):
     config.available_features.add('llvm' + str(i))

@@ -1,3 +1,3 @@
-; RUN: llvm-dis < %p/function-local-metadata.3.5.ll.bc            > %t1
-; RUN: bc-align < %p/function-local-metadata.3.5.ll.bc | llvm-dis > %t2
+; RUN: llvm-dis < %p/Inputs/function-local-metadata.3.5.ll.bc            > %t1
+; RUN: bc-align < %p/Inputs/function-local-metadata.3.5.ll.bc | llvm-dis > %t2
 ; RUN: diff %t1 %t2

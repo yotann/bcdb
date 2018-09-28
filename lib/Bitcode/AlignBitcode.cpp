@@ -104,6 +104,7 @@ private:
   uint32_t VSTOffsetOldValue = 0;
   DenseMap<uint64_t, uint64_t> OffsetMap;
   uint64_t CurEntryInOffset, CurEntryOutOffset;
+  uint64_t ModuleInOffset = 0, ModuleOutOffset = 0;
 
   void HandleStartBlock(unsigned ID);
   void HandleEndBlock();
@@ -126,23 +127,31 @@ BitcodeAligner::BitcodeAligner(MemoryBufferRef InBuffer,
       report_fatal_error("Invalid bitcode wrapper");
     Reader = BitstreamCursor(ArrayRef<uint8_t>(BufPtr, EndBufPtr));
   }
+  assert(isRawBitcode(BufPtr, EndBufPtr));
 
   Reader.setBlockInfo(&BlockInfo);
 }
 
 void BitcodeAligner::HandleStartBlock(unsigned ID) {
-  if (ID == bitc::FUNCTION_BLOCK_ID) {
-    OffsetMap[CurEntryInOffset] = Writer.GetCurrentBitNo();
+  if (ID == bitc::IDENTIFICATION_BLOCK_ID) {
+    // Keep track of offsets for multi-module files.
+    ModuleInOffset = CurEntryInOffset - 32;
+    ModuleOutOffset = CurEntryOutOffset - 32;
+  } else if (ID == bitc::FUNCTION_BLOCK_ID) {
+    OffsetMap[CurEntryInOffset - ModuleInOffset] =
+        Writer.GetCurrentBitNo() - ModuleOutOffset;
   } else if (ID == bitc::VALUE_SYMTAB_BLOCK_ID && VSTOffsetPlaceholder) {
-    if (VSTOffsetOldValue == CurEntryInOffset / 32) {
-      Writer.BackpatchWord(VSTOffsetPlaceholder, CurEntryOutOffset / 32);
+    if (VSTOffsetOldValue == (CurEntryInOffset - ModuleInOffset) / 32) {
+      Writer.BackpatchWord(VSTOffsetPlaceholder,
+                           (CurEntryOutOffset - ModuleOutOffset) / 32);
     }
   }
   if (Reader.EnterSubBlock(ID, nullptr))
     report_fatal_error("Malformed block record");
-  Writer.EnterSubblock(
-      ID, alignTo<8>(Reader.getAbbrevIDWidth() +
-                     1)); // +1 to accomodate the general abbrev if we add it
+
+  // Align the code width, and make it larger to accommodate the general
+  // abbrev.
+  Writer.EnterSubblock(ID, alignTo<8>(Reader.getAbbrevIDWidth() + 1));
 
   Blocks.emplace_back();
   const auto *BI = BlockInfo.getBlockInfo(ID);
@@ -238,6 +247,10 @@ void BitcodeAligner::AlignBitcode() {
 
     if (Entry.Kind == BitstreamEntry::EndBlock) {
       HandleEndBlock();
+      // Skip padding at end of file, like llvm::getBitcodeFileContents.
+      if (Blocks.empty())
+        if (Reader.getCurrentByteNo() + 8 >= Reader.getBitcodeBytes().size())
+          break;
     } else if (Entry.Kind == BitstreamEntry::SubBlock &&
                Entry.ID == bitc::BLOCKINFO_BLOCK_ID) {
       HandleBlockinfoBlock();
