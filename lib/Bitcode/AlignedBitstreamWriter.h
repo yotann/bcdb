@@ -396,6 +396,7 @@ private:
           BlobData = nullptr;
         } else {
           emitBlob(Vals.slice(RecordIdx));
+          RecordIdx = Vals.size();
         }
       } else { // Single scalar field.
         assert(RecordIdx < Vals.size() && "Invalid abbrev/record");

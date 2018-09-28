@@ -127,7 +127,8 @@ BitcodeAligner::BitcodeAligner(MemoryBufferRef InBuffer,
       report_fatal_error("Invalid bitcode wrapper");
     Reader = BitstreamCursor(ArrayRef<uint8_t>(BufPtr, EndBufPtr));
   }
-  assert(isRawBitcode(BufPtr, EndBufPtr));
+  if (!isRawBitcode(BufPtr, EndBufPtr))
+    report_fatal_error("Invalid magic bytes; not a bitcode file?");
 
   Reader.setBlockInfo(&BlockInfo);
 }
@@ -151,6 +152,8 @@ void BitcodeAligner::HandleStartBlock(unsigned ID) {
 
   // Align the code width, and make it larger to accommodate the general
   // abbrev.
+  if (Reader.getAbbrevIDWidth() >= 32)
+    report_fatal_error("Abbrev ID width too large");
   Writer.EnterSubblock(ID, alignTo<8>(Reader.getAbbrevIDWidth() + 1));
 
   Blocks.emplace_back();
@@ -245,17 +248,19 @@ void BitcodeAligner::AlignBitcode() {
     BitstreamEntry Entry =
         Reader.advance(BitstreamCursor::AF_DontAutoprocessAbbrevs);
 
-    if (Entry.Kind == BitstreamEntry::EndBlock) {
+    if (Entry.Kind == BitstreamEntry::SubBlock &&
+               Entry.ID == bitc::BLOCKINFO_BLOCK_ID) {
+      HandleBlockinfoBlock();
+    } else if (Entry.Kind == BitstreamEntry::SubBlock) {
+      HandleStartBlock(Entry.ID);
+    } else if (Blocks.empty()) {
+      report_fatal_error("Invalid bitstream entry at top level");
+    } else if (Entry.Kind == BitstreamEntry::EndBlock) {
       HandleEndBlock();
       // Skip padding at end of file, like llvm::getBitcodeFileContents.
       if (Blocks.empty())
         if (Reader.getCurrentByteNo() + 8 >= Reader.getBitcodeBytes().size())
           break;
-    } else if (Entry.Kind == BitstreamEntry::SubBlock &&
-               Entry.ID == bitc::BLOCKINFO_BLOCK_ID) {
-      HandleBlockinfoBlock();
-    } else if (Entry.Kind == BitstreamEntry::SubBlock) {
-      HandleStartBlock(Entry.ID);
     } else if (Entry.Kind == BitstreamEntry::Record &&
                Entry.ID == bitc::DEFINE_ABBREV) {
       HandleDefineAbbrev();
@@ -265,6 +270,9 @@ void BitcodeAligner::AlignBitcode() {
       report_fatal_error("Malformed bitstream entry");
     }
   }
+
+  if (!Blocks.empty())
+    report_fatal_error("Unexpected EOF");
 }
 
 void bcdb::AlignBitcode(MemoryBufferRef InBuffer,
