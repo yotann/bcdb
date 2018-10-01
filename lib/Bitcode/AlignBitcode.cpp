@@ -249,7 +249,7 @@ void BitcodeAligner::AlignBitcode() {
         Reader.advance(BitstreamCursor::AF_DontAutoprocessAbbrevs);
 
     if (Entry.Kind == BitstreamEntry::SubBlock &&
-               Entry.ID == bitc::BLOCKINFO_BLOCK_ID) {
+        Entry.ID == bitc::BLOCKINFO_BLOCK_ID) {
       HandleBlockinfoBlock();
     } else if (Entry.Kind == BitstreamEntry::SubBlock) {
       HandleStartBlock(Entry.ID);
