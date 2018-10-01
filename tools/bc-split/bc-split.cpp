@@ -4,8 +4,6 @@
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Config/llvm-config.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
@@ -14,9 +12,6 @@
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Transforms/IPO.h>
-#include <llvm/Transforms/Utils/Cloning.h>
-#include <llvm/Transforms/Utils/ModuleUtils.h>
 
 #include "bcdb/Split.h"
 
@@ -48,6 +43,13 @@ int main(int argc, const char **argv) {
                                 std::unique_ptr<Module> MPart) {
 
     std::error_code EC;
+
+    EC = sys::fs::create_directories(OutputDirectory + "/" + dir);
+    if (EC) {
+      errs() << EC.message() << '\n';
+      exit(1);
+    }
+
     std::string Filename = (OutputDirectory + "/" + dir + "/" + file).str();
     std::unique_ptr<ToolOutputFile> Out(
         new ToolOutputFile(Filename, EC, sys::fs::F_None));
