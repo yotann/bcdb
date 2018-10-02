@@ -58,7 +58,9 @@ int main(int argc, const char **argv) {
       exit(1);
     }
 
-    verifyModule(*MPart);
+    if (verifyModule(*MPart, &errs())) {
+      exit(1);
+    }
 #if LLVM_VERSION_MAJOR >= 7
     WriteBitcodeToFile(*MPart, Out->os());
 #else
