@@ -28,4 +28,5 @@ get_property(LLVM_LIT_DEPENDS GLOBAL PROPERTY LLVM_LIT_DEPENDS)
 add_lit_target(check "Running all tests"
   ${LLVM_LIT_TESTSUITES}
   DEPENDS ${LLVM_LIT_DEPENDS}
+  ARGS -v
 )
