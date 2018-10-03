@@ -3,14 +3,18 @@
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: FileCheck --check-prefix=LINKAGE -match-full-lines %s < %t/linkage.txt
 
-; MODULE: declare void @f.private()
+; MODULE: declare{{( dso_local)?}} void @f.private()
 ; PRIVATE: define void @0()
+; PRIVATE: declare void @f.internal()
+; PRIVATE: declare extern_weak void @f.extern_weak()
 ; LINKAGE: f.private 9
 define private void @f.private() {
+  call void @f.internal()
+  call void @f.extern_weak()
   ret void
 }
 
-; MODULE: declare void @f.internal()
+; MODULE: declare{{( dso_local)?}} void @f.internal()
 ; LINKAGE: f.internal 3
 define internal void @f.internal() {
   ret void

@@ -122,6 +122,9 @@ Value *DeclMaterializer::materialize(Value *V) {
         /*insertbefore*/ nullptr, SGV->getThreadLocalMode(),
         SGV->getType()->getAddressSpace());
   }
+#if LLVM_VERSION_MAJOR >= 7
+  NewGV->setDSOLocal(false);
+#endif
   if (SGV->hasExternalWeakLinkage())
     NewGV->setLinkage(GlobalValue::ExternalWeakLinkage);
   if (auto *NewF = dyn_cast<Function>(NewGV)) {
@@ -141,6 +144,9 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   DF->copyAttributesFrom(&SF);
   DF->stealArgumentListFrom(SF);
   DF->getBasicBlockList().splice(DF->end(), SF.getBasicBlockList());
+#if LLVM_VERSION_MAJOR >= 7
+  DF->setDSOLocal(false);
+#endif
 
   // Remap all values used within the function.
   ValueToValueMapTy VMap;
