@@ -10,17 +10,14 @@
 using namespace bcdb;
 using namespace llvm;
 
-// TODO: visibility
-// TODO: thread-local mode
 // TODO: comdats, comdat selection kind
-// TODO: unnamed addr
 // TODO: function-level inline asm
 // TODO: sections
 // TODO: GC
+// TODO: function prefix, function prologue
 
 // TODO: function-, instruction-level metadata
 // TODO: named arguments, instructions, basic blocks
-// TODO: preserved use-list order
 
 // TODO: operand bundles
 // TODO: sync scopes
@@ -122,16 +119,22 @@ Value *DeclMaterializer::materialize(Value *V) {
         /*insertbefore*/ nullptr, SGV->getThreadLocalMode(),
         SGV->getType()->getAddressSpace());
   }
+
+  NewGV->setVisibility(GlobalValue::DefaultVisibility);
+  NewGV->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
+  NewGV->setDLLStorageClass(GlobalValue::DefaultStorageClass);
 #if LLVM_VERSION_MAJOR >= 7
   NewGV->setDSOLocal(false);
 #endif
   if (SGV->hasExternalWeakLinkage())
     NewGV->setLinkage(GlobalValue::ExternalWeakLinkage);
+
   if (auto *NewF = dyn_cast<Function>(NewGV)) {
     NewF->setPersonalityFn(nullptr);
     NewF->setPrefixData(nullptr);
     NewF->setPrologueData(nullptr);
   }
+
   return NewGV;
 }
 
@@ -144,6 +147,10 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   DF->copyAttributesFrom(&SF);
   DF->stealArgumentListFrom(SF);
   DF->getBasicBlockList().splice(DF->end(), SF.getBasicBlockList());
+
+  DF->setVisibility(GlobalValue::DefaultVisibility);
+  DF->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
+  DF->setDLLStorageClass(GlobalValue::DefaultStorageClass);
 #if LLVM_VERSION_MAJOR >= 7
   DF->setDSOLocal(false);
 #endif
