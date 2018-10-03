@@ -123,11 +123,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   return MPart;
 }
 
-void bcdb::SplitModule(
-    std::unique_ptr<Module> M,
-    function_ref<void(StringRef, StringRef, std::unique_ptr<Module> MPart)>
-        ModuleCallback) {
-
+void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
   // Make sure all globals are named so we can link everything back together
   // later.
   nameUnamedGlobals(*M);
@@ -137,7 +133,7 @@ void bcdb::SplitModule(
       // Create a new module containing only this function.
       auto MPart = ExtractFunction(*M, F);
 
-      ModuleCallback("functions", F.getName(), std::move(MPart));
+      Saver.saveFunction(F.getName(), std::move(MPart));
 
       // Delete the function from the old module.
       F.deleteBody();
@@ -145,5 +141,5 @@ void bcdb::SplitModule(
     }
   }
 
-  ModuleCallback("remainder", "module", std::move(M));
+  Saver.saveRemainder(std::move(M));
 }

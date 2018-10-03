@@ -8,10 +8,14 @@
 
 namespace bcdb {
 
-void SplitModule(std::unique_ptr<llvm::Module> M,
-                 llvm::function_ref<void(llvm::StringRef, llvm::StringRef,
-                                         std::unique_ptr<llvm::Module> MPart)>
-                     ModuleCallback);
+class SplitSaver {
+public:
+  virtual void saveFunction(llvm::StringRef Name,
+                            std::unique_ptr<llvm::Module> Module) = 0;
+  virtual void saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
+};
+
+void SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver);
 
 } // end namespace bcdb
 

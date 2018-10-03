@@ -28,6 +28,49 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::Required,
 static cl::opt<std::string> OutputDirectory(cl::Positional, cl::Required,
                                             cl::desc("<output directory>"));
 
+class DirSplitSaver : public SplitSaver {
+  std::string Path;
+
+public:
+  DirSplitSaver(StringRef Path) : Path(Path) {}
+
+  void saveFunction(StringRef Name, std::unique_ptr<Module> Module) override {
+    saveModule("functions", Name, *Module);
+  }
+
+  void saveRemainder(std::unique_ptr<Module> Module) override {
+    saveModule("remainder", "module", *Module);
+  }
+
+  void saveModule(StringRef Dir, StringRef File, Module &MPart) {
+    std::error_code EC;
+
+    EC = sys::fs::create_directories(Path + "/" + Dir);
+    if (EC) {
+      errs() << EC.message() << '\n';
+      exit(1);
+    }
+
+    std::string Filename = (Path + "/" + Dir + "/" + File).str();
+    std::unique_ptr<ToolOutputFile> Out(
+        new ToolOutputFile(Filename, EC, sys::fs::F_None));
+    if (EC) {
+      errs() << EC.message() << '\n';
+      exit(1);
+    }
+
+    if (verifyModule(MPart, &errs())) {
+      exit(1);
+    }
+#if LLVM_VERSION_MAJOR >= 7
+    WriteBitcodeToFile(MPart, Out->os());
+#else
+    WriteBitcodeToFile(&MPart, Out->os());
+#endif
+    Out->keep();
+  }
+};
+
 int main(int argc, const char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "Module splitting");
 
@@ -39,35 +82,8 @@ int main(int argc, const char **argv) {
     return 1;
   }
 
-  SplitModule(std::move(M), [&](StringRef dir, StringRef file,
-                                std::unique_ptr<Module> MPart) {
-
-    std::error_code EC;
-
-    EC = sys::fs::create_directories(OutputDirectory + "/" + dir);
-    if (EC) {
-      errs() << EC.message() << '\n';
-      exit(1);
-    }
-
-    std::string Filename = (OutputDirectory + "/" + dir + "/" + file).str();
-    std::unique_ptr<ToolOutputFile> Out(
-        new ToolOutputFile(Filename, EC, sys::fs::F_None));
-    if (EC) {
-      errs() << EC.message() << '\n';
-      exit(1);
-    }
-
-    if (verifyModule(*MPart, &errs())) {
-      exit(1);
-    }
-#if LLVM_VERSION_MAJOR >= 7
-    WriteBitcodeToFile(*MPart, Out->os());
-#else
-    WriteBitcodeToFile(MPart.get(), Out->os());
-#endif
-    Out->keep();
-  });
+  DirSplitSaver Saver(OutputDirectory);
+  SplitModule(std::move(M), Saver);
 
   return 0;
 }
