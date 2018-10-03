@@ -1,5 +1,7 @@
 #include "bcdb/Split.h"
 
+#include "Codes.h"
+
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -8,7 +10,6 @@
 using namespace bcdb;
 using namespace llvm;
 
-// TODO: linkage (only function definitions may have linkage)
 // TODO: visibility
 // TODO: thread-local mode
 // TODO: comdats, comdat selection kind
@@ -31,6 +32,34 @@ using namespace llvm;
 // TODO: source file name
 // TODO: module-level inline asm
 // TODO: module-level metadata
+
+static unsigned getEncodedLinkage(const GlobalValue::LinkageTypes Linkage) {
+  switch (Linkage) {
+  case GlobalValue::ExternalLinkage:
+    return bitc::LINKAGE_TYPE_EXTERNAL;
+  case GlobalValue::AppendingLinkage:
+    return bitc::LINKAGE_TYPE_APPENDING;
+  case GlobalValue::InternalLinkage:
+    return bitc::LINKAGE_TYPE_INTERNAL;
+  case GlobalValue::ExternalWeakLinkage:
+    return bitc::LINKAGE_TYPE_EXTERNAL_WEAK;
+  case GlobalValue::CommonLinkage:
+    return bitc::LINKAGE_TYPE_COMMON;
+  case GlobalValue::PrivateLinkage:
+    return bitc::LINKAGE_TYPE_PRIVATE;
+  case GlobalValue::AvailableExternallyLinkage:
+    return bitc::LINKAGE_TYPE_AVAILABLE_EXTERNALLY;
+  case GlobalValue::WeakAnyLinkage:
+    return bitc::LINKAGE_TYPE_WEAK_ANY;
+  case GlobalValue::WeakODRLinkage:
+    return bitc::LINKAGE_TYPE_WEAK_ODR;
+  case GlobalValue::LinkOnceAnyLinkage:
+    return bitc::LINKAGE_TYPE_LINK_ONCE_ANY;
+  case GlobalValue::LinkOnceODRLinkage:
+    return bitc::LINKAGE_TYPE_LINK_ONCE_ODR;
+  }
+  llvm_unreachable("Invalid linkage");
+}
 
 // We don't need to change or merge any types.
 namespace {
@@ -133,7 +162,8 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
       // Create a new module containing only this function.
       auto MPart = ExtractFunction(*M, F);
 
-      Saver.saveFunction(F.getName(), std::move(MPart));
+      Saver.saveFunction(std::move(MPart), F.getName(),
+                         getEncodedLinkage(F.getLinkage()));
 
       // Delete the function from the old module.
       F.deleteBody();

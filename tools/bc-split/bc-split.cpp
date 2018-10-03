@@ -30,11 +30,31 @@ static cl::opt<std::string> OutputDirectory(cl::Positional, cl::Required,
 
 class DirSplitSaver : public SplitSaver {
   std::string Path;
+  std::unique_ptr<raw_fd_ostream> LinkageFile;
 
 public:
-  DirSplitSaver(StringRef Path) : Path(Path) {}
+  DirSplitSaver(StringRef Path) : Path(Path) {
+    std::error_code EC;
+    std::string Filename;
 
-  void saveFunction(StringRef Name, std::unique_ptr<Module> Module) override {
+    EC = sys::fs::create_directory(Path);
+    if (EC) {
+      errs() << EC.message() << '\n';
+      exit(1);
+    }
+
+    Filename = (Path + "/linkage.txt").str();
+    LinkageFile =
+        std::make_unique<raw_fd_ostream>(Filename, EC, sys::fs::F_None);
+    if (EC) {
+      errs() << EC.message() << '\n';
+      exit(1);
+    }
+  }
+
+  void saveFunction(std::unique_ptr<Module> Module, StringRef Name,
+                    unsigned Linkage) override {
+    *LinkageFile << Name << ' ' << Linkage << '\n';
     saveModule("functions", Name, *Module);
   }
 
@@ -52,8 +72,7 @@ public:
     }
 
     std::string Filename = (Path + "/" + Dir + "/" + File).str();
-    std::unique_ptr<ToolOutputFile> Out(
-        new ToolOutputFile(Filename, EC, sys::fs::F_None));
+    ToolOutputFile Out(Filename, EC, sys::fs::F_None);
     if (EC) {
       errs() << EC.message() << '\n';
       exit(1);
@@ -63,11 +82,11 @@ public:
       exit(1);
     }
 #if LLVM_VERSION_MAJOR >= 7
-    WriteBitcodeToFile(MPart, Out->os());
+    WriteBitcodeToFile(MPart, Out.os());
 #else
-    WriteBitcodeToFile(&MPart, Out->os());
+    WriteBitcodeToFile(&MPart, Out.os());
 #endif
-    Out->keep();
+    Out.keep();
   }
 };
 

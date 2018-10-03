@@ -10,8 +10,8 @@ namespace bcdb {
 
 class SplitSaver {
 public:
-  virtual void saveFunction(llvm::StringRef Name,
-                            std::unique_ptr<llvm::Module> Module) = 0;
+  virtual void saveFunction(std::unique_ptr<llvm::Module> Module,
+                            llvm::StringRef Name, unsigned Linkage) = 0;
   virtual void saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
 };
 
