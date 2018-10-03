@@ -2,7 +2,7 @@
 #define BCDB_SPLIT_CODES_H
 
 namespace bcdb {
-namespace bitc {
+namespace codes {
 
 // Same values used by LLVM for bitcode.
 enum LinkageTypeCodes {
@@ -19,7 +19,7 @@ enum LinkageTypeCodes {
   LINKAGE_TYPE_LINK_ONCE_ODR = 19
 };
 
-} // End bitc namespace
+} // End codes namespace
 } // End bcdb namespace
 
 #endif

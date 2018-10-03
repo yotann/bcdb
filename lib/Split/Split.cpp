@@ -2,6 +2,7 @@
 
 #include "Codes.h"
 
+#include <llvm/Bitcode/LLVMBitCodes.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -10,11 +11,13 @@
 using namespace bcdb;
 using namespace llvm;
 
-// TODO: comdats, comdat selection kind
 // TODO: function-level inline asm
 // TODO: sections
 // TODO: GC
 // TODO: function prefix, function prologue
+// TODO: function alignment
+// TODO: function address space
+// TODO: parameter attributes, return value attributes
 
 // TODO: function-, instruction-level metadata
 // TODO: named arguments, instructions, basic blocks
@@ -33,29 +36,45 @@ using namespace llvm;
 static unsigned getEncodedLinkage(const GlobalValue::LinkageTypes Linkage) {
   switch (Linkage) {
   case GlobalValue::ExternalLinkage:
-    return bitc::LINKAGE_TYPE_EXTERNAL;
+    return codes::LINKAGE_TYPE_EXTERNAL;
   case GlobalValue::AppendingLinkage:
-    return bitc::LINKAGE_TYPE_APPENDING;
+    return codes::LINKAGE_TYPE_APPENDING;
   case GlobalValue::InternalLinkage:
-    return bitc::LINKAGE_TYPE_INTERNAL;
+    return codes::LINKAGE_TYPE_INTERNAL;
   case GlobalValue::ExternalWeakLinkage:
-    return bitc::LINKAGE_TYPE_EXTERNAL_WEAK;
+    return codes::LINKAGE_TYPE_EXTERNAL_WEAK;
   case GlobalValue::CommonLinkage:
-    return bitc::LINKAGE_TYPE_COMMON;
+    return codes::LINKAGE_TYPE_COMMON;
   case GlobalValue::PrivateLinkage:
-    return bitc::LINKAGE_TYPE_PRIVATE;
+    return codes::LINKAGE_TYPE_PRIVATE;
   case GlobalValue::AvailableExternallyLinkage:
-    return bitc::LINKAGE_TYPE_AVAILABLE_EXTERNALLY;
+    return codes::LINKAGE_TYPE_AVAILABLE_EXTERNALLY;
   case GlobalValue::WeakAnyLinkage:
-    return bitc::LINKAGE_TYPE_WEAK_ANY;
+    return codes::LINKAGE_TYPE_WEAK_ANY;
   case GlobalValue::WeakODRLinkage:
-    return bitc::LINKAGE_TYPE_WEAK_ODR;
+    return codes::LINKAGE_TYPE_WEAK_ODR;
   case GlobalValue::LinkOnceAnyLinkage:
-    return bitc::LINKAGE_TYPE_LINK_ONCE_ANY;
+    return codes::LINKAGE_TYPE_LINK_ONCE_ANY;
   case GlobalValue::LinkOnceODRLinkage:
-    return bitc::LINKAGE_TYPE_LINK_ONCE_ODR;
+    return codes::LINKAGE_TYPE_LINK_ONCE_ODR;
   }
   llvm_unreachable("Invalid linkage");
+}
+
+static unsigned getEncodedComdatSelectionKind(Comdat::SelectionKind Kind) {
+  switch (Kind) {
+  case Comdat::Any:
+    return bitc::COMDAT_SELECTION_KIND_ANY;
+  case Comdat::ExactMatch:
+    return bitc::COMDAT_SELECTION_KIND_EXACT_MATCH;
+  case Comdat::Largest:
+    return bitc::COMDAT_SELECTION_KIND_LARGEST;
+  case Comdat::NoDuplicates:
+    return bitc::COMDAT_SELECTION_KIND_NO_DUPLICATES;
+  case Comdat::SameSize:
+    return bitc::COMDAT_SELECTION_KIND_SAME_SIZE;
+  }
+  llvm_unreachable("Invalid selection kind");
 }
 
 // We don't need to change or merge any types.
@@ -175,8 +194,15 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
       // Create a new module containing only this function.
       auto MPart = ExtractFunction(*M, F);
 
-      Saver.saveFunction(std::move(MPart), F.getName(),
-                         getEncodedLinkage(F.getLinkage()));
+      unsigned Linkage = getEncodedLinkage(F.getLinkage());
+      Comdat *Comdat = F.getComdat();
+      StringRef ComdatName = Comdat ? Comdat->getName() : "";
+      unsigned ComdatKind =
+          Comdat ? getEncodedComdatSelectionKind(Comdat->getSelectionKind())
+                 : 0;
+
+      Saver.saveFunction(std::move(MPart), F.getName(), Linkage, ComdatName,
+                         ComdatKind);
 
       // Delete the function from the old module.
       F.deleteBody();

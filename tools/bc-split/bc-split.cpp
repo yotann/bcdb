@@ -30,7 +30,7 @@ static cl::opt<std::string> OutputDirectory(cl::Positional, cl::Required,
 
 class DirSplitSaver : public SplitSaver {
   std::string Path;
-  std::unique_ptr<raw_fd_ostream> LinkageFile;
+  std::unique_ptr<raw_fd_ostream> LinkageFile, ComdatFile;
 
 public:
   DirSplitSaver(StringRef Path) : Path(Path) {
@@ -50,11 +50,24 @@ public:
       errs() << EC.message() << '\n';
       exit(1);
     }
+
+    Filename = (Path + "/comdat.txt").str();
+    ComdatFile =
+        std::make_unique<raw_fd_ostream>(Filename, EC, sys::fs::F_None);
+    if (EC) {
+      errs() << EC.message() << '\n';
+      exit(1);
+    }
   }
 
   void saveFunction(std::unique_ptr<Module> Module, StringRef Name,
-                    unsigned Linkage) override {
+                    unsigned Linkage, StringRef ComdatName,
+                    unsigned ComdatKind) override {
     *LinkageFile << Name << ' ' << Linkage << '\n';
+    if (ComdatKind) {
+      assert(!ComdatName.empty());
+      *ComdatFile << Name << ' ' << ComdatKind << ' ' << ComdatName << '\n';
+    }
     saveModule("functions", Name, *Module);
   }
 
