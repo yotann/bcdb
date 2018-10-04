@@ -1,44 +1,43 @@
 ; RUN: llvm-as < %s | bc-split - %t
 ; RUN: llvm-dis < %t/functions/f.any | FileCheck --check-prefix=DEFINE -match-full-lines %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
-; RUN: FileCheck --check-prefix=COMDAT -match-full-lines %s < %t/comdat.txt
 
+; MODULE: $any = comdat any
 $any = comdat any
+; MODULE: $exactmatch = comdat exactmatch
 $exactmatch = comdat exactmatch
+; MODULE: $largest = comdat largest
 $largest = comdat largest
+; MODULE: $noduplicates = comdat noduplicates
 $noduplicates = comdat noduplicates
+; MODULE: $samesize = comdat samesize
 $samesize = comdat samesize
 
-; COMDAT-NOT: f {{.*}}
-define void @f() {
-  ret void
-}
-
+; MODULE: define void @f.any() comdat($any)
+; MODULE-NEXT: unreachable
 ; DEFINE: define void @0() {
-; MODULE: declare void @f.any()
-; COMDAT: f.any 1 any
 define void @f.any() comdat($any) {
   call void @f.exactmatch()
   ret void
 }
 
+; MODULE: define void @f.exactmatch() comdat($exactmatch)
 ; DEFINE: declare void @f.exactmatch()
-; COMDAT: f.exactmatch 2 exactmatch
 define void @f.exactmatch() comdat($exactmatch) {
   ret void
 }
 
-; COMDAT: f.largest 3 largest
+; MODULE: define void @f.largest() comdat($largest)
 define void @f.largest() comdat($largest) {
   ret void
 }
 
-; COMDAT: f.noduplicates 4 noduplicates
+; MODULE: define void @f.noduplicates() comdat($noduplicates)
 define void @f.noduplicates() comdat($noduplicates) {
   ret void
 }
 
-; COMDAT: f.samesize 5 samesize
+; MODULE: define void @f.samesize() comdat($samesize)
 define void @f.samesize() comdat($samesize) {
   ret void
 }

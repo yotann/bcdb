@@ -2,7 +2,6 @@
 
 #include "Codes.h"
 
-#include <llvm/Bitcode/LLVMBitCodes.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -32,50 +31,6 @@ using namespace llvm;
 // TODO: source file name
 // TODO: module-level inline asm
 // TODO: module-level metadata
-
-static unsigned getEncodedLinkage(const GlobalValue::LinkageTypes Linkage) {
-  switch (Linkage) {
-  case GlobalValue::ExternalLinkage:
-    return codes::LINKAGE_TYPE_EXTERNAL;
-  case GlobalValue::AppendingLinkage:
-    return codes::LINKAGE_TYPE_APPENDING;
-  case GlobalValue::InternalLinkage:
-    return codes::LINKAGE_TYPE_INTERNAL;
-  case GlobalValue::ExternalWeakLinkage:
-    return codes::LINKAGE_TYPE_EXTERNAL_WEAK;
-  case GlobalValue::CommonLinkage:
-    return codes::LINKAGE_TYPE_COMMON;
-  case GlobalValue::PrivateLinkage:
-    return codes::LINKAGE_TYPE_PRIVATE;
-  case GlobalValue::AvailableExternallyLinkage:
-    return codes::LINKAGE_TYPE_AVAILABLE_EXTERNALLY;
-  case GlobalValue::WeakAnyLinkage:
-    return codes::LINKAGE_TYPE_WEAK_ANY;
-  case GlobalValue::WeakODRLinkage:
-    return codes::LINKAGE_TYPE_WEAK_ODR;
-  case GlobalValue::LinkOnceAnyLinkage:
-    return codes::LINKAGE_TYPE_LINK_ONCE_ANY;
-  case GlobalValue::LinkOnceODRLinkage:
-    return codes::LINKAGE_TYPE_LINK_ONCE_ODR;
-  }
-  llvm_unreachable("Invalid linkage");
-}
-
-static unsigned getEncodedComdatSelectionKind(Comdat::SelectionKind Kind) {
-  switch (Kind) {
-  case Comdat::Any:
-    return bitc::COMDAT_SELECTION_KIND_ANY;
-  case Comdat::ExactMatch:
-    return bitc::COMDAT_SELECTION_KIND_EXACT_MATCH;
-  case Comdat::Largest:
-    return bitc::COMDAT_SELECTION_KIND_LARGEST;
-  case Comdat::NoDuplicates:
-    return bitc::COMDAT_SELECTION_KIND_NO_DUPLICATES;
-  case Comdat::SameSize:
-    return bitc::COMDAT_SELECTION_KIND_SAME_SIZE;
-  }
-  llvm_unreachable("Invalid selection kind");
-}
 
 // We don't need to change or merge any types.
 namespace {
@@ -194,19 +149,12 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
       // Create a new module containing only this function.
       auto MPart = ExtractFunction(*M, F);
 
-      unsigned Linkage = getEncodedLinkage(F.getLinkage());
-      Comdat *Comdat = F.getComdat();
-      StringRef ComdatName = Comdat ? Comdat->getName() : "";
-      unsigned ComdatKind =
-          Comdat ? getEncodedComdatSelectionKind(Comdat->getSelectionKind())
-                 : 0;
+      Saver.saveFunction(std::move(MPart), F.getName());
 
-      Saver.saveFunction(std::move(MPart), F.getName(), Linkage, ComdatName,
-                         ComdatKind);
-
-      // Delete the function from the old module.
-      F.deleteBody();
-      F.setComdat(nullptr);
+      // Add a stub definition to the remainder module so we can keep the
+      // linkage type, comdats, and aliases.
+      BasicBlock *BB = BasicBlock::Create(F.getContext(), "", &F);
+      new UnreachableInst(F.getContext(), BB);
     }
   }
 
