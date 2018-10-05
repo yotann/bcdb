@@ -2,10 +2,10 @@
 ; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 
-; MODULE: define void @f() #0
+; MODULE: define void @f(i8 inreg) #0
 ; MODULE-NEXT: unreachable
-; DEFINE: define void @0() #0
-define void @f() #0 {
+; DEFINE: define void @0(i8 inreg) #0
+define void @f(i8 inreg) #0 {
   ret void
 }
 

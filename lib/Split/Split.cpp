@@ -10,23 +10,6 @@
 using namespace bcdb;
 using namespace llvm;
 
-// TODO: function-level inline asm
-// TODO: sections
-// TODO: GC
-// TODO: function prefix, function prologue
-// TODO: function alignment
-// TODO: function address space
-// TODO: parameter attributes, return value attributes
-
-// TODO: function-, instruction-level metadata
-// TODO: named arguments, instructions, basic blocks
-
-// TODO: operand bundles
-// TODO: sync scopes
-
-// TODO: aliases
-// TODO: ifuncs
-
 // We don't need to change or merge any types.
 namespace {
 class IdentityTypeMapTy : public ValueMapTypeRemapper {
@@ -110,19 +93,34 @@ Value *DeclMaterializer::materialize(Value *V) {
 static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   auto MPart = std::make_unique<Module>(SF.getName(), M.getContext());
   MPart->setSourceFileName("");
+  // Include datalayout and triple, needed for compilation.
   MPart->setDataLayout(M.getDataLayout());
   MPart->setTargetTriple(M.getTargetTriple());
 
   // See LLVM's IRLinker::linkFunctionBody().
+  assert(SF.getAddressSpace() == 0 && "function in non-default address space");
   Function *DF = Function::Create(
       SF.getFunctionType(), GlobalValue::ExternalLinkage, "", MPart.get());
-  DF->copyAttributesFrom(&SF);
   DF->stealArgumentListFrom(SF);
   DF->getBasicBlockList().splice(DF->end(), SF.getBasicBlockList());
 
+  // Copy attributes.
+  // Calling convention, GC, and alignment are kept on both functions.
+  DF->copyAttributesFrom(&SF);
+  // Personality, prefix, and prologue are only kept on the full function.
+  SF.setPersonalityFn(nullptr);
+  SF.setPrefixData(nullptr);
+  SF.setPrologueData(nullptr);
+
+  // Metadata is only kept on the full function.
+  DF->copyMetadata(&SF, /*Offset*/ 0);
+  SF.clearMetadata();
+
+  // Linkage information is only kept on the stub.
   DF->setVisibility(GlobalValue::DefaultVisibility);
   DF->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
   DF->setDLLStorageClass(GlobalValue::DefaultStorageClass);
+  DF->setSection("");
 #if LLVM_VERSION_MAJOR >= 7
   DF->setDSOLocal(false);
 #endif
@@ -133,6 +131,11 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   DeclMaterializer Materializer(*MPart, M, TypeMap);
   RemapFunction(*DF, VMap, RemapFlags::RF_NullMapMissingGlobalValues, &TypeMap,
                 &Materializer);
+
+  // Add a stub definition to the remainder module so we can keep the
+  // linkage type, comdats, and aliases.
+  BasicBlock *BB = BasicBlock::Create(SF.getContext(), "", &SF);
+  new UnreachableInst(SF.getContext(), BB);
 
   return MPart;
 }
@@ -146,13 +149,7 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
     if (!F.isDeclaration()) {
       // Create a new module containing only this function.
       auto MPart = ExtractFunction(*M, F);
-
       Saver.saveFunction(std::move(MPart), F.getName());
-
-      // Add a stub definition to the remainder module so we can keep the
-      // linkage type, comdats, and aliases.
-      BasicBlock *BB = BasicBlock::Create(F.getContext(), "", &F);
-      new UnreachableInst(F.getContext(), BB);
     }
   }
 
