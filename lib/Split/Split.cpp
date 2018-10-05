@@ -27,11 +27,6 @@ using namespace llvm;
 // TODO: aliases
 // TODO: ifuncs
 
-// TODO: target triple
-// TODO: source file name
-// TODO: module-level inline asm
-// TODO: module-level metadata
-
 // We don't need to change or merge any types.
 namespace {
 class IdentityTypeMapTy : public ValueMapTypeRemapper {
@@ -114,6 +109,9 @@ Value *DeclMaterializer::materialize(Value *V) {
 
 static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   auto MPart = std::make_unique<Module>(SF.getName(), M.getContext());
+  MPart->setSourceFileName("");
+  MPart->setDataLayout(M.getDataLayout());
+  MPart->setTargetTriple(M.getTargetTriple());
 
   // See LLVM's IRLinker::linkFunctionBody().
   Function *DF = Function::Create(
