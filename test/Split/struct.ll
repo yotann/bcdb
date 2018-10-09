@@ -38,4 +38,6 @@ define void @f(%mytype*, %needed4) personality void(i32)* @g {
   ret void
 }
 
-declare void @g(i32)
+define void @g(i32) {
+  ret void
+}
