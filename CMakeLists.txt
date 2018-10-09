@@ -26,11 +26,12 @@ if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
   message(FATAL_ERROR "Python 2.7 or newer is required")
 endif()
 
+set(LLVM_BUILD_TOOLS ON)
+option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 include(HandleLLVMOptions)
-
-set(LLVM_BUILD_TOOLS ON)
 
 # Put libs and bins in expected place.
 # XXX: We don't setup CMAKE_CFG_INTDIR to distinguish Release/Debug/etc.
