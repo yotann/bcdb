@@ -97,9 +97,6 @@ Type *NeededTypeMap::getMember(Type *Ty) {
     }
 
     Entry = &MappedTypes[Ty];
-    // If the current type was mapped while mapping one of the elements, stop.
-    if (*Entry && *Entry != Placeholder)
-      return *Entry;
     // If none of the element types changed, stop and reuse the original type.
     if (!AnyChange)
       return *Entry = Ty;
@@ -181,8 +178,10 @@ void NeededTypeMap::VisitValue(const Value *V) {
 
   if (const Constant *C = dyn_cast<Constant>(V)) {
     VisitType(V->getType());
-    for (const Use &Op : C->operands())
-      VisitValue(Op);
+
+    if (!isa<GlobalValue>(C))
+      for (const Use &Op : C->operands())
+        VisitValue(Op);
 
     if (auto *GEPO = dyn_cast<GEPOperator>(C))
       VisitType(GEPO->getSourceElementType());
@@ -219,14 +218,10 @@ void NeededTypeMap::VisitInstruction(Instruction *I) {
   for (const auto &MI : MDs)
     VisitMetadata(MI.second);
 
-  if (auto CS = CallSite(I))
-    VisitType(CS.getFunctionType());
   if (auto *AI = dyn_cast<AllocaInst>(I))
     VisitType(AI->getAllocatedType());
-  if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(I))
     VisitType(GEP->getSourceElementType());
-    VisitType(GEP->getResultElementType());
-  }
 }
 
 void NeededTypeMap::VisitFunction(Function &F) {
