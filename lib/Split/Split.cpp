@@ -2,6 +2,10 @@
 
 #include "Codes.h"
 
+#include <llvm/IR/Function.h>
+#include <llvm/IR/InlineAsm.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -10,29 +14,248 @@
 using namespace bcdb;
 using namespace llvm;
 
-// We don't need to change or merge any types.
 namespace {
-class IdentityTypeMapTy : public ValueMapTypeRemapper {
-public:
-  Type *get(Type *SrcTy) { return SrcTy; }
+/// Remaps types and replaces unneeded named structs with opaque structs.
+///
+/// 1. Call VisitFunction() to determine which type definitions are actually
+///    needed by the function we want to keep.
+/// 2. Use the type map to remap all types in the function. Unneeded named
+///    structs will be replaced with opaque structs.
+/// 3. Save the function.
+/// 4. Call RestoreNames() to restore all struct names in the original module.
+class NeededTypeMap : public ValueMapTypeRemapper {
+  /// Set of types we actually need to keep around.
+  SmallPtrSet<const Type *, 16> Needed;
 
-  FunctionType *get(FunctionType *T) {
-    return cast<FunctionType>(get((Type *)T));
+  /// Set of already-visited metadata, to prevent infinite recursion.
+  SmallPtrSet<const Metadata *, 16> VisitedMetadata;
+
+  /// Mapping for source types that have already been mapped.
+  DenseMap<Type *, Type *> MappedTypes;
+
+  /// List of named structs in the source module that have had their names
+  /// temporarily stolen.
+  SmallVector<StructType *, 16> StolenNameTypes;
+
+public:
+  Type *remapType(Type *SrcTy) override { return get(SrcTy); }
+
+  Type *get(Type *Ty) {
+    assert(Needed.count(Ty) && "not all types visited");
+    return getMember(Ty);
   }
 
-private:
-  Type *remapType(Type *SrcTy) override { return get(SrcTy); }
+  FunctionType *get(FunctionType *Ty) {
+    return cast<FunctionType>(get((Type *)Ty));
+  }
+
+  /// Get the mapping for a type that may not have been visited directly.
+  Type *getMember(Type *Ty);
+
+  /// Restore struct names to the source module that were stolen for use in the
+  /// destination module.
+  void RestoreNames();
+
+  /// Visit various parts of the source module to determine which type
+  /// definitions we need to keep.
+  void VisitType(const Type *Ty);
+  void VisitValue(const Value *V);
+  void VisitMetadata(const Metadata *MD);
+  void VisitInstruction(Instruction *I);
+  void VisitFunction(Function &F);
 };
+}
+
+Type *NeededTypeMap::getMember(Type *Ty) {
+  // See LLVM's TypeMapTy::get().
+
+  Type **Entry = &MappedTypes[Ty];
+  if (*Entry)
+    return *Entry;
+  if (Ty->getNumContainedTypes() == 0)
+    return *Entry = Ty;
+
+  bool IsUniqued = !isa<StructType>(Ty) || cast<StructType>(Ty)->isLiteral();
+
+  // Prevent infinite recursion with a placeholder struct.
+  StructType *Placeholder = nullptr;
+  bool ForceOpaque = false;
+  if (!IsUniqued) {
+    *Entry = Placeholder = StructType::create(Ty->getContext());
+    if (!Needed.count(Ty))
+      ForceOpaque = true;
+  }
+
+  SmallVector<Type *, 4> ElementTypes;
+  bool AnyChange = false;
+  if (!ForceOpaque) {
+    // Map the element types.
+    ElementTypes.reserve(Ty->getNumContainedTypes());
+    for (Type *SubTy : Ty->subtypes()) {
+      ElementTypes.push_back(getMember(SubTy));
+      AnyChange |= ElementTypes.back() != SubTy;
+    }
+
+    Entry = &MappedTypes[Ty];
+    // If the current type was mapped while mapping one of the elements, stop.
+    if (*Entry && *Entry != Placeholder)
+      return *Entry;
+    // If none of the element types changed, stop and reuse the original type.
+    if (!AnyChange)
+      return *Entry = Ty;
+  }
+
+  // Create a new type with the mapped element types.
+  switch (Ty->getTypeID()) {
+  default:
+    llvm_unreachable("unknown derived type to remap");
+  case Type::ArrayTyID:
+    return *Entry = ArrayType::get(ElementTypes[0],
+                                   cast<ArrayType>(Ty)->getNumElements());
+  case Type::VectorTyID:
+    return *Entry = VectorType::get(ElementTypes[0],
+                                    cast<VectorType>(Ty)->getNumElements());
+  case Type::PointerTyID:
+    return *Entry = PointerType::get(ElementTypes[0],
+                                     cast<PointerType>(Ty)->getAddressSpace());
+  case Type::FunctionTyID:
+    return *Entry = FunctionType::get(ElementTypes[0],
+                                      makeArrayRef(ElementTypes).slice(1),
+                                      cast<FunctionType>(Ty)->isVarArg());
+  case Type::StructTyID: {
+    auto *STy = cast<StructType>(Ty);
+    // For literal struct types, we just create a new literal struct type.
+    if (IsUniqued)
+      return *Entry = StructType::get(Ty->getContext(), ElementTypes,
+                                      STy->isPacked());
+    assert(!STy->isOpaque() && "opaque should have been handled already");
+    assert(*Entry == Placeholder && "placeholder was replaced");
+    // Fill in the placeholder with the mapped element types.
+    if (!ForceOpaque)
+      Placeholder->setBody(ElementTypes, STy->isPacked());
+    // Steal the name from the source type.
+    if (STy->hasName()) {
+      SmallString<16> TmpName = STy->getName();
+      STy->setName("");
+      Placeholder->setName(TmpName);
+      StolenNameTypes.push_back(STy);
+    }
+    return Placeholder;
+  }
+  }
+}
+
+void NeededTypeMap::RestoreNames() {
+  for (StructType *STy : StolenNameTypes) {
+    StructType *DTy = cast<StructType>(MappedTypes[STy]);
+    SmallString<16> TmpName = DTy->getName();
+    DTy->setName("");
+    STy->setName(TmpName);
+  }
+}
+
+void NeededTypeMap::VisitType(const Type *Ty) {
+  bool New = Needed.insert(Ty).second;
+  if (New) {
+    // When using a pointer to a named struct type, we don't necessarily need
+    // the struct type's definition.
+    if (Ty->isPointerTy()) {
+      StructType *ST = dyn_cast<StructType>(Ty->getPointerElementType());
+      if (ST && !ST->isLiteral())
+        return;
+    }
+    // Otherwise, we need definitions for all subtypes.
+    for (const Type *SubTy : Ty->subtypes())
+      VisitType(SubTy);
+  }
+}
+
+void NeededTypeMap::VisitValue(const Value *V) {
+  // See LLVM's Mapper::mapValue().
+
+  if (const InlineAsm *IA = dyn_cast<InlineAsm>(V))
+    return VisitType(IA->getFunctionType());
+
+  if (const auto *MDV = dyn_cast<MetadataAsValue>(V))
+    return VisitMetadata(MDV->getMetadata());
+
+  if (const Constant *C = dyn_cast<Constant>(V)) {
+    VisitType(V->getType());
+    for (const Use &Op : C->operands())
+      VisitValue(Op);
+
+    if (auto *GEPO = dyn_cast<GEPOperator>(C))
+      VisitType(GEPO->getSourceElementType());
+
+    if (auto *F = dyn_cast<Function>(C)) {
+      for (auto &Arg : F->args())
+        if (Arg.hasByValOrInAllocaAttr())
+          VisitType(Arg.getType()->getPointerElementType());
+    }
+  }
+}
+
+void NeededTypeMap::VisitMetadata(const Metadata *MD) {
+  bool New = VisitedMetadata.insert(MD).second;
+  if (!New)
+    return;
+  if (auto *VMD = dyn_cast<ValueAsMetadata>(MD))
+    return VisitValue(VMD->getValue());
+  if (auto *N = dyn_cast<MDNode>(MD)) {
+    for (auto &Op : N->operands())
+      VisitMetadata(Op);
+  }
+}
+
+void NeededTypeMap::VisitInstruction(Instruction *I) {
+  // See LLVM's Mapper::remapInstruction().
+
+  VisitType(I->getType());
+  for (const Use &Op : I->operands())
+    VisitValue(Op);
+
+  SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+  I->getAllMetadata(MDs);
+  for (const auto &MI : MDs)
+    VisitMetadata(MI.second);
+
+  if (auto CS = CallSite(I))
+    VisitType(CS.getFunctionType());
+  if (auto *AI = dyn_cast<AllocaInst>(I))
+    VisitType(AI->getAllocatedType());
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
+    VisitType(GEP->getSourceElementType());
+    VisitType(GEP->getResultElementType());
+  }
+}
+
+void NeededTypeMap::VisitFunction(Function &F) {
+  // See LLVM's Mapper::remapFunction().
+
+  VisitType(F.getType());
+  for (const Use &Op : F.operands())
+    VisitValue(Op);
+
+  SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
+  F.getAllMetadata(MDs);
+  for (const auto &MI : MDs)
+    VisitMetadata(MI.second);
+
+  for (const Argument &A : F.args())
+    VisitType(A.getType());
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      VisitInstruction(&I);
 }
 
 namespace {
 class DeclMaterializer : public ValueMaterializer {
   Module &DM;
   const Module &SM;
-  IdentityTypeMapTy &TypeMap;
+  NeededTypeMap &TypeMap;
 
 public:
-  DeclMaterializer(Module &DM, const Module &SM, IdentityTypeMapTy &TypeMap)
+  DeclMaterializer(Module &DM, const Module &SM, NeededTypeMap &TypeMap)
       : DM(DM), SM(SM), TypeMap(TypeMap) {}
   Value *materialize(Value *V) override;
 };
@@ -47,7 +270,7 @@ Value *DeclMaterializer::materialize(Value *V) {
   GlobalValue *NewGV;
   if (auto *SGVar = dyn_cast<GlobalVariable>(SGV)) {
     auto *DGVar = new GlobalVariable(
-        DM, TypeMap.get(SGVar->getValueType()), SGVar->isConstant(),
+        DM, TypeMap.getMember(SGVar->getValueType()), SGVar->isConstant(),
         GlobalValue::ExternalLinkage, /*init*/ nullptr, SGVar->getName(),
         /*insertbefore*/ nullptr, SGVar->getThreadLocalMode(),
         SGVar->getType()->getAddressSpace());
@@ -66,7 +289,7 @@ Value *DeclMaterializer::materialize(Value *V) {
                          GlobalValue::ExternalLinkage, SGV->getName(), &DM);
   } else {
     NewGV = new GlobalVariable(
-        DM, TypeMap.get(SGV->getValueType()), /*isConstant*/ false,
+        DM, TypeMap.getMember(SGV->getValueType()), /*isConstant*/ false,
         GlobalValue::ExternalLinkage, /*init*/ nullptr, SGV->getName(),
         /*insertbefore*/ nullptr, SGV->getThreadLocalMode(),
         SGV->getType()->getAddressSpace());
@@ -90,17 +313,23 @@ Value *DeclMaterializer::materialize(Value *V) {
   return NewGV;
 }
 
-static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
+static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
+                                               NeededTypeMap &TypeMap) {
   auto MPart = std::make_unique<Module>(SF.getName(), M.getContext());
   MPart->setSourceFileName("");
   // Include datalayout and triple, needed for compilation.
   MPart->setDataLayout(M.getDataLayout());
   MPart->setTargetTriple(M.getTargetTriple());
 
-  // See LLVM's IRLinker::linkFunctionBody().
+  TypeMap.VisitFunction(SF);
+
+// See LLVM's IRLinker::linkFunctionBody().
+#if LLVM_VERSION_MAJOR > 7
   assert(SF.getAddressSpace() == 0 && "function in non-default address space");
-  Function *DF = Function::Create(
-      SF.getFunctionType(), GlobalValue::ExternalLinkage, "", MPart.get());
+#endif
+  Function *DF =
+      Function::Create(TypeMap.get(SF.getFunctionType()),
+                       GlobalValue::ExternalLinkage, "", MPart.get());
   DF->stealArgumentListFrom(SF);
   DF->getBasicBlockList().splice(DF->end(), SF.getBasicBlockList());
 
@@ -127,7 +356,6 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
 
   // Remap all values used within the function.
   ValueToValueMapTy VMap;
-  IdentityTypeMapTy TypeMap;
   DeclMaterializer Materializer(*MPart, M, TypeMap);
   RemapFunction(*DF, VMap, RemapFlags::RF_NullMapMissingGlobalValues, &TypeMap,
                 &Materializer);
@@ -148,8 +376,10 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
   for (Function &F : *M) {
     if (!F.isDeclaration()) {
       // Create a new module containing only this function.
-      auto MPart = ExtractFunction(*M, F);
+      NeededTypeMap TypeMap;
+      auto MPart = ExtractFunction(*M, F, TypeMap);
       Saver.saveFunction(std::move(MPart), F.getName());
+      TypeMap.RestoreNames();
     }
   }
 
