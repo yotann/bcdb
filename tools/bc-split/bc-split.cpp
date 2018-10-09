@@ -9,6 +9,8 @@
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/PrettyStackTrace.h>
+#include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
@@ -80,6 +82,9 @@ public:
 };
 
 int main(int argc, const char **argv) {
+  PrettyStackTraceProgram StackPrinter(argc, argv);
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
+
   cl::ParseCommandLineOptions(argc, argv, "Module splitting");
 
   LLVMContext Context;

@@ -6,6 +6,8 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/PrettyStackTrace.h>
+#include <llvm/Support/Signals.h>
 #include <llvm/Support/SystemUtils.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
@@ -56,6 +58,9 @@ static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
 }
 
 int main(int argc, const char **argv) {
+  PrettyStackTraceProgram StackPrinter(argc, argv);
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
+
   cl::ParseCommandLineOptions(argc, argv, "bitcode aligner");
 
   ErrorOr<std::unique_ptr<MemoryBuffer>> MemBufOrErr =
