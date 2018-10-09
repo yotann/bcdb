@@ -61,4 +61,4 @@ licenses, and/or restrictions:
 
 Program             Directory
 -------             ---------
-llvm-lit            utils/lit
+lit                 third_party/lit-0.7.0
