@@ -3,7 +3,7 @@ configure_lit_site_cfg(
   ${CMAKE_CURRENT_BINARY_DIR}/lit.cfg.py
 )
 
-set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/utils/lit-0.7.0/lit.py)
+set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/third_party/lit-0.7.0/lit.py)
 # LIT_COMMAND is needed until LLVM 6
 set(LIT_COMMAND ${PYTHON_EXECUTABLE} ${LLVM_EXTERNAL_LIT})
 
