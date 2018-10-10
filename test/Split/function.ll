@@ -1,24 +1,35 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=DEFINE %s
+; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+
+; JOINED: declare i32 @llvm.read_register.i32(metadata)
+; JOINED: declare !srcloc !0 void @g()
 
 ; MODULE: define i32 @f(i32) {
 ; MODULE-NEXT: unreachable
 
 define i32 @f(i32 %arg) !srcloc !0 {
 ; DEFINE: define i32 @0(i32 %arg) !srcloc !0 {
+; JOINED: define i32 @f(i32 %arg) !srcloc !1 {
 entry:
 ; DEFINE-NEXT: entry:
+; JOINED-NEXT: entry:
   add i32 %arg, %arg
   ; DEFINE-NEXT: add i32 %arg, %arg
+  ; JOINED-NEXT: add i32 %arg, %arg
   %swap = call i32 asm "bswap $0", "=r,r"(i32 %arg)
   ; DEFINE-NEXT: %swap = call i32 asm "bswap $0", "=r,r"(i32 %arg)
+  ; JOINED-NEXT: %swap = call i32 asm "bswap $0", "=r,r"(i32 %arg)
   call i32 @llvm.read_register.i32(metadata !1), !srcloc !2
-  ; DEFINE-NEXT: call i32 @llvm.read_register.i32(metadata !1)
+  ; DEFINE-NEXT: call i32 @llvm.read_register.i32(metadata !1), !srcloc !2
+  ; JOINED-NEXT: call i32 @llvm.read_register.i32(metadata !2), !srcloc !3
   call void @g()
   ; DEFINE-NEXT: call void @g()
+  ; JOINED-NEXT: call void @g()
   ret i32 %0
   ; DEFINE-NEXT: ret i32 %0
+  ; JOINED-NEXT: ret i32 %0
 }
 
 declare i32 @llvm.read_register.i32(metadata)
@@ -42,3 +53,8 @@ declare !srcloc !3 void @g()
 !3 = !{i32 1234}
 ; DEFINE-NOT: !3
 ; MODULE: !0 = !{i32 1234}
+
+; JOINED: !0 = !{i32 1234}
+; JOINED: !1 = !{!"blah"}
+; JOINED: !2 = !{!"rax"}
+; JOINED: !3 = distinct !{!2}

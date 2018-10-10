@@ -1,11 +1,13 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=F %s
-; RUN: llvm-dis < %t/functions/g | FileCheck --check-prefix=G %s
+; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=F %s
+; RUN: llvm-dis < %t/functions/g      | FileCheck --check-prefix=G %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
 
 ; F: %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
 ; G-NOT: %mytype
 ; MODULE: %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
+; JOINED: %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
 %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
 
 ; F: %needed = type { %needed2* }
@@ -16,6 +18,7 @@
 
 ; F: %unneeded = type opaque
 ; MODULE: %unneeded = type { i64 }
+; JOINED: %unneeded = type { i64 }
 %unneeded = type { i64 }
 
 ; F: %needed3 = type { i8 }
@@ -24,6 +27,7 @@
 ; F: %needed4 = type { i16 }
 %needed4 = type { i16 }
 
+; JOINED: define void @f(%mytype*, %needed4)
 define void @f(%mytype*, %needed4) personality void(i32)* @g {
   %n1p = getelementptr %mytype, %mytype* %0, i64 0, i32 0
   %n1 = load %needed*, %needed** %n1p

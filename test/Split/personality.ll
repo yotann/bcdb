@@ -1,7 +1,8 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=F %s
-; RUN: llvm-dis < %t/functions/g | FileCheck --check-prefix=G %s
+; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=F %s
+; RUN: llvm-dis < %t/functions/g      | FileCheck --check-prefix=G %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
 
 ; MODULE: define void @f()
 ; MODULE-NEXT: unreachable
@@ -12,10 +13,11 @@ define void @f() {
   ret void
 }
 
-; MODULE: define void @g()
+; MODULE: define void @g() {
 ; MODULE-NEXT: unreachable
 ; F: declare void @g()
 ; G: define void @0() personality i8* bitcast (i32 (...)* @p to i8*)
+; JOINED: define void @g() personality i8* bitcast (i32 (...)* @p to i8*)
 define void @g() personality i8* bitcast (i32 (...)* @p to i8*) {
   ret void
 }

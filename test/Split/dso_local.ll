@@ -1,7 +1,11 @@
 ; REQUIRES: llvm7
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=DEFINE %s
+; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+
+; JOINED: declare dso_local void @g()
+; JOINED: define dso_local void @f()
 
 ; MODULE: define dso_local void @f()
 ; MODULE-NEXT: unreachable

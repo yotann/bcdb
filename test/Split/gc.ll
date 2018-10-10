@@ -1,6 +1,10 @@
 ; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+
+; JOINED: declare void @g() gc "shadow-stack"
+; JOINED: define void @f() gc "shadow-stack"
 
 ; MODULE: define void @f() gc "shadow-stack"
 ; DEFINE: define void @0() gc "shadow-stack"

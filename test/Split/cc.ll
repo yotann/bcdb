@@ -1,6 +1,10 @@
 ; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f.fastcc | FileCheck --check-prefix=DEFINE %s
-; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: llvm-dis < %t/remainder/module   | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis            | FileCheck --check-prefix=JOINED %s
+
+; JOINED: declare coldcc void @f.coldcc()
+; JOINED: define fastcc void @f.fastcc()
 
 ; MODULE: define fastcc void @f.fastcc()
 ; MODULE-NEXT: unreachable
