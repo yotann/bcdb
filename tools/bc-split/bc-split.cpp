@@ -24,11 +24,14 @@ using namespace llvm;
 using ToolOutputFile = tool_output_file;
 #endif
 
-static cl::opt<std::string> InputFilename(cl::Positional, cl::Required,
-                                          cl::desc("<input bitcode file>"));
+static cl::opt<std::string> InputFilename(cl::Positional,
+                                          cl::desc("<input bitcode file>"),
+                                          cl::init("-"),
+                                          cl::value_desc("filename"));
 
-static cl::opt<std::string> OutputDirectory(cl::Positional, cl::Required,
-                                            cl::desc("<output directory>"));
+static cl::opt<std::string> OutputDirectory("o", cl::Required,
+                                            cl::desc("<output directory>"),
+                                            cl::value_desc("directory"));
 
 class DirSplitSaver : public SplitSaver {
   std::string Path;

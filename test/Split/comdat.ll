@@ -1,4 +1,4 @@
-; RUN: llvm-as < %s | bc-split - %t
+; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f.any | FileCheck --check-prefix=DEFINE -match-full-lines %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 
