@@ -9,6 +9,7 @@
 
 #include "BitstreamReader.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <cassert>
 #include <string>
 

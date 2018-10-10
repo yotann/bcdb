@@ -1,7 +1,7 @@
 #include <string>
 #include <utility>
 
-#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Module.h>
@@ -33,6 +33,7 @@ static cl::opt<std::string> OutputDirectory("o", cl::Required,
                                             cl::desc("<output directory>"),
                                             cl::value_desc("directory"));
 
+namespace {
 class DirSplitSaver : public SplitSaver {
   std::string Path;
 
@@ -83,6 +84,7 @@ public:
     Out.keep();
   }
 };
+} // end anonymous namespace
 
 int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);

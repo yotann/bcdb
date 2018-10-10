@@ -1,19 +1,20 @@
 #include "bcdb/AlignBitcode.h"
 
 #include <llvm/ADT/IndexedMap.h>
+#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/LLVMBitCodes.h>
 #include <llvm/Support/MathExtras.h>
 #include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/raw_ostream.h>
 #include <utility>
 
 #include "AlignedBitstreamWriter.h"
 #include "BitstreamReader.h"
 
 // WARNING: this code could break (generate invalid modules) if LLVM ever adds
-// more file offsets!
+// more file offsets to the bitstream!
 
 using namespace bcdb;
 using namespace llvm;
