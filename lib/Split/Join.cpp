@@ -6,7 +6,8 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Linker/Linker.h>
+#include <llvm/Linker/IRMover.h>
+#include <llvm/Support/Error.h>
 #include <memory>
 
 using namespace bcdb;
@@ -22,47 +23,54 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
     GV.setLinkage(GlobalValue::ExternalLinkage);
   }
 
-  // List all the function stubs and delete their bodies.
+  // List all the function stubs and mark them external.
   SmallVector<StringRef, 0> Stubs;
   for (Function &F : *M) {
-    LinkageMap[F.getName()] = F.getLinkage();
-    F.setLinkage(GlobalValue::ExternalLinkage);
     if (!F.isDeclaration()) {
+      LinkageMap[F.getName()] = F.getLinkage();
+      F.setLinkage(GlobalValue::ExternalLinkage);
       Stubs.push_back(F.getName());
-      F.dropAllReferences();
     }
   }
 
   // Link all function definitions.
-  Linker L(*M);
+  IRMover Mover(*M);
   for (StringRef Name : Stubs) {
-    Function *F = M->getFunction(Name);
-    auto Comdat = F->getComdat();
+    Function *Stub = M->getFunction(Name);
 
+    // Find the function definition.
     std::unique_ptr<Module> MPart = Loader.loadFunction(Name);
-    for (Function &FDef : *MPart) {
-      if (!FDef.isDeclaration()) {
-        FDef.setName(Name);
-        assert(FDef.getName() == Name && "name conflict");
-        FDef.copyAttributesFrom(F);
-      } else {
-        // Declarations must have unnamed_addr, otherwise the linker will strip
-        // unnamed_addr or local_unnamed_addr when linking.
-        FDef.setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+    Function *Def = nullptr;
+    for (Function &F : *MPart) {
+      if (!F.isDeclaration()) {
+        assert(!Def && "multiple functions in function module");
+        Def = &F;
       }
     }
-    L.linkInModule(std::move(MPart));
 
-    assert(M->getFunction(Name) != F && "stub was not replaced");
-    F = M->getFunction(Name);
-    F->setComdat(Comdat);
+    // Copy linker information from the stub.
+    Def->setName(Name);
+    assert(Def->getName() == Name && "name conflict");
+    Def->copyAttributesFrom(Stub);
+    Def->setComdat(Stub->getComdat());
+
+    // Move the definition into the main module.
+    Error E = Mover.move(std::move(MPart), {Def},
+                         [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+                         /* IsPerformingImport */ false);
+    handleAllErrors(std::move(E), [](const ErrorInfoBase &E) {
+      errs() << E.message() << '\n';
+      report_fatal_error("error during joining");
+    });
+    assert(M->getFunction(Name) != Stub && "stub was not replaced");
   }
 
   // Restore linkage types for globals.
   for (GlobalValue &GV : M->globals())
     GV.setLinkage(LinkageMap[GV.getName()]);
-  for (GlobalValue &F : *M)
-    F.setLinkage(LinkageMap[F.getName()]);
+  for (Function &F : *M)
+    if (!F.isDeclaration())
+      F.setLinkage(LinkageMap[F.getName()]);
 
   return M;
 }
