@@ -4,5 +4,6 @@ set(LLVM_LINK_COMPONENTS
   TransformUtils
 )
 add_llvm_library(BCDBSplit
+  Join.cpp
   Split.cpp
 )

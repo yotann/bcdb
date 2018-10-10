@@ -8,6 +8,12 @@
 
 namespace bcdb {
 
+class SplitLoader {
+public:
+  virtual std::unique_ptr<llvm::Module> loadFunction(llvm::StringRef Name) = 0;
+  virtual std::unique_ptr<llvm::Module> loadRemainder() = 0;
+};
+
 class SplitSaver {
 public:
   virtual void saveFunction(std::unique_ptr<llvm::Module> Module,
@@ -15,6 +21,7 @@ public:
   virtual void saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
 };
 
+std::unique_ptr<llvm::Module> JoinModule(SplitLoader &Loader);
 void SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver);
 
 } // end namespace bcdb
