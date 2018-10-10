@@ -359,9 +359,9 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
 
   // Remap all values used within the function.
   ValueToValueMapTy VMap;
+  VMap[&SF] = DF; // Map recursive calls to recursive calls.
   DeclMaterializer Materializer(*MPart, M, TypeMap);
-  RemapFunction(*DF, VMap, RemapFlags::RF_NullMapMissingGlobalValues, &TypeMap,
-                &Materializer);
+  RemapFunction(*DF, VMap, RemapFlags::RF_None, &TypeMap, &Materializer);
 
   // Add a stub definition to the remainder module so we can keep the
   // linkage type, comdats, and aliases.

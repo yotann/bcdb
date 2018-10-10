@@ -43,6 +43,7 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
     for (Function &FDef : *MPart) {
       if (!FDef.isDeclaration()) {
         FDef.setName(Name);
+        assert(FDef.getName() == Name && "name conflict");
         FDef.copyAttributesFrom(F);
       } else {
         // Declarations must have unnamed_addr, otherwise the linker will strip
@@ -52,6 +53,7 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
     }
     L.linkInModule(std::move(MPart));
 
+    assert(M->getFunction(Name) != F && "stub was not replaced");
     F = M->getFunction(Name);
     F->setComdat(Comdat);
   }
