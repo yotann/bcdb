@@ -57,6 +57,9 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
     // Move the definition into the main module.
     Error E = Mover.move(std::move(MPart), {Def},
                          [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+#if LLVM_VERSION_MAJOR <= 4
+                         /* LinkModuleInlineAsm */ false,
+#endif
                          /* IsPerformingImport */ false);
     handleAllErrors(std::move(E), [](const ErrorInfoBase &E) {
       errs() << E.message() << '\n';
