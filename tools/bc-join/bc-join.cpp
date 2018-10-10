@@ -13,6 +13,7 @@
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
+#include <llvm/Support/SystemUtils.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -33,6 +34,8 @@ static cl::opt<std::string> OutputFilename("o",
                                            cl::desc("<output bitcode file>"),
                                            cl::init("-"),
                                            cl::value_desc("filename"));
+
+static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"));
 
 namespace {
 class DirSplitLoader : public SplitLoader {
@@ -84,12 +87,14 @@ int main(int argc, const char **argv) {
   if (verifyModule(*M, &errs())) {
     return 1;
   }
+  if (Force || !CheckBitcodeOutputToConsole(Out.os(), true)) {
 #if LLVM_VERSION_MAJOR >= 7
-  WriteBitcodeToFile(*M, Out.os());
+    WriteBitcodeToFile(*M, Out.os());
 #else
-  WriteBitcodeToFile(M.get(), Out.os());
+    WriteBitcodeToFile(M.get(), Out.os());
 #endif
-  Out.keep();
+    Out.keep();
+  }
 
   return 0;
 }
