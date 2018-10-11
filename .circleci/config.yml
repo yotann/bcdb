@@ -1,8 +1,46 @@
-version: 2
-jobs:
-  build:
+version: 2.1
+executors:
+  nix:
     docker:
       - image: nixos/nix:2.1.1
-      steps:
-        - checkout
-        - run: nix-build
+    environment:
+      SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt
+jobs:
+  build:
+    executor: nix
+    parameters:
+      llvm_version:
+        type: string
+    steps:
+      - checkout
+      - run:
+          name: Install CA certificates
+          command: ln -s ${NIX_SSL_CERT_FILE} ${SSL_CERT_FILE}
+      - restore_cache:
+          keys:
+            - v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}
+      - run:
+          name: Install dependencies
+          command: nix-shell -A bcdb<< parameters.llvm_version >> --command true
+      - save_cache:
+          key: v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}
+          paths:
+            - /nix
+      - run:
+          name: Build and test BCDB
+          command: nix-build -A bcdb<< parameters.llvm_version >>
+workflows:
+  build:
+    jobs:
+      - build:
+          name: build-llvm4
+          llvm_version: "4"
+      - build:
+          name: build-llvm5
+          llvm_version: "5"
+      - build:
+          name: build-llvm6
+          llvm_version: "6"
+      - build:
+          name: build-llvm7
+          llvm_version: "7"
