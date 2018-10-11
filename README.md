@@ -1,6 +1,6 @@
 # BCDB
 
-[![Build Status](https://api.travis-ci.com/yotann/bcdb.svg?token=sgABsDMd2HHBVgrpcAYp&branch=master)](https://travis-ci.com/yotann/bcdb)
+[![CircleCI](https://circleci.com/gh/yotann/bcdb.svg?style=svg&circle-token=9e4bcd0300cf4ad93636da4776001b0b0344eae8)](https://circleci.com/gh/yotann/bcdb)
 ![ALLVM ALL THE THINGS!](https://img.shields.io/badge/ALLVM-ALL%20THE%20THINGS-brightgreen.svg)
 
 ## Contact
