@@ -1,0 +1,8 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: nixos/nix:2.1.1
+      steps:
+        - checkout
+        - run: nix-build
