@@ -2,13 +2,13 @@
 ; RUN: llvm-dis < %t/remainder/module   | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis            | FileCheck --check-prefix=MODULE %s
 
-; MODULE: @blockaddresses = constant [2 x i8*] [i8* blockaddress(@g, %1), i8* blockaddress(@h, %1)]
-@blockaddresses = constant [2 x i8*] [i8* blockaddress(@g, %1), i8* blockaddress(@h, %1)]
+; MODULE: @blockaddresses = constant [2 x i8*] [i8* blockaddress(@g, %bb2), i8* blockaddress(@h, %1)]
+@blockaddresses = constant [2 x i8*] [i8* blockaddress(@g, %bb2), i8* blockaddress(@h, %1)]
 
 ; MODULE: define i8* @f()
 define i8* @f() {
-  ; MODULE: ret i8* blockaddress(@g, %bb2)
-  ret i8* blockaddress(@g, %bb2)
+  ; MODULE: ret i8* blockaddress(@g, %{{.*}})
+  ret i8* blockaddress(@g, %1)
 }
 
 ; MODULE: define i8* @g()
