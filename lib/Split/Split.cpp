@@ -1,5 +1,6 @@
 #include "bcdb/Split.h"
 
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
@@ -45,6 +46,9 @@ class NeededTypeMap : public ValueMapTypeRemapper {
   /// temporarily stolen.
   SmallVector<StructType *, 16> StolenNameTypes;
 
+  /// Whether we saw any blockaddress value.
+  bool VisitedAnyBlockAddress = false;
+
 public:
   Type *remapType(Type *SrcTy) override { return get(SrcTy); }
 
@@ -71,6 +75,9 @@ public:
   void VisitMetadata(const Metadata *MD);
   void VisitInstruction(Instruction *I);
   void VisitFunction(Function &F);
+
+  /// Check whether any blockaddress values were visited.
+  bool didVisitAnyBlockAddress() const { return VisitedAnyBlockAddress; }
 };
 }
 
@@ -186,6 +193,9 @@ void NeededTypeMap::VisitValue(const Value *V) {
 
   if (const Constant *C = dyn_cast<Constant>(V)) {
     VisitType(V->getType());
+
+    if (isa<BlockAddress>(C))
+      VisitedAnyBlockAddress = true;
 
     if (!isa<GlobalValue>(C))
       for (const Use &Op : C->operands())
@@ -326,6 +336,10 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
 
   TypeMap.VisitFunction(SF);
 
+  // We can't handle blockaddress values in splitted functions.
+  if (TypeMap.didVisitAnyBlockAddress())
+    return 0;
+
 // See LLVM's IRLinker::linkFunctionBody().
 #if LLVM_VERSION_MAJOR > 7
   assert(SF.getAddressSpace() == 0 && "function in non-default address space");
@@ -378,10 +392,15 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
 
   for (Function &F : *M) {
     if (!F.isDeclaration()) {
+      // We can't handle blockaddress yet.
+      if (any_of(F.users(), [](const User *U) { return isa<BlockAddress>(U); }))
+        continue;
+
       // Create a new module containing only this function.
       NeededTypeMap TypeMap;
       auto MPart = ExtractFunction(*M, F, TypeMap);
-      Saver.saveFunction(std::move(MPart), F.getName());
+      if (MPart)
+        Saver.saveFunction(std::move(MPart), F.getName());
       TypeMap.RestoreNames();
     }
   }

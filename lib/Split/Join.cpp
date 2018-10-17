@@ -5,6 +5,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Linker/IRMover.h>
 #include <llvm/Support/Error.h>
@@ -12,6 +13,15 @@
 
 using namespace bcdb;
 using namespace llvm;
+
+static bool isStub(const Function &F) {
+  if (F.isDeclaration() || F.size() != 1)
+    return false;
+  const BasicBlock &BB = F.getEntryBlock();
+  if (BB.size() != 1 || !isa<UnreachableInst>(BB.front()))
+    return false;
+  return true;
+}
 
 std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
   std::unique_ptr<Module> M = Loader.loadRemainder();
@@ -32,7 +42,7 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
   IRMover Mover(*M);
   SmallVector<Function *, 0> OutFunctions;
   for (Function *Stub : InFunctions) {
-    if (Stub->isDeclaration()) {
+    if (!isStub(*Stub)) {
       OutFunctions.push_back(Stub);
       continue;
     }
