@@ -3,8 +3,6 @@
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
 
-; JOINED: declare void @g() prefix i8 56 prologue i8 78
-
 ; DEFINE: define void @0() prefix i8 12 prologue i8 34 {
 ; MODULE: define void @f() {
 ; JOINED: define void @f() prefix i8 12 prologue i8 34 {
@@ -16,4 +14,5 @@ define void @f() prefix i8 12 prologue i8 34 {
 ; DEFINE-NOT: 56
 ; DEFINE-NOT: 78
 ; MODULE: declare void @g() prefix i8 56 prologue i8 78
+; JOINED: declare void @g() prefix i8 56 prologue i8 78
 declare void @g() prefix i8 56 prologue i8 78

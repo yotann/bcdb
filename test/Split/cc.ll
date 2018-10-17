@@ -3,12 +3,10 @@
 ; RUN: llvm-dis < %t/remainder/module   | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis            | FileCheck --check-prefix=JOINED %s
 
-; JOINED: declare coldcc void @f.coldcc()
-; JOINED: define fastcc void @f.fastcc()
-
 ; MODULE: define fastcc void @f.fastcc()
 ; MODULE-NEXT: unreachable
 ; DEFINE: define fastcc void @0()
+; JOINED: define fastcc void @f.fastcc()
 define fastcc void @f.fastcc() {
   call void @f.coldcc()
   ret void
@@ -16,4 +14,5 @@ define fastcc void @f.fastcc() {
 
 ; MODULE: declare coldcc void @f.coldcc()
 ; DEFINE: declare coldcc void @f.coldcc()
+; JOINED: declare coldcc void @f.coldcc()
 declare coldcc void @f.coldcc()

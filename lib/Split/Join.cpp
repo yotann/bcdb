@@ -18,27 +18,27 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
 
   // Make all globals external so function modules can link to them.
   StringMap<GlobalValue::LinkageTypes> LinkageMap;
-  for (GlobalValue &GV : M->globals()) {
-    LinkageMap[GV.getName()] = GV.getLinkage();
-    GV.setLinkage(GlobalValue::ExternalLinkage);
+  for (GlobalObject &GO : M->global_objects()) {
+    LinkageMap[GO.getName()] = GO.getLinkage();
+    GO.setLinkage(GlobalValue::ExternalLinkage);
   }
 
-  // List all the function stubs and mark them external.
-  SmallVector<StringRef, 0> Stubs;
-  for (Function &F : *M) {
-    if (!F.isDeclaration()) {
-      LinkageMap[F.getName()] = F.getLinkage();
-      F.setLinkage(GlobalValue::ExternalLinkage);
-      Stubs.push_back(F.getName());
-    }
-  }
+  // List all the function stubs and declarations.
+  SmallVector<Function *, 0> InFunctions;
+  for (Function &F : *M)
+    InFunctions.push_back(&F);
 
   // Link all function definitions.
   IRMover Mover(*M);
-  for (StringRef Name : Stubs) {
-    Function *Stub = M->getFunction(Name);
+  SmallVector<Function *, 0> OutFunctions;
+  for (Function *Stub : InFunctions) {
+    if (Stub->isDeclaration()) {
+      OutFunctions.push_back(Stub);
+      continue;
+    }
 
     // Find the function definition.
+    StringRef Name = Stub->getName();
     std::unique_ptr<Module> MPart = Loader.loadFunction(Name);
     Function *Def = nullptr;
     for (Function &F : *MPart) {
@@ -66,14 +66,20 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
       report_fatal_error("error during joining");
     });
     assert(M->getFunction(Name) != Stub && "stub was not replaced");
+    OutFunctions.push_back(M->getFunction(Name));
   }
 
   // Restore linkage types for globals.
-  for (GlobalValue &GV : M->globals())
-    GV.setLinkage(LinkageMap[GV.getName()]);
-  for (Function &F : *M)
-    if (!F.isDeclaration())
-      F.setLinkage(LinkageMap[F.getName()]);
+  for (GlobalObject &GO : M->global_objects())
+    GO.setLinkage(LinkageMap[GO.getName()]);
+
+  // Reorder the functions to match their original order. This has no effect on
+  // correctness, but makes it easier to compare the joined module with the
+  // original one.
+  for (Function *F : OutFunctions)
+    F->removeFromParent();
+  M->getFunctionList().insert(M->getFunctionList().end(), OutFunctions.begin(),
+                              OutFunctions.end());
 
   return M;
 }

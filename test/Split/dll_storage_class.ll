@@ -3,12 +3,10 @@
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
 
-; JOINED: declare dllimport void @f.dllimport()
-; JOINED: define dllexport void @f.dllexport()
-
 ; MODULE: define dllexport void @f.dllexport()
 ; MODULE-NEXT: unreachable
 ; DEFINE: define void @0()
+; JOINED: define dllexport void @f.dllexport()
 define dllexport void @f.dllexport() {
   call void @f.dllimport()
   ret void
@@ -16,4 +14,5 @@ define dllexport void @f.dllexport() {
 
 ; MODULE: declare dllimport void @f.dllimport()
 ; DEFINE: declare void @f.dllimport()
+; JOINED: declare dllimport void @f.dllimport()
 declare dllimport void @f.dllimport()

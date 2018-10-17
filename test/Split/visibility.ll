@@ -3,8 +3,6 @@
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
 
-; JOINED: declare protected void @f.protected()
-
 ; MODULE: define hidden void @f.hidden()
 ; MODULE-NEXT: unreachable
 ; DEFINE: define void @0()
@@ -15,4 +13,5 @@ define hidden void @f.hidden() {
 }
 
 ; DEFINE: declare void @f.protected()
+; JOINED: declare protected void @f.protected()
 declare protected void @f.protected()
