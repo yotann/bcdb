@@ -26,6 +26,14 @@ if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
   message(FATAL_ERROR "Python 2.7 or newer is required")
 endif()
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+link_directories(${SQLITE3_LIBRARY_DIRS})
+pkg_check_modules(LIBSODIUM REQUIRED libsodium)
+link_directories(${LIBSODIUM_LIBRARY_DIRS})
+
+
+
 set(LLVM_BUILD_TOOLS ON)
 option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
 
