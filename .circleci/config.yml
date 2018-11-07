@@ -18,12 +18,12 @@ jobs:
           command: ln -s ${NIX_SSL_CERT_FILE} ${SSL_CERT_FILE}
       - restore_cache:
           keys:
-            - v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}
+            - v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
       - run:
           name: Install dependencies
           command: nix-shell -A bcdb<< parameters.llvm_version >> --command true
       - save_cache:
-          key: v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}
+          key: v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
           paths:
             - /nix
       - run:
