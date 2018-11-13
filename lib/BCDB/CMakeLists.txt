@@ -1,6 +1,3 @@
-set(LLVM_LINK_COMPONENTS
-  BitWriter
-)
 add_llvm_library(BCDB
   BCDB.cpp
 )
