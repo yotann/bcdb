@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/PrettyStackTrace.h>
@@ -70,10 +71,11 @@ int main(int argc, const char **argv) {
     return 1;
   }
   std::unique_ptr<MemoryBuffer> MemBuf(std::move(MemBufOrErr.get()));
-
   SmallVector<char, 0> OutBuffer;
   OutBuffer.reserve(256 * 1024);
-  AlignBitcode(*MemBuf, OutBuffer);
+
+  ExitOnError Err("bc-align: ");
+  Err(AlignBitcode(*MemBuf, OutBuffer));
   WriteOutputFile(OutBuffer);
 
   return 0;

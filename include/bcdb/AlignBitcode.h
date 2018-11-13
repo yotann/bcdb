@@ -2,12 +2,20 @@
 #define BCDB_ALIGNBITCODE_H
 
 #include <llvm/ADT/SmallVector.h>
-#include <llvm/Support/MemoryBuffer.h>
+
+namespace llvm {
+class Error;
+class MemoryBufferRef;
+class Module;
+} // end namespace llvm
 
 namespace bcdb {
 
-void AlignBitcode(llvm::MemoryBufferRef InBuffer,
-                  llvm::SmallVectorImpl<char> &OutBuffer);
+llvm::Error AlignBitcode(llvm::MemoryBufferRef InBuffer,
+                         llvm::SmallVectorImpl<char> &OutBuffer);
+
+void WriteAlignedModule(const llvm::Module &M,
+                        llvm::SmallVectorImpl<char> &Buffer);
 
 } // end namespace bcdb
 

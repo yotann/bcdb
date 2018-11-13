@@ -5,7 +5,10 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Bitcode/LLVMBitCodes.h>
+#include <llvm/Support/Errc.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/MathExtras.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <utility>
@@ -18,6 +21,10 @@
 
 using namespace bcdb;
 using namespace llvm;
+
+static Error error(const Twine &Message) {
+  return make_error<StringError>(Message, errc::invalid_argument);
+}
 
 static bool AbbrevWorthKeeping(const BitCodeAbbrev *Abbrev) {
   for (unsigned i = 0; i < Abbrev->getNumOperandInfos(); i++) {
@@ -88,9 +95,10 @@ namespace {
 class BitcodeAligner {
 public:
   BitcodeAligner(MemoryBufferRef InBuffer, SmallVectorImpl<char> &OutBuffer);
-  void AlignBitcode();
+  Error AlignBitcode();
 
 private:
+  MemoryBufferRef InBuffer;
   BitstreamCursor Reader;
   AlignedBitstreamWriter Writer;
   BitstreamBlockInfo BlockInfo;
@@ -107,9 +115,9 @@ private:
   uint64_t CurEntryInOffset, CurEntryOutOffset;
   uint64_t ModuleInOffset = 0, ModuleOutOffset = 0;
 
-  void HandleStartBlock(unsigned ID);
+  Error HandleStartBlock(unsigned ID);
   void HandleEndBlock();
-  void HandleBlockinfoBlock();
+  Error HandleBlockinfoBlock();
   void HandleDefineAbbrev();
   void HandleRecord(unsigned ID);
 };
@@ -117,24 +125,9 @@ private:
 
 BitcodeAligner::BitcodeAligner(MemoryBufferRef InBuffer,
                                SmallVectorImpl<char> &OutBuffer)
-    : Reader(InBuffer), Writer(OutBuffer) {
-  // Skip the wrapper header, if any.
-  const unsigned char *BufPtr =
-      reinterpret_cast<const unsigned char *>(InBuffer.getBufferStart());
-  const unsigned char *EndBufPtr =
-      reinterpret_cast<const unsigned char *>(InBuffer.getBufferEnd());
-  if (isBitcodeWrapper(BufPtr, EndBufPtr)) {
-    if (SkipBitcodeWrapperHeader(BufPtr, EndBufPtr, true))
-      report_fatal_error("Invalid bitcode wrapper");
-    Reader = BitstreamCursor(ArrayRef<uint8_t>(BufPtr, EndBufPtr));
-  }
-  if (!isRawBitcode(BufPtr, EndBufPtr))
-    report_fatal_error("Invalid magic bytes; not a bitcode file?");
+    : InBuffer(InBuffer), Reader(InBuffer), Writer(OutBuffer) {}
 
-  Reader.setBlockInfo(&BlockInfo);
-}
-
-void BitcodeAligner::HandleStartBlock(unsigned ID) {
+Error BitcodeAligner::HandleStartBlock(unsigned ID) {
   if (ID == bitc::IDENTIFICATION_BLOCK_ID) {
     // Keep track of offsets for multi-module files.
     ModuleInOffset = CurEntryInOffset - 32;
@@ -149,12 +142,12 @@ void BitcodeAligner::HandleStartBlock(unsigned ID) {
     }
   }
   if (Reader.EnterSubBlock(ID, nullptr))
-    report_fatal_error("Malformed block record");
+    return error("Malformed block record");
 
   // Align the code width, and make it larger to accommodate the general
   // abbrev.
   if (Reader.getAbbrevIDWidth() >= 32)
-    report_fatal_error("Abbrev ID width too large");
+    return error("Abbrev ID width too large");
   Writer.EnterSubblock(ID, alignTo<8>(Reader.getAbbrevIDWidth() + 1));
 
   Blocks.emplace_back();
@@ -172,6 +165,7 @@ void BitcodeAligner::HandleStartBlock(unsigned ID) {
   }
 
   Blocks.back().GeneralAbbrevID = Writer.EmitAbbrev(MakeGeneralAbbrev());
+  return Error::success();
 }
 
 void BitcodeAligner::HandleEndBlock() {
@@ -179,10 +173,10 @@ void BitcodeAligner::HandleEndBlock() {
   Blocks.pop_back();
 }
 
-void BitcodeAligner::HandleBlockinfoBlock() {
+Error BitcodeAligner::HandleBlockinfoBlock() {
   Optional<BitstreamBlockInfo> NewBlockInfo = Reader.ReadBlockInfoBlock();
   if (!NewBlockInfo)
-    report_fatal_error("Malformed BlockInfoBlock");
+    return error("Malformed BlockInfoBlock");
   BlockInfo = std::move(*NewBlockInfo);
 
   Writer.EnterBlockInfoBlock();
@@ -193,6 +187,7 @@ void BitcodeAligner::HandleBlockinfoBlock() {
         Writer.EmitBlockInfoAbbrev(BI->BlockID, AlignAbbrev(Abbrev.get()));
   }
   Writer.ExitBlock();
+  return Error::success();
 }
 
 void BitcodeAligner::HandleDefineAbbrev() {
@@ -239,7 +234,21 @@ void BitcodeAligner::HandleRecord(unsigned ID) {
   }
 }
 
-void BitcodeAligner::AlignBitcode() {
+Error BitcodeAligner::AlignBitcode() {
+  // Skip the wrapper header, if any.
+  const unsigned char *BufPtr =
+      reinterpret_cast<const unsigned char *>(InBuffer.getBufferStart());
+  const unsigned char *EndBufPtr =
+      reinterpret_cast<const unsigned char *>(InBuffer.getBufferEnd());
+  if (isBitcodeWrapper(BufPtr, EndBufPtr)) {
+    if (SkipBitcodeWrapperHeader(BufPtr, EndBufPtr, true))
+      return error("Invalid bitcode wrapper");
+    Reader = BitstreamCursor(ArrayRef<uint8_t>(BufPtr, EndBufPtr));
+  }
+  if (!isRawBitcode(BufPtr, EndBufPtr))
+    return error("Invalid magic bytes; not a bitcode file?");
+  Reader.setBlockInfo(&BlockInfo);
+
   uint32_t Signature = Reader.Read(32);
   Writer.Emit(Signature, 32);
 
@@ -251,11 +260,13 @@ void BitcodeAligner::AlignBitcode() {
 
     if (Entry.Kind == BitstreamEntry::SubBlock &&
         Entry.ID == bitc::BLOCKINFO_BLOCK_ID) {
-      HandleBlockinfoBlock();
+      if (Error Err = HandleBlockinfoBlock())
+        return Err;
     } else if (Entry.Kind == BitstreamEntry::SubBlock) {
-      HandleStartBlock(Entry.ID);
+      if (Error Err = HandleStartBlock(Entry.ID))
+        return Err;
     } else if (Blocks.empty()) {
-      report_fatal_error("Invalid bitstream entry at top level");
+      return error("Invalid bitstream entry at top level");
     } else if (Entry.Kind == BitstreamEntry::EndBlock) {
       HandleEndBlock();
       // Skip padding at end of file, like llvm::getBitcodeFileContents.
@@ -268,15 +279,28 @@ void BitcodeAligner::AlignBitcode() {
     } else if (Entry.Kind == BitstreamEntry::Record) {
       HandleRecord(Entry.ID);
     } else {
-      report_fatal_error("Malformed bitstream entry");
+      return error("Malformed bitstream entry");
     }
   }
 
   if (!Blocks.empty())
-    report_fatal_error("Unexpected EOF");
+    return error("Unexpected EOF");
+  return Error::success();
 }
 
-void bcdb::AlignBitcode(MemoryBufferRef InBuffer,
-                        SmallVectorImpl<char> &OutBuffer) {
-  BitcodeAligner(InBuffer, OutBuffer).AlignBitcode();
+Error bcdb::AlignBitcode(MemoryBufferRef InBuffer,
+                         SmallVectorImpl<char> &OutBuffer) {
+  return BitcodeAligner(InBuffer, OutBuffer).AlignBitcode();
+}
+
+void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
+  SmallVector<char, 0> TmpBuffer;
+#if LLVM_VERSION_MAJOR >= 7
+  BitcodeWriter(TmpBuffer).writeModule(M);
+#else
+  BitcodeWriter(TmpBuffer).writeModule(&M);
+#endif
+  AlignBitcode(
+      MemoryBufferRef(StringRef(TmpBuffer.data(), TmpBuffer.size()), ""),
+      Buffer);
 }
