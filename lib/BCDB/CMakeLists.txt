@@ -1,0 +1,7 @@
+set(LLVM_LINK_COMPONENTS
+  BitWriter
+)
+add_llvm_library(BCDB
+  BCDB.cpp
+)
+target_link_libraries(BCDB PRIVATE BCDBSplit MemoDB)
