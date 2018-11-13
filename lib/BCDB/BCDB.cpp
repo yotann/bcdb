@@ -1,5 +1,6 @@
 #include "bcdb/BCDB.h"
 
+#include "bcdb/AlignBitcode.h"
 #include "bcdb/Split.h"
 
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -38,11 +39,7 @@ class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;
   void SaveModule(Module &M) {
     SmallVector<char, 0> Buffer;
-#if LLVM_VERSION_MAJOR >= 7
-    BitcodeWriter(Buffer).writeModule(M);
-#else
-    BitcodeWriter(Buffer).writeModule(&M);
-#endif
+    WriteAlignedModule(M, Buffer);
     memodb_value *value = memodb_blob_create(db, Buffer.data(), Buffer.size());
     memodb_value_free(value);
   }
