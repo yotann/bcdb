@@ -36,6 +36,7 @@ link_directories(${LIBSODIUM_LIBRARY_DIRS})
 
 set(LLVM_BUILD_TOOLS ON)
 option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
+option(LLVM_ENABLE_WARNINGS "Enable warnings" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
