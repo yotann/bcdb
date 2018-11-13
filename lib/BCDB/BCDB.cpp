@@ -5,6 +5,7 @@
 
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Support/Errc.h>
+#include <llvm/Support/Error.h>
 
 using namespace bcdb;
 using namespace llvm;
@@ -37,24 +38,26 @@ BCDB::~BCDB() { memodb_db_close(db); }
 namespace {
 class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;
-  void SaveModule(Module &M) {
+  Error SaveModule(Module &M) {
     SmallVector<char, 0> Buffer;
     WriteAlignedModule(M, Buffer);
     memodb_value *value = memodb_blob_create(db, Buffer.data(), Buffer.size());
     memodb_value_free(value);
+    return Error::success();
   }
 
 public:
   BCDBSplitSaver(memodb_db *db) : db(db) {}
-  void saveFunction(std::unique_ptr<Module> M, StringRef Name) override {
-    SaveModule(*M);
+  Error saveFunction(std::unique_ptr<Module> M, StringRef Name) override {
+    return SaveModule(*M);
   }
-  void saveRemainder(std::unique_ptr<Module> M) override { SaveModule(*M); }
+  Error saveRemainder(std::unique_ptr<Module> M) override {
+    return SaveModule(*M);
+  }
 };
 } // end anonymous namespace
 
 Error BCDB::Add(std::unique_ptr<Module> M) {
   BCDBSplitSaver Saver(db);
-  SplitModule(std::move(M), Saver);
-  return Error::success();
+  return SplitModule(std::move(M), Saver);
 }

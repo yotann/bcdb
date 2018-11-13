@@ -1,27 +1,32 @@
 #ifndef BCDB_SPLIT_H
 #define BCDB_SPLIT_H
 
-#include <llvm/ADT/StringRef.h>
-#include <llvm/IR/Module.h>
+#include <llvm/Support/Error.h>
 #include <memory>
+
+namespace llvm {
+class Module;
+class StringRef;
+} // end namespace llvm
 
 namespace bcdb {
 
 class SplitLoader {
 public:
-  virtual std::unique_ptr<llvm::Module> loadFunction(llvm::StringRef Name) = 0;
-  virtual std::unique_ptr<llvm::Module> loadRemainder() = 0;
+  virtual llvm::Expected<std::unique_ptr<llvm::Module>>
+  loadFunction(llvm::StringRef Name) = 0;
+  virtual llvm::Expected<std::unique_ptr<llvm::Module>> loadRemainder() = 0;
 };
 
 class SplitSaver {
 public:
-  virtual void saveFunction(std::unique_ptr<llvm::Module> Module,
-                            llvm::StringRef Name) = 0;
-  virtual void saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
+  virtual llvm::Error saveFunction(std::unique_ptr<llvm::Module> Module,
+                                   llvm::StringRef Name) = 0;
+  virtual llvm::Error saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
 };
 
-std::unique_ptr<llvm::Module> JoinModule(SplitLoader &Loader);
-void SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver);
+llvm::Expected<std::unique_ptr<llvm::Module>> JoinModule(SplitLoader &Loader);
+llvm::Error SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver);
 
 } // end namespace bcdb
 

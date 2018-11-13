@@ -16,7 +16,7 @@
 #include <llvm/IR/Operator.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
-#include <llvm/Support/ErrorHandling.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
@@ -385,7 +385,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   return MPart;
 }
 
-void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
+Error bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
   // Make sure all globals are named so we can link everything back together
   // later.
   nameUnamedGlobals(*M);
@@ -399,11 +399,13 @@ void bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
       // Create a new module containing only this function.
       NeededTypeMap TypeMap;
       auto MPart = ExtractFunction(*M, F, TypeMap);
-      if (MPart)
-        Saver.saveFunction(std::move(MPart), F.getName());
+      if (MPart) {
+        if (Error Err = Saver.saveFunction(std::move(MPart), F.getName()))
+          return Err;
+      }
       TypeMap.RestoreNames();
     }
   }
 
-  Saver.saveRemainder(std::move(M));
+  return Saver.saveRemainder(std::move(M));
 }

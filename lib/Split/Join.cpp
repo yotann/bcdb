@@ -8,6 +8,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Linker/IRMover.h>
+#include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <memory>
 
@@ -23,8 +24,11 @@ static bool isStub(const Function &F) {
   return true;
 }
 
-std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
-  std::unique_ptr<Module> M = Loader.loadRemainder();
+Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
+  Expected<std::unique_ptr<Module>> ModuleOrErr = Loader.loadRemainder();
+  if (!ModuleOrErr)
+    return ModuleOrErr.takeError();
+  std::unique_ptr<Module> M = std::move(*ModuleOrErr);
 
   // Make all globals external so function modules can link to them.
   StringMap<GlobalValue::LinkageTypes> LinkageMap;
@@ -49,11 +53,18 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
 
     // Find the function definition.
     StringRef Name = Stub->getName();
-    std::unique_ptr<Module> MPart = Loader.loadFunction(Name);
+    Expected<std::unique_ptr<Module>> MPartOrErr = Loader.loadFunction(Name);
+    if (!MPartOrErr)
+      return MPartOrErr.takeError();
+    std::unique_ptr<Module> MPart = std::move(*MPartOrErr);
     Function *Def = nullptr;
     for (Function &F : *MPart) {
       if (!F.isDeclaration()) {
-        assert(!Def && "multiple functions in function module");
+        if (Def) {
+          return make_error<StringError>(
+              "multiple functions in function module " + Name,
+              errc::invalid_argument);
+        }
         Def = &F;
       }
     }
@@ -65,16 +76,13 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
     Def->setComdat(Stub->getComdat());
 
     // Move the definition into the main module.
-    Error E = Mover.move(std::move(MPart), {Def},
-                         [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+    if (Error Err = Mover.move(std::move(MPart), {Def},
+                               [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
-                         /* LinkModuleInlineAsm */ false,
+                               /* LinkModuleInlineAsm */ false,
 #endif
-                         /* IsPerformingImport */ false);
-    handleAllErrors(std::move(E), [](const ErrorInfoBase &E) {
-      errs() << E.message() << '\n';
-      report_fatal_error("error during joining");
-    });
+                               /* IsPerformingImport */ false))
+      return Err;
     assert(M->getFunction(Name) != Stub && "stub was not replaced");
     OutFunctions.push_back(M->getFunction(Name));
   }
@@ -91,5 +99,5 @@ std::unique_ptr<Module> bcdb::JoinModule(SplitLoader &Loader) {
   M->getFunctionList().insert(M->getFunctionList().end(), OutFunctions.begin(),
                               OutFunctions.end());
 
-  return M;
+  return std::move(M);
 }

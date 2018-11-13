@@ -9,6 +9,7 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
@@ -46,15 +47,17 @@ public:
   DirSplitLoader(LLVMContext &Context, StringRef Path)
       : Context(Context), Path(Path) {}
 
-  std::unique_ptr<llvm::Module> loadFunction(llvm::StringRef Name) override {
+  Expected<std::unique_ptr<llvm::Module>>
+  loadFunction(llvm::StringRef Name) override {
     return loadModule("functions", Name);
   }
 
-  std::unique_ptr<llvm::Module> loadRemainder() override {
+  Expected<std::unique_ptr<llvm::Module>> loadRemainder() override {
     return loadModule("remainder", "module");
   }
 
-  std::unique_ptr<llvm::Module> loadModule(StringRef Dir, StringRef File) {
+  Expected<std::unique_ptr<llvm::Module>> loadModule(StringRef Dir,
+                                                     StringRef File) {
     std::string Filename = (Path + "/" + Dir + "/" + File).str();
     SMDiagnostic Err;
     std::unique_ptr<Module> M = parseIRFile(Filename, Err, Context);
@@ -62,7 +65,7 @@ public:
       Err.print("bc-join", errs());
       exit(1);
     }
-    return M;
+    return std::move(M);
   }
 };
 } // end anonymous namespace
@@ -74,8 +77,9 @@ int main(int argc, const char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "Module joining");
 
   LLVMContext Context;
+  ExitOnError Err("bc-join: ");
   DirSplitLoader Loader(Context, InputDirectory);
-  std::unique_ptr<Module> M = JoinModule(Loader);
+  std::unique_ptr<Module> M = Err(JoinModule(Loader));
 
   std::error_code EC;
   ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);

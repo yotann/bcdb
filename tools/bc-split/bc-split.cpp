@@ -49,39 +49,37 @@ public:
     }
   }
 
-  void saveFunction(std::unique_ptr<Module> Module, StringRef Name) override {
-    saveModule("functions", Name, *Module);
+  Error saveFunction(std::unique_ptr<Module> Module, StringRef Name) override {
+    return saveModule("functions", Name, *Module);
   }
 
-  void saveRemainder(std::unique_ptr<Module> Module) override {
-    saveModule("remainder", "module", *Module);
+  Error saveRemainder(std::unique_ptr<Module> Module) override {
+    return saveModule("remainder", "module", *Module);
   }
 
-  void saveModule(StringRef Dir, StringRef File, Module &MPart) {
+private:
+  Error saveModule(StringRef Dir, StringRef File, Module &MPart) {
     std::error_code EC;
 
     EC = sys::fs::create_directories(Path + "/" + Dir);
-    if (EC) {
-      errs() << EC.message() << '\n';
-      exit(1);
-    }
+    if (EC)
+      return errorCodeToError(EC);
 
     std::string Filename = (Path + "/" + Dir + "/" + File).str();
     ToolOutputFile Out(Filename, EC, sys::fs::F_None);
-    if (EC) {
-      errs() << EC.message() << '\n';
-      exit(1);
-    }
+    if (EC)
+      return errorCodeToError(EC);
 
-    if (verifyModule(MPart, &errs())) {
-      exit(1);
-    }
+    if (verifyModule(MPart, &errs()))
+      return make_error<StringError>("could not verify module part",
+                                     inconvertibleErrorCode());
 #if LLVM_VERSION_MAJOR >= 7
     WriteBitcodeToFile(MPart, Out.os());
 #else
     WriteBitcodeToFile(&MPart, Out.os());
 #endif
     Out.keep();
+    return Error::success();
   }
 };
 } // end anonymous namespace
@@ -93,15 +91,16 @@ int main(int argc, const char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "Module splitting");
 
   LLVMContext Context;
-  SMDiagnostic Err;
-  std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
+  SMDiagnostic Diag;
+  std::unique_ptr<Module> M = parseIRFile(InputFilename, Diag, Context);
   if (!M) {
-    Err.print(argv[0], errs());
+    Diag.print(argv[0], errs());
     return 1;
   }
 
   DirSplitSaver Saver(OutputDirectory);
-  SplitModule(std::move(M), Saver);
+  ExitOnError Err("bc-split: ");
+  Err(SplitModule(std::move(M), Saver));
 
   return 0;
 }
