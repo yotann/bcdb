@@ -27,10 +27,12 @@ if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
 endif()
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SQLITE3 REQUIRED sqlite3)
-link_directories(${SQLITE3_LIBRARY_DIRS})
+pkg_check_modules(LIBGIT2 REQUIRED libgit2)
+link_directories(${LIBGIT2_LIBRARY_DIRS})
 pkg_check_modules(LIBSODIUM REQUIRED libsodium)
 link_directories(${LIBSODIUM_LIBRARY_DIRS})
+pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+link_directories(${SQLITE3_LIBRARY_DIRS})
 
 
 

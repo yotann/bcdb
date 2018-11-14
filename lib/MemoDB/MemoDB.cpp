@@ -13,7 +13,9 @@ struct error_db : public memodb_db {
 } // end anonymous namespace
 
 int memodb_db_open(memodb_db **db, const char *uri, int create_if_missing) {
-  if (!std::strncmp(uri, "sqlite:", 7)) {
+  if (!std::strncmp(uri, "git:", 4)) {
+    return memodb_git_open(db, uri + 4, create_if_missing);
+  } else if (!std::strncmp(uri, "sqlite:", 7)) {
     return memodb_sqlite_open(db, uri + 7, create_if_missing);
   } else {
     *db = new error_db;

@@ -14,6 +14,7 @@ public:
   virtual ~memodb_db() {}
 };
 
+int memodb_git_open(memodb_db **db, const char *path, int create_if_missing);
 int memodb_sqlite_open(memodb_db **db, const char *path, int create_if_missing);
 
 #endif // MEMODB_INTERNAL_H_INCLUDED
