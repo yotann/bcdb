@@ -17,6 +17,9 @@ void memodb_value_free(memodb_value *value);
 
 memodb_value *memodb_blob_create(memodb_db *db, const void *data, size_t size);
 
+memodb_value *memodb_map_create(memodb_db *db, const char **keys,
+                                memodb_value **values, size_t count);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

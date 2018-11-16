@@ -6,6 +6,8 @@
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
+#include <string>
+#include <vector>
 
 using namespace bcdb;
 using namespace llvm;
@@ -38,26 +40,67 @@ BCDB::~BCDB() { memodb_db_close(db); }
 namespace {
 class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;
-  Error SaveModule(Module &M) {
+  std::vector<std::string> function_keys;
+  std::vector<memodb_value *> function_values;
+  memodb_value *remainder_value = nullptr;
+
+  Expected<memodb_value *> SaveModule(Module &M) {
     SmallVector<char, 0> Buffer;
     WriteAlignedModule(M, Buffer);
     memodb_value *value = memodb_blob_create(db, Buffer.data(), Buffer.size());
-    memodb_value_free(value);
-    return Error::success();
+    return value;
   }
 
 public:
   BCDBSplitSaver(memodb_db *db) : db(db) {}
+  ~BCDBSplitSaver() {
+    for (memodb_value *value : function_values)
+      memodb_value_free(value);
+    memodb_value_free(remainder_value);
+  }
   Error saveFunction(std::unique_ptr<Module> M, StringRef Name) override {
-    return SaveModule(*M);
+    Expected<memodb_value *> value = SaveModule(*M);
+    if (!value)
+      return value.takeError();
+    function_keys.push_back(Name);
+    function_values.push_back(*value);
+    return Error::success();
   }
   Error saveRemainder(std::unique_ptr<Module> M) override {
-    return SaveModule(*M);
+    Expected<memodb_value *> value = SaveModule(*M);
+    if (!value)
+      return value.takeError();
+    remainder_value = *value;
+    return Error::success();
+  }
+  Error finish() {
+    std::vector<const char *> function_keys_c;
+    for (const std::string &x : function_keys)
+      function_keys_c.push_back(x.c_str());
+    memodb_value *function_map =
+        memodb_map_create(db, function_keys_c.data(), function_values.data(),
+                          function_keys.size());
+    if (!function_map)
+      return make_error<StringError>("could not create function map",
+                                     inconvertibleErrorCode());
+
+    const char *keys[] = {"functions", "remainder"};
+    memodb_value *values[] = {function_map, remainder_value};
+    memodb_value *result = memodb_map_create(db, keys, values, 2);
+    memodb_value_free(function_map);
+    if (!result)
+      return make_error<StringError>("could not create module map",
+                                     inconvertibleErrorCode());
+
+    memodb_value_free(result);
+    return Error::success();
   }
 };
 } // end anonymous namespace
 
 Error BCDB::Add(std::unique_ptr<Module> M) {
   BCDBSplitSaver Saver(db);
-  return SplitModule(std::move(M), Saver);
+  if (Error Err = SplitModule(std::move(M), Saver))
+    return Err;
+  return Saver.finish();
 }
