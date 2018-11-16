@@ -13,6 +13,7 @@ public:
   virtual memodb_value *blob_create(const void *data, size_t size) = 0;
   virtual memodb_value *map_create(const char **keys, memodb_value **values,
                                    size_t count) = 0;
+  virtual int head_set(const char *name, memodb_value *value) = 0;
   virtual ~memodb_db() {}
 };
 

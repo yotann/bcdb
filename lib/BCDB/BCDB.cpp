@@ -73,7 +73,7 @@ public:
     remainder_value = *value;
     return Error::success();
   }
-  Error finish() {
+  Expected<memodb_value *> finish() {
     std::vector<const char *> function_keys_c;
     for (const std::string &x : function_keys)
       function_keys_c.push_back(x.c_str());
@@ -91,16 +91,22 @@ public:
     if (!result)
       return make_error<StringError>("could not create module map",
                                      inconvertibleErrorCode());
-
-    memodb_value_free(result);
-    return Error::success();
+    return result;
   }
 };
 } // end anonymous namespace
 
-Error BCDB::Add(std::unique_ptr<Module> M) {
+Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   BCDBSplitSaver Saver(db);
   if (Error Err = SplitModule(std::move(M), Saver))
     return Err;
-  return Saver.finish();
+  Expected<memodb_value *> ValueOrErr = Saver.finish();
+  if (!ValueOrErr)
+    return ValueOrErr.takeError();
+  int rc = memodb_head_set(db, Name.str().c_str(), *ValueOrErr);
+  memodb_value_free(*ValueOrErr);
+  if (rc)
+    return make_error<StringError>("could not update head",
+                                   inconvertibleErrorCode());
+  return Error::success();
 }

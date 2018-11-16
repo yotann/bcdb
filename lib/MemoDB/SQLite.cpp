@@ -6,6 +6,11 @@
 #include <sqlite3.h>
 
 static const char SQLITE_INIT_STMTS[] =
+    "CREATE TABLE IF NOT EXISTS head(\n"
+    "  hid INTEGER PRIMARY KEY,    -- Head ID\n"
+    "  name TEXT UNIQUE NOT NULL,  -- Head name\n"
+    "  vid INTEGER                 -- Value ID\n"
+    ");\n"
     "CREATE TABLE IF NOT EXISTS value(\n"
     "  vid INTEGER PRIMARY KEY,    -- Value ID\n"
     "  type INTEGER NOT NULL       -- Value type\n"
@@ -31,6 +36,7 @@ public:
   memodb_value *blob_create(const void *data, size_t size) override;
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
+  int head_set(const char *name, memodb_value *value) override;
   ~sqlite_db() override { sqlite3_close(db); }
 };
 } // end anonymous namespace
@@ -187,6 +193,16 @@ memodb_value *sqlite_db::map_create(const char **keys, memodb_value **values,
   if (transaction.commit() != SQLITE_OK)
     return nullptr;
   return new sqlite_value(result);
+}
+
+int sqlite_db::head_set(const char *name, memodb_value *value) {
+  auto v = static_cast<const sqlite_value *>(value);
+  Stmt insert_stmt(db, "INSERT OR REPLACE INTO head(name, vid) VALUES(?1,?2)");
+  insert_stmt.bind_text(1, name);
+  insert_stmt.bind_int(2, v->id);
+  if (insert_stmt.step() != SQLITE_DONE)
+    return -1;
+  return 0;
 }
 
 int memodb_sqlite_open(memodb_db **db_out, const char *path,

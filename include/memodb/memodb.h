@@ -20,6 +20,8 @@ memodb_value *memodb_blob_create(memodb_db *db, const void *data, size_t size);
 memodb_value *memodb_map_create(memodb_db *db, const char **keys,
                                 memodb_value **values, size_t count);
 
+int memodb_head_set(memodb_db *db, const char *name, memodb_value *value);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

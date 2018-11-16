@@ -13,6 +13,9 @@ struct error_db : public memodb_db {
                            size_t count) override {
     return nullptr;
   }
+  int head_set(const char *name, memodb_value *value) override {
+    return -1;
+  }
 };
 } // end anonymous namespace
 
@@ -38,4 +41,8 @@ memodb_value *memodb_blob_create(memodb_db *db, const void *data, size_t size) {
 memodb_value *memodb_map_create(memodb_db *db, const char **keys,
                                 memodb_value **values, size_t count) {
   return db->map_create(keys, values, count);
+}
+
+int memodb_head_set(memodb_db *db, const char *name, memodb_value *value) {
+  return db->head_set(name, value);
 }

@@ -22,7 +22,7 @@ public:
   static llvm::Expected<std::unique_ptr<BCDB>> Open(llvm::StringRef uri);
 
   ~BCDB();
-  llvm::Error Add(std::unique_ptr<llvm::Module> M);
+  llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
 };
 
 } // end namespace bcdb

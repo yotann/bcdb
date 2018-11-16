@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstring>
 #include <git2.h>
+#include <string>
 
 namespace {
 class git_db : public memodb_db {
@@ -13,6 +14,7 @@ public:
   memodb_value *blob_create(const void *data, size_t size) override;
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
+  int head_set(const char *name, memodb_value *value) override;
   ~git_db() override {
     git_repository_free(repo);
     git_libgit2_shutdown();
@@ -78,6 +80,41 @@ memodb_value *git_db::map_create(const char **keys, memodb_value **values,
   if (rc)
     return nullptr;
   return new git_value(result);
+}
+
+int git_db::head_set(const char *name, memodb_value *value) {
+  git_signature *signature;
+  int rc = git_signature_now(&signature, "MemoDB", "memodb");
+  if (rc)
+    return -1;
+
+  auto tree_value = static_cast<const git_value *>(value);
+
+  git_tree *tree;
+  rc = git_tree_lookup(&tree, repo, &tree_value->id);
+  if (rc) {
+    git_signature_free(signature);
+    return -1;
+  }
+
+  git_oid commit_id;
+  rc =
+      git_commit_create(&commit_id, repo, /*update_ref*/ nullptr, signature,
+                        signature, /*message_encoding*/ nullptr, /*message*/ "",
+                        tree, /*parent_count*/ 0, /*parents*/ nullptr);
+  git_signature_free(signature);
+  git_tree_free(tree);
+  if (rc)
+    return -1;
+
+  // TODO: escape ref_name
+  std::string ref_name = std::string("refs/heads/") + name;
+  rc = git_reference_create(/*out*/ nullptr, repo, ref_name.c_str(), &commit_id,
+                            /*force*/ 1, /*log_message*/ "updated");
+  if (rc)
+    return -1;
+
+  return 0;
 }
 
 int memodb_git_open(memodb_db **db_out, const char *path,

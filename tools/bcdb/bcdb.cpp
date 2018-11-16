@@ -28,6 +28,9 @@ static cl::opt<std::string> AddFilename(cl::Positional, cl::Required,
                                         cl::value_desc("filename"),
                                         cl::sub(AddCommand));
 
+static cl::opt<std::string> AddName("name", cl::desc("Name of the new head"),
+                                    cl::sub(AddCommand));
+
 static int Add() {
   ExitOnError Err("bcdb add: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
@@ -40,7 +43,11 @@ static int Add() {
     return 1;
   }
 
-  Err(db->Add(std::move(M)));
+  StringRef Name = AddName;
+  if (Name.empty())
+    Name = AddFilename;
+
+  Err(db->Add(Name, std::move(M)));
   return 0;
 }
 
