@@ -120,7 +120,8 @@ int sqlite_db::open(const char *path, int create_if_missing) {
   if (rc != SQLITE_OK)
     return -1;
 
-  rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL", nullptr, nullptr, nullptr);
+  rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL; PRAGMA synchronous = 1",
+                    nullptr, nullptr, nullptr);
   // ignore return code
 
   rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
