@@ -550,6 +550,6 @@ public:
   }
 };
 
-} // End bcdb namespace
+} // namespace bcdb
 
 #endif

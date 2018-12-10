@@ -357,17 +357,17 @@ public:
   explicit BitstreamCursor(MemoryBufferRef BitcodeBytes)
       : SimpleBitstreamCursor(BitcodeBytes) {}
 
-  using SimpleBitstreamCursor::canSkipToPos;
   using SimpleBitstreamCursor::AtEndOfStream;
-  using SimpleBitstreamCursor::getBitcodeBytes;
   using SimpleBitstreamCursor::GetCurrentBitNo;
-  using SimpleBitstreamCursor::getCurrentByteNo;
-  using SimpleBitstreamCursor::getPointerToByte;
   using SimpleBitstreamCursor::JumpToBit;
-  using SimpleBitstreamCursor::fillCurWord;
   using SimpleBitstreamCursor::Read;
   using SimpleBitstreamCursor::ReadVBR;
   using SimpleBitstreamCursor::ReadVBR64;
+  using SimpleBitstreamCursor::canSkipToPos;
+  using SimpleBitstreamCursor::fillCurWord;
+  using SimpleBitstreamCursor::getBitcodeBytes;
+  using SimpleBitstreamCursor::getCurrentByteNo;
+  using SimpleBitstreamCursor::getPointerToByte;
 
   /// Return the number of bits used to encode an abbrev #.
   unsigned getAbbrevIDWidth() const { return CurCodeSize; }
@@ -517,6 +517,6 @@ public:
   void setBlockInfo(BitstreamBlockInfo *BI) { BlockInfo = BI; }
 };
 
-} // end bcdb namespace
+} // namespace bcdb
 
 #endif // LLVM_BITCODE_BITSTREAMREADER_H

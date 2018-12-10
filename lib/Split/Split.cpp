@@ -79,7 +79,7 @@ public:
   /// Check whether any blockaddress values were visited.
   bool didVisitAnyBlockAddress() const { return VisitedAnyBlockAddress; }
 };
-}
+} // end anonymous namespace
 
 Type *NeededTypeMap::getMember(Type *Ty) {
   // See LLVM's TypeMapTy::get().

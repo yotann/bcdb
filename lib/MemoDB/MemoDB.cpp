@@ -13,9 +13,7 @@ struct error_db : public memodb_db {
                            size_t count) override {
     return nullptr;
   }
-  int head_set(const char *name, memodb_value *value) override {
-    return -1;
-  }
+  int head_set(const char *name, memodb_value *value) override { return -1; }
 };
 } // end anonymous namespace
 
