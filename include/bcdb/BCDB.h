@@ -3,6 +3,7 @@
 
 #include "memodb/memodb.h"
 
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
 #include <memory>
 
@@ -14,6 +15,7 @@ class StringRef;
 namespace bcdb {
 
 class BCDB {
+  llvm::LLVMContext Context;
   memodb_db *db;
   BCDB(memodb_db *db);
 
@@ -23,6 +25,7 @@ public:
 
   ~BCDB();
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
+  llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
 };
 
 } // end namespace bcdb

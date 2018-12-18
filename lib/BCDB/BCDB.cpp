@@ -3,9 +3,11 @@
 #include "bcdb/AlignBitcode.h"
 #include "bcdb/Split.h"
 
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <string>
 #include <vector>
 
@@ -109,4 +111,60 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
     return make_error<StringError>("could not update head",
                                    inconvertibleErrorCode());
   return Error::success();
+}
+
+namespace {
+class BCDBSplitLoader : public SplitLoader {
+  LLVMContext &Context;
+  memodb_db *db;
+  memodb_value *root;
+
+  Expected<std::unique_ptr<Module>> LoadModule(memodb_value *parent,
+                                               StringRef Name) {
+    memodb_value *value = memodb_map_lookup(db, parent, Name.str().c_str());
+    if (!value)
+      return make_error<StringError>("could not look up module",
+                                     inconvertibleErrorCode());
+    size_t buffer_size;
+    int rc = memodb_blob_get_size(db, value, &buffer_size);
+    const char *buffer = reinterpret_cast<const char *>(memodb_blob_get_buffer(db, value));
+    if (rc || !buffer) {
+      memodb_value_free(value);
+      return make_error<StringError>("could not read module blob",
+                                     inconvertibleErrorCode());
+    }
+    StringRef buffer_ref(buffer, buffer_size);
+    auto result = parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context);
+    memodb_value_free(value);
+    return result;
+  }
+
+public:
+  BCDBSplitLoader(LLVMContext &Context, memodb_db *db, memodb_value *root)
+      : Context(Context), db(db), root(root) {}
+  ~BCDBSplitLoader() { memodb_value_free(root); }
+
+  Expected<std::unique_ptr<Module>> loadFunction(StringRef Name) override {
+    memodb_value *parent = memodb_map_lookup(db, root, "functions");
+    if (!parent)
+      return make_error<StringError>("could not look up function",
+                                     inconvertibleErrorCode());
+    auto result = LoadModule(parent, Name);
+    memodb_value_free(parent);
+    return result;
+  }
+
+  Expected<std::unique_ptr<Module>> loadRemainder() override {
+    return LoadModule(root, "remainder");
+  }
+};
+} // end anonymous namespace
+
+Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
+  memodb_value *value = memodb_head_get(db, Name.str().c_str());
+  if (!value)
+    return make_error<StringError>("could not get head",
+                                   inconvertibleErrorCode());
+  BCDBSplitLoader Loader(Context, db, value);
+  return JoinModule(Loader);
 }

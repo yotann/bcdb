@@ -295,11 +295,14 @@ Error bcdb::AlignBitcode(MemoryBufferRef InBuffer,
 
 void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
   SmallVector<char, 0> TmpBuffer;
+  BitcodeWriter Writer(TmpBuffer);
 #if LLVM_VERSION_MAJOR >= 7
-  BitcodeWriter(TmpBuffer).writeModule(M);
+  Writer.writeModule(M);
 #else
-  BitcodeWriter(TmpBuffer).writeModule(&M);
+  Writer.writeModule(&M);
 #endif
+  Writer.writeSymtab();
+  Writer.writeStrtab();
   AlignBitcode(
       MemoryBufferRef(StringRef(TmpBuffer.data(), TmpBuffer.size()), ""),
       Buffer);

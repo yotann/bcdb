@@ -1,19 +1,27 @@
 #include "bcdb/BCDB.h"
 
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/SystemUtils.h>
+#include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 #include <memory>
 #include <string>
 
 using namespace bcdb;
 using namespace llvm;
+
+#if LLVM_VERSION_MAJOR <= 5
+using ToolOutputFile = tool_output_file;
+#endif
 
 static cl::opt<std::string> Uri("uri", cl::Required,
                                 cl::desc("URI of the database"),
@@ -51,6 +59,45 @@ static int Add() {
   return 0;
 }
 
+// bcdb get
+
+static cl::SubCommand GetCommand("get", "Retrieve a module");
+
+static cl::opt<std::string> GetName("name", cl::Required,
+                                    cl::desc("Name of the head to get"),
+                                    cl::sub(GetCommand));
+
+static cl::opt<std::string>
+    GetOutputFilename("o", cl::desc("<output bitcode file>"), cl::init("-"),
+                      cl::value_desc("filename"), cl::sub(GetCommand));
+
+static cl::opt<bool> GetForce("f",
+                              cl::desc("Enable binary output on terminals"),
+                              cl::sub(GetCommand));
+
+static int Get() {
+  ExitOnError Err("bcdb get: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::unique_ptr<Module> M = Err(db->Get(GetName));
+
+  std::error_code EC;
+  ToolOutputFile Out(GetOutputFilename, EC, sys::fs::F_None);
+  Err(errorCodeToError(EC));
+
+  if (verifyModule(*M, &errs())) {
+    return 1;
+  }
+  if (GetForce || !CheckBitcodeOutputToConsole(Out.os(), true)) {
+#if LLVM_VERSION_MAJOR >= 7
+    WriteBitcodeToFile(*M, Out.os());
+#else
+    WriteBitcodeToFile(M.get(), Out.os());
+#endif
+    Out.keep();
+  }
+  return 0;
+}
+
 // bcdb init
 
 static cl::SubCommand InitCommand("init", "Initialize the database");
@@ -71,6 +118,8 @@ int main(int argc, char **argv) {
 
   if (AddCommand) {
     return Add();
+  } else if (GetCommand) {
+    return Get();
   } else if (InitCommand) {
     return Init();
   } else {

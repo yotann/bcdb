@@ -12,8 +12,12 @@ class git_db : public memodb_db {
 public:
   int open(const char *path, int create_if_missing);
   memodb_value *blob_create(const void *data, size_t size) override;
+  const void *blob_get_buffer(memodb_value *blob) override;
+  int blob_get_size(memodb_value *blob, size_t *size) override;
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
+  memodb_value *map_lookup(memodb_value *map, const char *key) override;
+  memodb_value *head_get(const char *name) override;
   int head_set(const char *name, memodb_value *value) override;
   ~git_db() override {
     git_repository_free(repo);
@@ -56,6 +60,14 @@ memodb_value *git_db::blob_create(const void *data, size_t size) {
   return new git_value(value);
 }
 
+const void *git_db::blob_get_buffer(memodb_value *blob) {
+  return nullptr; // FIXME
+}
+
+int git_db::blob_get_size(memodb_value *blob, size_t *size) {
+  return -1; // FIXME
+}
+
 memodb_value *git_db::map_create(const char **keys, memodb_value **values,
                                  size_t count) {
   TreeBuilder builder;
@@ -77,6 +89,19 @@ memodb_value *git_db::map_create(const char **keys, memodb_value **values,
   git_value result;
   result.is_dir = true;
   rc = git_treebuilder_write(&result.id, builder.builder);
+  if (rc)
+    return nullptr;
+  return new git_value(result);
+}
+
+memodb_value *git_db::map_lookup(memodb_value *map, const char *key) {
+  return nullptr; // FIXME
+}
+
+memodb_value *git_db::head_get(const char *name) {
+  git_value result;
+  result.is_dir = true;
+  int rc = git_reference_name_to_id(&result.id, repo, name);
   if (rc)
     return nullptr;
   return new git_value(result);

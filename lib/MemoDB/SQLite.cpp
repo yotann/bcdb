@@ -4,6 +4,7 @@
 #include <cstring>
 #include <sodium.h>
 #include <sqlite3.h>
+#include <vector>
 
 static const char SQLITE_INIT_STMTS[] =
     "CREATE TABLE IF NOT EXISTS head(\n"
@@ -34,8 +35,12 @@ class sqlite_db : public memodb_db {
 public:
   int open(const char *path, int create_if_missing);
   memodb_value *blob_create(const void *data, size_t size) override;
+  const void *blob_get_buffer(memodb_value *blob) override;
+  int blob_get_size(memodb_value *blob, size_t *size) override;
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
+  memodb_value *map_lookup(memodb_value *map, const char *key) override;
+  memodb_value *head_get(const char *name) override;
   int head_set(const char *name, memodb_value *value) override;
   ~sqlite_db() override { sqlite3_close(db); }
 };
@@ -44,6 +49,7 @@ public:
 namespace {
 struct sqlite_value : public memodb_value {
   sqlite3_int64 id;
+  std::vector<char> buffer;
   sqlite_value(sqlite3_int64 id) : id(id) {}
 };
 } // end anonymous namespace
@@ -168,6 +174,31 @@ memodb_value *sqlite_db::blob_create(const void *data, size_t size) {
   return new sqlite_value(result);
 }
 
+const void *sqlite_db::blob_get_buffer(memodb_value *blob) {
+  sqlite_value *blob_value = static_cast<sqlite_value *>(blob);
+  if (!blob_value->buffer.empty())
+    return blob_value->buffer.data();
+
+  Stmt stmt(db, "SELECT content FROM blob WHERE vid = ?1");
+  stmt.bind_int(1, blob_value->id);
+  if (stmt.step() != SQLITE_ROW)
+    return nullptr;
+  const char *data = reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
+  int size = sqlite3_column_bytes(stmt.stmt, 0);
+  blob_value->buffer.assign(data, data + size);
+  return blob_value->buffer.data();
+}
+
+int sqlite_db::blob_get_size(memodb_value *blob, size_t *size) {
+  const sqlite_value *blob_value = static_cast<const sqlite_value *>(blob);
+  Stmt stmt(db, "SELECT LENGTH(content) FROM blob WHERE vid = ?1");
+  stmt.bind_int(1, blob_value->id);
+  if (stmt.step() != SQLITE_ROW)
+    return -1;
+  *size = sqlite3_column_int64(stmt.stmt, 0);
+  return 0;
+}
+
 memodb_value *sqlite_db::map_create(const char **keys, memodb_value **values,
                                     size_t count) {
   // TODO: check for identical maps
@@ -194,6 +225,24 @@ memodb_value *sqlite_db::map_create(const char **keys, memodb_value **values,
   if (transaction.commit() != SQLITE_OK)
     return nullptr;
   return new sqlite_value(result);
+}
+
+memodb_value *sqlite_db::map_lookup(memodb_value *map, const char *key) {
+  const sqlite_value *map_value = static_cast<const sqlite_value *>(map);
+  Stmt stmt(db, "SELECT value FROM map WHERE vid = ?1 AND key = ?2");
+  stmt.bind_int(1, map_value->id);
+  stmt.bind_text(2, key);
+  if (stmt.step() != SQLITE_ROW)
+    return nullptr;
+  return new sqlite_value(sqlite3_column_int64(stmt.stmt, 0));
+}
+
+memodb_value *sqlite_db::head_get(const char *name) {
+  Stmt stmt(db, "SELECT vid FROM head WHERE name = ?1");
+  stmt.bind_text(1, name);
+  if (stmt.step() != SQLITE_ROW)
+    return nullptr;
+  return new sqlite_value(sqlite3_column_int64(stmt.stmt, 0));
 }
 
 int sqlite_db::head_set(const char *name, memodb_value *value) {

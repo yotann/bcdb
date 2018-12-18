@@ -11,8 +11,12 @@ public:
 class memodb_db {
 public:
   virtual memodb_value *blob_create(const void *data, size_t size) = 0;
+  virtual const void *blob_get_buffer(memodb_value *blob) = 0;
+  virtual int blob_get_size(memodb_value *blob, size_t *size) = 0;
   virtual memodb_value *map_create(const char **keys, memodb_value **values,
                                    size_t count) = 0;
+  virtual memodb_value *map_lookup(memodb_value *map, const char *key) = 0;
+  virtual memodb_value *head_get(const char *name) = 0;
   virtual int head_set(const char *name, memodb_value *value) = 0;
   virtual ~memodb_db() {}
 };
