@@ -183,7 +183,8 @@ const void *sqlite_db::blob_get_buffer(memodb_value *blob) {
   stmt.bind_int(1, blob_value->id);
   if (stmt.step() != SQLITE_ROW)
     return nullptr;
-  const char *data = reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
+  const char *data =
+      reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
   int size = sqlite3_column_bytes(stmt.stmt, 0);
   blob_value->buffer.assign(data, data + size);
   return blob_value->buffer.data();

@@ -21,7 +21,8 @@ int memodb_blob_get_size(memodb_db *db, memodb_value *blob, size_t *size);
 
 memodb_value *memodb_map_create(memodb_db *db, const char **keys,
                                 memodb_value **values, size_t count);
-memodb_value *memodb_map_lookup(memodb_db *db, memodb_value *map, const char *key);
+memodb_value *memodb_map_lookup(memodb_db *db, memodb_value *map,
+                                const char *key);
 
 memodb_value *memodb_head_get(memodb_db *db, const char *name);
 int memodb_head_set(memodb_db *db, const char *name, memodb_value *value);

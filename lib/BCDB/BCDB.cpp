@@ -127,7 +127,8 @@ class BCDBSplitLoader : public SplitLoader {
                                      inconvertibleErrorCode());
     size_t buffer_size;
     int rc = memodb_blob_get_size(db, value, &buffer_size);
-    const char *buffer = reinterpret_cast<const char *>(memodb_blob_get_buffer(db, value));
+    const char *buffer =
+        reinterpret_cast<const char *>(memodb_blob_get_buffer(db, value));
     if (rc || !buffer) {
       memodb_value_free(value);
       return make_error<StringError>("could not read module blob",

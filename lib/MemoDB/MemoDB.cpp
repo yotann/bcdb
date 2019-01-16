@@ -13,12 +13,8 @@ struct error_db : public memodb_db {
                            size_t count) override {
     return nullptr;
   }
-  const void *blob_get_buffer(memodb_value *blob) override {
-    return nullptr;
-  }
-  int blob_get_size(memodb_value *blob, size_t *size) override {
-    return -1;
-  }
+  const void *blob_get_buffer(memodb_value *blob) override { return nullptr; }
+  int blob_get_size(memodb_value *blob, size_t *size) override { return -1; }
   memodb_value *map_lookup(memodb_value *map, const char *key) override {
     return nullptr;
   }
@@ -59,7 +55,8 @@ memodb_value *memodb_map_create(memodb_db *db, const char **keys,
   return db->map_create(keys, values, count);
 }
 
-memodb_value *memodb_map_lookup(memodb_db *db, memodb_value *map, const char *key) {
+memodb_value *memodb_map_lookup(memodb_db *db, memodb_value *map,
+                                const char *key) {
   return db->map_lookup(map, key);
 }
 
