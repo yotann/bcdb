@@ -83,10 +83,7 @@ int main(int argc, const char **argv) {
 
   std::error_code EC;
   ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
-  if (EC) {
-    errs() << EC.message() << '\n';
-    return 1;
-  }
+  Err(errorCodeToError(EC));
 
   if (verifyModule(*M, &errs())) {
     return 1;
