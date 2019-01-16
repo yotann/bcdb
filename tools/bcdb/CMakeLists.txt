@@ -1,6 +1,5 @@
 set(LLVM_LINK_COMPONENTS
   IRReader
-  IRWriter
   Support
 )
 add_llvm_tool(bcdb
