@@ -48,7 +48,7 @@ class BCDBSplitSaver : public SplitSaver {
 
   Expected<memodb_value *> SaveModule(Module &M) {
     SmallVector<char, 0> Buffer;
-    WriteAlignedModule(M, Buffer);
+    WriteUnalignedModule(M, Buffer);
     memodb_value *value = memodb_blob_create(db, Buffer.data(), Buffer.size());
     return value;
   }

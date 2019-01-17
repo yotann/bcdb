@@ -293,9 +293,8 @@ Error bcdb::AlignBitcode(MemoryBufferRef InBuffer,
   return BitcodeAligner(InBuffer, OutBuffer).AlignBitcode();
 }
 
-void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
-  SmallVector<char, 0> TmpBuffer;
-  BitcodeWriter Writer(TmpBuffer);
+void bcdb::WriteUnalignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
+  BitcodeWriter Writer(Buffer);
 #if LLVM_VERSION_MAJOR >= 7
   Writer.writeModule(M);
   Writer.writeSymtab();
@@ -307,6 +306,11 @@ void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
 #else
   Writer.writeModule(&M);
 #endif
+}
+
+void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
+  SmallVector<char, 0> TmpBuffer;
+  WriteUnalignedModule(M, TmpBuffer);
   AlignBitcode(
       MemoryBufferRef(StringRef(TmpBuffer.data(), TmpBuffer.size()), ""),
       Buffer);
