@@ -5,14 +5,22 @@
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Transforms/IPO.h>
 #include <string>
 #include <vector>
 
 using namespace bcdb;
 using namespace llvm;
+
+static cl::opt<bool> NoRenameConstants(
+    "no-rename-constants",
+    cl::desc("Don't improve deduplication by renaming anonymous constants"),
+    cl::sub(*cl::AllSubCommands));
 
 Error BCDB::Init(StringRef uri) {
   memodb_db *db;
@@ -98,7 +106,42 @@ public:
 };
 } // end anonymous namespace
 
+static hash_code HashConstant(Constant *C) {
+  if (auto *CAZ = dyn_cast<ConstantAggregateZero>(C))
+    return hash_value(CAZ->getNumElements());
+  if (auto *CDS = dyn_cast<ConstantDataSequential>(C))
+    return hash_value(CDS->getRawDataValues());
+  return 0;
+}
+
+static void RenameAnonymousConstants(Module &M) {
+  for (GlobalVariable &GV : M.globals()) {
+    if (!GV.hasPrivateLinkage())
+      continue;
+    if (!GV.getName().startswith(".str."))
+      continue;
+    if (!GV.hasInitializer())
+      continue;
+
+    auto Hash = static_cast<size_t>(HashConstant(GV.getInitializer()));
+    if (!Hash)
+      continue;
+    SmallString<64> TempStr(".sh.");
+    raw_svector_ostream TmpStream(TempStr);
+    TmpStream << (Hash & 0xffff);
+    GV.setName(TmpStream.str());
+  }
+}
+
+static void PreprocessModule(Module &M) {
+  if (!NoRenameConstants) {
+    createConstantMergePass()->runOnModule(M);
+    RenameAnonymousConstants(M);
+  }
+}
+
 Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
+  PreprocessModule(*M);
   BCDBSplitSaver Saver(db);
   if (Error Err = SplitModule(std::move(M), Saver))
     return Err;
