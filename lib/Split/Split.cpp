@@ -91,6 +91,7 @@ Type *NeededTypeMap::getMember(Type *Ty) {
     return *Entry = Ty;
 
   bool IsUniqued = !isa<StructType>(Ty) || cast<StructType>(Ty)->isLiteral();
+  bool NeedsRenaming = isa<StructType>(Ty) && cast<StructType>(Ty)->hasName();
 
   // Prevent infinite recursion with a placeholder struct.
   StructType *Placeholder = nullptr;
@@ -113,7 +114,7 @@ Type *NeededTypeMap::getMember(Type *Ty) {
 
     Entry = &MappedTypes[Ty];
     // If none of the element types changed, stop and reuse the original type.
-    if (!AnyChange)
+    if (!AnyChange && !NeedsRenaming)
       return *Entry = Ty;
   }
 
@@ -145,13 +146,16 @@ Type *NeededTypeMap::getMember(Type *Ty) {
     // Fill in the placeholder with the mapped element types.
     if (!ForceOpaque)
       Placeholder->setBody(ElementTypes, STy->isPacked());
+
     // Steal the name from the source type.
-    if (STy->hasName()) {
+    // XXX: disabled (see issue #10).
+    if (false && STy->hasName()) {
       SmallString<16> TmpName = STy->getName();
       STy->setName("");
       Placeholder->setName(TmpName);
       StolenNameTypes.push_back(STy);
     }
+
     return Placeholder;
   }
   }

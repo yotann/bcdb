@@ -1,8 +1,8 @@
 ; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=DEFINE %s
 
-; DEFINE: %s = type { i16 }
-; DEFINE: %t = type { i32 }
+; DEFINE: %0 = type { i16 }
+; DEFINE: %1 = type { i32 }
 %s = type { i16 }
 %t = type { i32 }
 

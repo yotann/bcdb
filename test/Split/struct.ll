@@ -4,27 +4,27 @@
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
 
-; F: %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
-; G-NOT: %mytype
+; F: %0 = type { %1*, %0*, %3*, %4* }
+; G-NOT: %0
 ; MODULE: %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
 ; JOINED: %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
 %mytype = type { %needed*, %mytype*, %unneeded*, %needed3* }
 
-; F: %needed = type { %needed2* }
+; F: %1 = type { %2* }
 %needed = type { %needed2* }
 
-; F: %needed2 = type { i32 }
+; F: %2 = type { i32 }
 %needed2 = type { i32 }
 
-; F: %unneeded = type opaque
 ; MODULE: %unneeded = type { i64 }
 ; JOINED: %unneeded = type { i64 }
+; F: %3 = type opaque
 %unneeded = type { i64 }
 
-; F: %needed3 = type { i8 }
+; F: %4 = type { i8 }
 %needed3 = type { i8 }
 
-; F: %needed4 = type { i16 }
+; F: %5 = type { i16 }
 %needed4 = type { i16 }
 
 ; JOINED: define void @f(%mytype*, %needed4)
