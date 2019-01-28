@@ -9,7 +9,7 @@ jobs:
   build:
     executor: nix
     parameters:
-      llvm_version:
+      attribute:
         type: string
     steps:
       - checkout
@@ -18,29 +18,32 @@ jobs:
           command: ln -s ${NIX_SSL_CERT_FILE} ${SSL_CERT_FILE}
       - restore_cache:
           keys:
-            - v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
+            - v0-<< parameters.attribute >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
       - run:
           name: Install dependencies
-          command: nix-shell -A bcdb<< parameters.llvm_version >> --command true
+          command: nix-shell -A << parameters.attribute >> --command true
       - save_cache:
-          key: v0-llvm<< parameters.llvm_version >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
+          key: v0-<< parameters.attribute >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
           paths:
             - /nix
       - run:
           name: Build and test BCDB
-          command: nix-build -A bcdb<< parameters.llvm_version >>
+          command: nix-build -A << parameters.attribute >>
 workflows:
   build:
     jobs:
       - build:
           name: build-llvm4
-          llvm_version: "4"
+          attribute: "bcdb4"
       - build:
           name: build-llvm5
-          llvm_version: "5"
+          attribute: "bcdb5"
       - build:
           name: build-llvm6
-          llvm_version: "6"
+          attribute: "bcdb6"
       - build:
           name: build-llvm7
-          llvm_version: "7"
+          attribute: "bcdb7"
+      - build:
+          name: build-llvm7-clang7
+          attribute: "bcdb7-clang7"

@@ -22,4 +22,7 @@ with import nixpkgs {};
   bcdb7 = callPackage ./build.nix {
     inherit (llvmPackages_7) llvm;
   };
+  bcdb7-clang7 = callPackage ./build.nix {
+    inherit (llvmPackages_7) llvm stdenv;
+  };
 }
