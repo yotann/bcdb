@@ -80,7 +80,7 @@ static std::shared_ptr<BitCodeAbbrev> AlignAbbrev(const BitCodeAbbrev *Abbrev) {
     }
     Result->Add(Op);
   }
-  return std::move(Result);
+  return Result;
 }
 
 static std::shared_ptr<BitCodeAbbrev> MakeGeneralAbbrev() {
@@ -88,7 +88,7 @@ static std::shared_ptr<BitCodeAbbrev> MakeGeneralAbbrev() {
   Result->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   Result->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Result->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
-  return std::move(Result);
+  return Result;
 }
 
 namespace {
@@ -293,7 +293,8 @@ Error bcdb::AlignBitcode(MemoryBufferRef InBuffer,
   return BitcodeAligner(InBuffer, OutBuffer).AlignBitcode();
 }
 
-void bcdb::WriteUnalignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
+void bcdb::WriteUnalignedModule(const Module &M,
+                                SmallVectorImpl<char> &Buffer) {
   BitcodeWriter Writer(Buffer);
 #if LLVM_VERSION_MAJOR >= 7
   Writer.writeModule(M);

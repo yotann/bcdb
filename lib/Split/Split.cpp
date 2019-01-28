@@ -278,14 +278,13 @@ void NeededTypeMap::VisitFunction(Function &F) {
 }
 
 namespace {
-class DeclMaterializer : public ValueMaterializer {
+class DeclMaterializer final : public ValueMaterializer {
   Module &DM;
-  const Module &SM;
   NeededTypeMap &TypeMap;
 
 public:
-  DeclMaterializer(Module &DM, const Module &SM, NeededTypeMap &TypeMap)
-      : DM(DM), SM(SM), TypeMap(TypeMap) {}
+  DeclMaterializer(Module &DM, NeededTypeMap &TypeMap)
+      : DM(DM), TypeMap(TypeMap) {}
   Value *materialize(Value *V) override;
 };
 } // end anonymous namespace
@@ -391,7 +390,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   // Remap all values used within the function.
   ValueToValueMapTy VMap;
   VMap[&SF] = DF; // Map recursive calls to recursive calls.
-  DeclMaterializer Materializer(*MPart, M, TypeMap);
+  DeclMaterializer Materializer(*MPart, TypeMap);
   RemapFunction(*DF, VMap, RemapFlags::RF_None, &TypeMap, &Materializer);
 
   // Add !llvm.dbg.cu if necessary.
