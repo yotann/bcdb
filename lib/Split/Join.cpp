@@ -82,7 +82,7 @@ Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
                                /* LinkModuleInlineAsm */ false,
 #endif
                                /* IsPerformingImport */ false))
-      return Err;
+      return std::move(Err);
     assert(M->getFunction(Name) != Stub && "stub was not replaced");
     OutFunctions.push_back(M->getFunction(Name));
   }
