@@ -5,6 +5,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constant.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
@@ -38,6 +39,9 @@ class NeededTypeMap : public ValueMapTypeRemapper {
 
   /// Set of already-visited metadata, to prevent infinite recursion.
   SmallPtrSet<const Metadata *, 16> VisitedMetadata;
+
+  /// Visited compile units, used to fill !llvm.dbg.cu.
+  SmallVector<const DICompileUnit *, 4> CompileUnits;
 
   /// Mapping for source types that have already been mapped.
   DenseMap<Type *, Type *> MappedTypes;
@@ -75,6 +79,11 @@ public:
   void VisitMetadata(const Metadata *MD);
   void VisitInstruction(Instruction *I);
   void VisitFunction(Function &F);
+
+  /// Get the list of compile units used in the function.
+  const SmallVector<const DICompileUnit *, 4> &GetCompileUnits() const {
+    return CompileUnits;
+  }
 
   /// Check whether any blockaddress values were visited.
   bool didVisitAnyBlockAddress() const { return VisitedAnyBlockAddress; }
@@ -223,8 +232,11 @@ void NeededTypeMap::VisitMetadata(const Metadata *MD) {
   if (auto *VMD = dyn_cast<ValueAsMetadata>(MD))
     return VisitValue(VMD->getValue());
   if (auto *N = dyn_cast<MDNode>(MD)) {
+    if (auto *CU = dyn_cast<DICompileUnit>(N))
+      CompileUnits.push_back(CU);
     for (auto &Op : N->operands())
-      VisitMetadata(Op);
+      if (Op)
+        VisitMetadata(Op);
   }
 }
 
@@ -344,10 +356,11 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   if (TypeMap.didVisitAnyBlockAddress())
     return 0;
 
-// See LLVM's IRLinker::linkFunctionBody().
 #if LLVM_VERSION_MAJOR > 7
   assert(SF.getAddressSpace() == 0 && "function in non-default address space");
 #endif
+
+  // See LLVM's IRLinker::linkFunctionBody().
   Function *DF =
       Function::Create(TypeMap.get(SF.getFunctionType()),
                        GlobalValue::ExternalLinkage, "", MPart.get());
@@ -380,6 +393,23 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   VMap[&SF] = DF; // Map recursive calls to recursive calls.
   DeclMaterializer Materializer(*MPart, M, TypeMap);
   RemapFunction(*DF, VMap, RemapFlags::RF_None, &TypeMap, &Materializer);
+
+  // Add !llvm.dbg.cu if necessary.
+  auto CUs = TypeMap.GetCompileUnits();
+  if (!CUs.empty()) {
+    NamedMDNode *NMD = MPart->getOrInsertNamedMetadata("llvm.dbg.cu");
+    NMD->clearOperands();
+    for (const DICompileUnit *CU : CUs) {
+      TrackingMDRef &NewCU = VMap.MD()[CU];
+      NMD->addOperand(cast<MDNode>(NewCU.get()));
+    }
+  }
+
+  // Copy debug version.
+  StringRef DIVersionKey = "Debug Info Version";
+  Metadata *DebugVersion = M.getModuleFlag(DIVersionKey);
+  if (DebugVersion)
+    MPart->addModuleFlag(Module::Warning, DIVersionKey, DebugVersion);
 
   // Add a stub definition to the remainder module so we can keep the
   // linkage type, comdats, and aliases.
