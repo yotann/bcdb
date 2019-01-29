@@ -22,31 +22,28 @@ jobs:
       - run:
           name: Install dependencies
           command: nix-shell -A << parameters.attribute >> --cores 4 --command true
-      - run:
-          name: Build and test BCDB
-          command: nix-build -A << parameters.attribute >>
-      - run:
-          name: Collect garbage
-          command: nix-collect-garbage
       - save_cache:
           key: v0-<< parameters.attribute >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
           paths:
             - /nix
+      - run:
+          name: Build and test BCDB
+          command: nix-build -A << parameters.attribute >>
 workflows:
   build:
     jobs:
       - build:
           name: build-llvm4
           attribute: "bcdb-llvm4"
-#      - build:
-#          name: build-llvm5
-#          attribute: "bcdb-llvm5"
-#      - build:
-#          name: build-llvm6
-#          attribute: "bcdb-llvm6"
-#      - build:
-#          name: build-llvm7
-#          attribute: "bcdb-llvm7"
-#      - build:
-#          name: build-llvm7-clang7
-#          attribute: "bcdb-llvm7-clang7"
+      - build:
+          name: build-llvm5
+          attribute: "bcdb-llvm5"
+      - build:
+          name: build-llvm6
+          attribute: "bcdb-llvm6"
+      - build:
+          name: build-llvm7
+          attribute: "bcdb-llvm7"
+      - build:
+          name: build-llvm7-clang7
+          attribute: "bcdb-llvm7-clang7"
