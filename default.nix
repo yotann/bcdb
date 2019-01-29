@@ -11,18 +11,19 @@ in
 with import nixpkgs {};
 {
   bcdb4 = callPackage ./build.nix {
-    inherit (llvmPackages_4) llvm;
+    llvm = llvmPackages_4.llvm.override { debugVersion = true; };
   };
   bcdb5 = callPackage ./build.nix {
-    inherit (llvmPackages_5) llvm;
+    llvm = llvmPackages_5.llvm.override { debugVersion = true; };
   };
   bcdb6 = callPackage ./build.nix {
-    inherit (llvmPackages_6) llvm;
+    llvm = llvmPackages_6.llvm.override { debugVersion = true; };
   };
   bcdb7 = callPackage ./build.nix {
-    inherit (llvmPackages_7) llvm;
+    llvm = llvmPackages_7.llvm.override { debugVersion = true; };
   };
   bcdb7-clang7 = callPackage ./build.nix {
-    inherit (llvmPackages_7) llvm stdenv;
+    inherit (llvmPackages_7) stdenv;
+    llvm = llvmPackages_7.llvm.override { debugVersion = true; };
   };
 }

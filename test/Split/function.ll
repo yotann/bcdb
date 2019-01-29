@@ -2,6 +2,7 @@
 ; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; XFAIL: *
 
 ; MODULE: define i32 @f(i32) {
 ; MODULE-NEXT: unreachable

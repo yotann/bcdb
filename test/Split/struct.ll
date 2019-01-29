@@ -3,6 +3,7 @@
 ; RUN: llvm-dis < %t/functions/g      | FileCheck --check-prefix=G %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; XFAIL: *
 
 ; F: %0 = type { %1*, %0*, %3*, %4* }
 ; G-NOT: %0

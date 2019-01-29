@@ -2,6 +2,7 @@
 ; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; XFAIL: *
 
 define void @f() {
   call void @g()
