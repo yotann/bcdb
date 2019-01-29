@@ -18,6 +18,7 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ cmake pkgconfig python2 ];
   buildInputs = [ libgit2 libsodium llvm sqlite ];
 
+  cmakeBuildType = "Debug";
   doCheck = true;
 
   enableParallelBuilding = true;
