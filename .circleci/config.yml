@@ -2,7 +2,7 @@ version: 2.1
 executors:
   nix:
     docker:
-      - image: nixos/nix:2.1.1
+      - image: nixos/nix:2.2.1
     environment:
       SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt
 jobs:
@@ -16,14 +16,17 @@ jobs:
       - run:
           name: Install CA certificates
           command: ln -s ${NIX_SSL_CERT_FILE} ${SSL_CERT_FILE}
+      - run:
+          name: Check dependencies
+          command: nix-store -q --references $(nix-instantiate -A << parameters.attribute >>) | grep llvm > deps.txt
       - restore_cache:
           keys:
-            - v0-<< parameters.attribute >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
+            - v1-{{ checksum "deps.txt" }}
       - run:
           name: Install dependencies
-          command: nix-shell -A << parameters.attribute >> --cores 4 --command true
+          command: nix-store --realise --cores 4 $(cat deps.txt)
       - save_cache:
-          key: v0-<< parameters.attribute >>-{{ checksum "default.nix" }}-{{ checksum "build.nix" }}
+          key: v1-{{ checksum "deps.txt" }}
           paths:
             - /nix
       - run:
