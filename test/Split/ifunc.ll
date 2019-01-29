@@ -1,8 +1,9 @@
 ; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
 ; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
-; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
-; XFAIL: *
+
+; NOTE: bc-join doesn't work because of a bug in LLVM.
+; https://bugs.llvm.org/show_bug.cgi?id=40368
 
 define void @f() {
   call void @g()
