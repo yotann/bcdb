@@ -23,8 +23,13 @@ jobs:
           keys:
             - v1-{{ checksum "deps.txt" }}
       - run:
+          name: Set up Cachix
+          command: |
+            nix-env -iA nixpkgs.cachix
+            cachix use bcdb
+      - run:
           name: Install dependencies
-          command: nix-store --realise --cores 4 $(cat deps.txt)
+          command: nix-store --realise --cores 4 $(cat deps.txt) | cachix push bcdb
       - save_cache:
           key: v1-{{ checksum "deps.txt" }}
           paths:
