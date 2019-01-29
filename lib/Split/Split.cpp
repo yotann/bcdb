@@ -391,7 +391,8 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   ValueToValueMapTy VMap;
   VMap[&SF] = DF; // Map recursive calls to recursive calls.
   DeclMaterializer Materializer(*MPart, TypeMap);
-  RemapFunction(*DF, VMap, RemapFlags::RF_None, &TypeMap, &Materializer);
+  RemapFunction(*DF, VMap, RemapFlags::RF_IgnoreMissingLocals, &TypeMap,
+                &Materializer);
 
   // Add !llvm.dbg.cu if necessary.
   auto CUs = TypeMap.GetCompileUnits();
