@@ -368,7 +368,14 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
 
   // Copy attributes.
   // Calling convention, GC, and alignment are kept on both functions.
-  DF->copyAttributesFrom(&SF);
+  if (LLVM_VERSION_MAJOR > 4 || !SF.hasSection()) {
+    DF->copyAttributesFrom(&SF);
+  } else {
+    // Avoid copying the section to work around a bug in LLVM 4 where
+    // DF->setSection("") crashes.
+    DF->GlobalValue::copyAttributesFrom(&SF);
+    DF->setAlignment(SF.getAlignment());
+  }
   // Personality, prefix, and prologue are only kept on the full function.
   SF.setPersonalityFn(nullptr);
   SF.setPrefixData(nullptr);
@@ -382,7 +389,8 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   DF->setVisibility(GlobalValue::DefaultVisibility);
   DF->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
   DF->setDLLStorageClass(GlobalValue::DefaultStorageClass);
-  DF->setSection("");
+  if (LLVM_VERSION_MAJOR > 4)
+    DF->setSection("");
 #if LLVM_VERSION_MAJOR >= 7
   DF->setDSOLocal(false);
 #endif
