@@ -341,6 +341,28 @@ Value *DeclMaterializer::materialize(Value *V) {
   return NewGV;
 }
 
+static void CopyFunctionAttributesExceptSection(Function *DF, Function *SF) {
+#if LLVM_VERSION_MAJOR > 4
+  DF->copyAttributesFrom(SF);
+  DF->setSection("");
+#else
+  // Avoid copying the section to work around a bug in LLVM 4 where
+  // DF->setSection("") crashes after a section is set.
+  DF->GlobalValue::copyAttributesFrom(SF);
+  DF->setAlignment(SF->getAlignment());
+  DF->setCallingConv(SF->getCallingConv());
+  DF->setAttributes(SF->getAttributes());
+  if (SF->hasGC())
+    DF->setGC(SF->getGC());
+  if (SF->hasPersonalityFn())
+    DF->setPersonalityFn(SF->getPersonalityFn());
+  if (SF->hasPrefixData())
+    DF->setPrefixData(SF->getPrefixData());
+  if (SF->hasPrologueData())
+    DF->setPrologueData(SF->getPrologueData());
+#endif
+}
+
 static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
                                                NeededTypeMap &TypeMap) {
   auto MPart = std::make_unique<Module>(SF.getName(), M.getContext());
@@ -368,14 +390,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
 
   // Copy attributes.
   // Calling convention, GC, and alignment are kept on both functions.
-  if (LLVM_VERSION_MAJOR > 4 || !SF.hasSection()) {
-    DF->copyAttributesFrom(&SF);
-  } else {
-    // Avoid copying the section to work around a bug in LLVM 4 where
-    // DF->setSection("") crashes.
-    DF->GlobalValue::copyAttributesFrom(&SF);
-    DF->setAlignment(SF.getAlignment());
-  }
+  CopyFunctionAttributesExceptSection(DF, &SF);
   // Personality, prefix, and prologue are only kept on the full function.
   SF.setPersonalityFn(nullptr);
   SF.setPrefixData(nullptr);
@@ -389,8 +404,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
   DF->setVisibility(GlobalValue::DefaultVisibility);
   DF->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
   DF->setDLLStorageClass(GlobalValue::DefaultStorageClass);
-  if (LLVM_VERSION_MAJOR > 4)
-    DF->setSection("");
+  DF->setSection("");
 #if LLVM_VERSION_MAJOR >= 7
   DF->setDSOLocal(false);
 #endif
