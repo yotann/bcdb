@@ -1,8 +1,8 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=F %s
-; RUN: llvm-dis < %t/functions/g      | FileCheck --check-prefix=G %s
-; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
-; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; RUN: llvm-dis < %t/functions/f.bc      | FileCheck --check-prefix=F %s
+; RUN: llvm-dis < %t/functions/g.bc      | FileCheck --check-prefix=G %s
+; RUN: llvm-dis < %t/remainder/module.bc | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis             | FileCheck --check-prefix=JOINED %s
 
 ; MODULE: define void @f()
 ; MODULE-NEXT: unreachable

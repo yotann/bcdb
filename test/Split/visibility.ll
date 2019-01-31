@@ -1,7 +1,7 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f.hidden | FileCheck --check-prefix=DEFINE %s
-; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
-; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; RUN: llvm-dis < %t/functions/f.hidden.bc | FileCheck --check-prefix=DEFINE %s
+; RUN: llvm-dis < %t/remainder/module.bc   | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis               | FileCheck --check-prefix=JOINED %s
 
 ; MODULE: define hidden void @f.hidden()
 ; MODULE-NEXT: unreachable

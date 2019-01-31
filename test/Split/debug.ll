@@ -1,6 +1,6 @@
 ; REQUIRES: llvm7
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f0     | FileCheck --check-prefix=DEFINE %s
+; RUN: llvm-dis < %t/functions/f0.bc | FileCheck --check-prefix=DEFINE %s
 
 ; DEFINE: define i32 @0() !dbg !4
 define i32 @f0() !dbg !10 {

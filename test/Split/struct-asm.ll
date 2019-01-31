@@ -1,5 +1,5 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f | FileCheck --check-prefix=DEFINE %s
+; RUN: llvm-dis < %t/functions/f.bc | FileCheck --check-prefix=DEFINE %s
 
 ; DEFINE: %0 = type { i32 }
 ; DEFINE: %1 = type { i32, i32 }

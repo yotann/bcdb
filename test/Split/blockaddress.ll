@@ -1,6 +1,6 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/remainder/module   | FileCheck --check-prefix=MODULE %s
-; RUN: bc-join %t | llvm-dis            | FileCheck --check-prefix=MODULE %s
+; RUN: llvm-dis < %t/remainder/module.bc | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis             | FileCheck --check-prefix=MODULE %s
 
 ; MODULE: @blockaddresses = constant [2 x i8*] [i8* blockaddress(@g, %bb2), i8* blockaddress(@h, %1)]
 @blockaddresses = constant [2 x i8*] [i8* blockaddress(@g, %bb2), i8* blockaddress(@h, %1)]

@@ -1,6 +1,6 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f      | FileCheck --check-prefix=DEFINE %s
-; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
+; RUN: llvm-dis < %t/functions/f.bc      | FileCheck --check-prefix=DEFINE %s
+; RUN: llvm-dis < %t/remainder/module.bc | FileCheck --check-prefix=MODULE %s
 
 ; NOTE: bc-join doesn't work because of a bug in LLVM.
 ; https://bugs.llvm.org/show_bug.cgi?id=40368

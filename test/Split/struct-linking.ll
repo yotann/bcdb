@@ -1,5 +1,5 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; RUN: bc-join %t | llvm-dis | FileCheck --check-prefix=JOINED %s
 ; Issue #8
 ; XFAIL: *
 

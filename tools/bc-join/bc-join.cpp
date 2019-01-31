@@ -58,7 +58,7 @@ public:
 
   Expected<std::unique_ptr<llvm::Module>> loadModule(StringRef Dir,
                                                      StringRef File) {
-    std::string Filename = (Path + "/" + Dir + "/" + File).str();
+    std::string Filename = (Path + "/" + Dir + "/" + File + ".bc").str();
     SMDiagnostic Err;
     std::unique_ptr<Module> M = parseIRFile(Filename, Err, Context);
     if (!M) {

@@ -65,7 +65,7 @@ private:
     if (EC)
       return errorCodeToError(EC);
 
-    std::string Filename = (Path + "/" + Dir + "/" + File).str();
+    std::string Filename = (Path + "/" + Dir + "/" + File + ".bc").str();
     ToolOutputFile Out(Filename, EC, sys::fs::F_None);
     if (EC)
       return errorCodeToError(EC);

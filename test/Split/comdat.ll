@@ -1,7 +1,7 @@
 ; RUN: llvm-as < %s | bc-split -o %t
-; RUN: llvm-dis < %t/functions/f.any  | FileCheck --check-prefix=DEFINE -match-full-lines %s
-; RUN: llvm-dis < %t/remainder/module | FileCheck --check-prefix=MODULE %s
-; RUN: bc-join %t | llvm-dis          | FileCheck --check-prefix=JOINED %s
+; RUN: llvm-dis < %t/functions/f.any.bc  | FileCheck --check-prefix=DEFINE -match-full-lines %s
+; RUN: llvm-dis < %t/remainder/module.bc | FileCheck --check-prefix=MODULE %s
+; RUN: bc-join %t | llvm-dis             | FileCheck --check-prefix=JOINED %s
 
 ; MODULE: $any = comdat any
 ; MODULE: $exactmatch = comdat exactmatch
