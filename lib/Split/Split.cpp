@@ -32,7 +32,6 @@ namespace {
 /// 2. Use the type map to remap all types in the function. Unneeded named
 ///    structs will be replaced with opaque structs.
 /// 3. Save the function.
-/// 4. Call RestoreNames() to restore all struct names in the original module.
 class NeededTypeMap : public ValueMapTypeRemapper {
   /// Set of types we actually need to keep around.
   SmallPtrSet<const Type *, 16> Needed;
@@ -45,10 +44,6 @@ class NeededTypeMap : public ValueMapTypeRemapper {
 
   /// Mapping for source types that have already been mapped.
   DenseMap<Type *, Type *> MappedTypes;
-
-  /// List of named structs in the source module that have had their names
-  /// temporarily stolen.
-  SmallVector<StructType *, 16> StolenNameTypes;
 
   /// Whether we saw any blockaddress value.
   bool VisitedAnyBlockAddress = false;
@@ -67,10 +62,6 @@ public:
 
   /// Get the mapping for a type that may not have been visited directly.
   Type *getMember(Type *Ty);
-
-  /// Restore struct names to the source module that were stolen for use in the
-  /// destination module.
-  void RestoreNames();
 
   /// Visit various parts of the source module to determine which type
   /// definitions we need to keep.
@@ -156,26 +147,8 @@ Type *NeededTypeMap::getMember(Type *Ty) {
     if (!ForceOpaque)
       Placeholder->setBody(ElementTypes, STy->isPacked());
 
-    // Steal the name from the source type.
-    // XXX: disabled (see issue #10).
-    if (false && STy->hasName()) {
-      SmallString<16> TmpName = STy->getName();
-      STy->setName("");
-      Placeholder->setName(TmpName);
-      StolenNameTypes.push_back(STy);
-    }
-
     return Placeholder;
   }
-  }
-}
-
-void NeededTypeMap::RestoreNames() {
-  for (StructType *STy : StolenNameTypes) {
-    StructType *DTy = cast<StructType>(MappedTypes[STy]);
-    SmallString<16> TmpName = DTy->getName();
-    DTy->setName("");
-    STy->setName(TmpName);
   }
 }
 
@@ -361,14 +334,14 @@ static void CopyFunctionAttributesExceptSection(Function *DF, Function *SF) {
 #endif
 }
 
-static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF,
-                                               NeededTypeMap &TypeMap) {
+static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   auto MPart = std::make_unique<Module>(SF.getName(), M.getContext());
   MPart->setSourceFileName("");
   // Include datalayout and triple, needed for compilation.
   MPart->setDataLayout(M.getDataLayout());
   MPart->setTargetTriple(M.getTargetTriple());
 
+  NeededTypeMap TypeMap;
   TypeMap.VisitFunction(SF);
 
   // We can't handle blockaddress values in splitted functions.
@@ -451,13 +424,11 @@ Error bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
         continue;
 
       // Create a new module containing only this function.
-      NeededTypeMap TypeMap;
-      auto MPart = ExtractFunction(*M, F, TypeMap);
+      auto MPart = ExtractFunction(*M, F);
       if (MPart) {
         if (Error Err = Saver.saveFunction(std::move(MPart), F.getName()))
           return Err;
       }
-      TypeMap.RestoreNames();
     }
   }
 
