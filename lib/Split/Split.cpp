@@ -261,7 +261,7 @@ void NeededTypeMap::VisitInstruction(Instruction *I) {
 void NeededTypeMap::VisitFunction(Function &F) {
   // See LLVM's Mapper::remapFunction().
 
-  VisitType(F.getType());
+  VisitValue(&F);
   for (const Use &Op : F.operands())
     VisitValue(Op);
 
@@ -270,8 +270,6 @@ void NeededTypeMap::VisitFunction(Function &F) {
   for (const auto &MI : MDs)
     VisitMetadata(MI.second);
 
-  for (const Argument &A : F.args())
-    VisitType(A.getType());
   for (BasicBlock &BB : F)
     for (Instruction &I : BB)
       VisitInstruction(&I);

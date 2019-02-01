@@ -11,4 +11,6 @@ define void @f() {
   ret void
 }
 
-declare void @g(%s* byval, %t* inalloca)
+define void @g(%s* byval, %t* inalloca) {
+  ret void
+}
