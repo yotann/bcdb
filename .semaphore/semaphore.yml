@@ -11,15 +11,15 @@ blocks:
       secrets:
         - name: bcdb-cachix
       jobs:
-        - name: Build and test matrix
+        - name: Build
           commands:
             - checkout
             - .semaphore/install-nix-and-cachix.sh
             - . ~/.nix-profile/etc/profile.d/nix.sh
             - .semaphore/build-deps.sh
-            - nix-build -A $ATTR
+            - nix-build -A $A
           matrix:
-            - env_var: ATTR
+            - env_var: A
               values:
                 - bcdb-llvm4
                 - bcdb-llvm5

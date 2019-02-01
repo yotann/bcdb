@@ -15,7 +15,8 @@ else
   . $PROFILE
   nix-env -iA cachix -f https://cachix.org/api/v1/install
   cache store nix-with-cachix /nix
+  cache list
 fi
 
 cachix use bcdb
-export NIX_BUILD_CORES=$(($(nproc)*2))
+echo "cores $(($(nproc)*2))" >> ~/.config/nix/nix.conf
