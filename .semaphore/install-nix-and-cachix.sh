@@ -14,9 +14,10 @@ else
   bash <(curl https://nixos.org/nix/install)
   . $PROFILE
   nix-env -iA cachix -f https://cachix.org/api/v1/install
+  nix-collect-garbage
   cache store nix-with-cachix-$SEMAPHORE_JOB_ID /nix
   cache list
 fi
 
 cachix use bcdb
-echo "build-cores $(($(nproc)*2))" >> ~/.config/nix/nix.conf
+echo "cores = $(($(nproc)*2))" >> ~/.config/nix/nix.conf
