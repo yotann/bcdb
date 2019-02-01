@@ -19,4 +19,4 @@ else
 fi
 
 cachix use bcdb
-echo "cores $(($(nproc)*2))" >> ~/.config/nix/nix.conf
+echo "build-cores $(($(nproc)*2))" >> ~/.config/nix/nix.conf
