@@ -1,0 +1,27 @@
+version: v1.0
+name: BCDB
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu1804
+
+blocks:
+  - name: "Build and test"
+    task:
+      secrets:
+        - name: bcdb-cachix
+      jobs:
+        - name: Build and test matrix
+          commands:
+            - checkout
+            - .semaphore/install-nix-and-cachix.sh
+            - .semaphore/build-deps.sh
+            - nix-build -A $ATTR
+          matrix:
+            - env_var: ATTR
+              values:
+                - bcdb-llvm4
+                - bcdb-llvm5
+                - bcdb-llvm6
+                - bcdb-llvm7
+                - bcdb-llvm7-clang7
