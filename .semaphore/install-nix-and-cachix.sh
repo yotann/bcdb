@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu
 
 PROFILE=/nix/var/nix/profiles/per-user/$USER/profile/etc/profile.d/nix.sh
