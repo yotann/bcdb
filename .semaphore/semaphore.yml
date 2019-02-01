@@ -15,6 +15,7 @@ blocks:
           commands:
             - checkout
             - .semaphore/install-nix-and-cachix.sh
+            - . ~/.nix-profile/etc/profile.d/nix.sh
             - .semaphore/build-deps.sh
             - nix-build -A $ATTR
           matrix:
