@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm/IR/CallSite.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -229,6 +230,14 @@ void NeededTypeMap::VisitInstruction(Instruction *I) {
     VisitType(AI->getAllocatedType());
   if (auto *GEP = dyn_cast<GetElementPtrInst>(I))
     VisitType(GEP->getSourceElementType());
+
+  if (auto CS = CallSite(I)) {
+    for (unsigned i = 0; i != CS.getNumArgOperands(); ++i) {
+      if (CS.isByValOrInAllocaArgument(i)) {
+        VisitType(CS.getArgument(i)->getType()->getPointerElementType());
+      }
+    }
+  }
 }
 
 void NeededTypeMap::VisitFunction(Function &F) {
