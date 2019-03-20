@@ -53,5 +53,8 @@ workflows:
           name: build-llvm7
           attribute: "bcdb-llvm7"
       - build:
-          name: build-llvm7-clang7
-          attribute: "bcdb-llvm7-clang7"
+          name: build-llvm8
+          attribute: "bcdb-llvm8"
+      - build:
+          name: build-clang
+          attribute: "bcdb-clang"

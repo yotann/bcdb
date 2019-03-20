@@ -2,8 +2,8 @@ let
   default_nixpkgs = (import <nixpkgs> {}).fetchFromGitHub {
     owner = "NixOS";
     repo = "nixpkgs-channels";
-    rev = "11cf7d6e1ffd5fbc09a51b76d668ad0858a772ed";
-    sha256 = "0zcg4mgfdk3ryiqj1j5iv5bljjvsgi6q6j9z1vkq383c4g4clc72";
+    rev = "91b1806476b7f78042d195537bba03620a868e82";
+    sha256 = "0ykfzzwarmaxrc7l7zg4fhvlmb154lwr5jvb9aj02482sky9ky4v";
   };
   debugLLVM = llvmPackages: (llvmPackages.llvm.override {
     debugVersion = true;
@@ -27,10 +27,13 @@ rec {
   bcdb-llvm7 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_7;
   };
+  bcdb-llvm8 = callPackage ./build.nix {
+    llvm = debugLLVM llvmPackages_8;
+  };
 
-  bcdb-llvm7-clang7 = callPackage ./build.nix {
+  bcdb-clang = callPackage ./build.nix {
     inherit (llvmPackages_7) stdenv;
-    llvm = debugLLVM llvmPackages_7;
+    llvm = llvmPackages_7.llvm;
   };
 
   bcdb = bcdb-llvm7;

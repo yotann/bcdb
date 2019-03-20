@@ -286,9 +286,12 @@ Value *DeclMaterializer::materialize(Value *V) {
     DGVar->copyAttributesFrom(SGVar);
     NewGV = DGVar;
   } else if (auto *SF = dyn_cast<Function>(SGV)) {
-    auto *DF =
-        Function::Create(TypeMap.get(SF->getFunctionType()),
-                         GlobalValue::ExternalLinkage, SF->getName(), &DM);
+    auto *DF = Function::Create(TypeMap.get(SF->getFunctionType()),
+                                GlobalValue::ExternalLinkage,
+#if LLVM_VERSION_MAJOR >= 8
+                                SF->getAddressSpace(),
+#endif
+                                SF->getName(), &DM);
     DF->copyAttributesFrom(SF);
     NewGV = DF;
   } else if (SGV->getValueType()->isFunctionTy()) {
@@ -322,7 +325,7 @@ Value *DeclMaterializer::materialize(Value *V) {
 }
 
 static void CopyFunctionAttributesExceptSection(Function *DF, Function *SF) {
-#if LLVM_VERSION_MAJOR > 4
+#if LLVM_VERSION_MAJOR >= 5
   DF->copyAttributesFrom(SF);
   DF->setSection("");
 #else
@@ -357,14 +360,13 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   if (TypeMap.didVisitAnyBlockAddress())
     return 0;
 
-#if LLVM_VERSION_MAJOR > 7
-  assert(SF.getAddressSpace() == 0 && "function in non-default address space");
-#endif
-
   // See LLVM's IRLinker::linkFunctionBody().
-  Function *DF =
-      Function::Create(TypeMap.get(SF.getFunctionType()),
-                       GlobalValue::ExternalLinkage, "", MPart.get());
+  Function *DF = Function::Create(TypeMap.get(SF.getFunctionType()),
+                                  GlobalValue::ExternalLinkage,
+#if LLVM_VERSION_MAJOR >= 8
+                                  SF.getAddressSpace(),
+#endif
+                                  "", MPart.get());
   DF->stealArgumentListFrom(SF);
   DF->getBasicBlockList().splice(DF->end(), SF.getBasicBlockList());
 
