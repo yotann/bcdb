@@ -7,6 +7,33 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 add_definitions(-Wall)
 
+SET(CMAKE_CXX_FLAGS_COVERAGE
+  "${CMAKE_CXX_FLAGS_DEBUG_INIT} --coverage"
+  CACHE STRING "Flags used by the compiler during coverage builds."
+  FORCE )
+SET(CMAKE_C_FLAGS_COVERAGE
+  "${CMAKE_C_FLAGS_DEBUG_INIT} --coverage"
+  CACHE STRING "Flags used by the compiler during coverage builds."
+  FORCE )
+SET(CMAKE_EXE_LINKER_FLAGS_COVERAGE
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG_INIT} --coverage"
+  CACHE STRING "Flags used by the linker during coverage builds."
+  FORCE )
+SET(CMAKE_MODULE_LINKER_FLAGS_COVERAGE
+  "${CMAKE_MODULE_LINKER_FLAGS_DEBUG_INIT} --coverage"
+  CACHE STRING "Flags used by the linker during coverage builds."
+  FORCE )
+SET(CMAKE_SHARED_LINKER_FLAGS_COVERAGE
+  "${CMAKE_SHARED_LINKER_FLAGS_DEBUG_INIT} --coverage"
+  CACHE STRING "Flags used by the linker during coverage builds."
+  FORCE )
+MARK_AS_ADVANCED(
+  CMAKE_CXX_FLAGS_COVERAGE
+  CMAKE_C_FLAGS_COVERAGE
+  CMAKE_EXE_LINKER_FLAGS_COVERAGE
+  CMAKE_MODULE_LINKER_FLAGS_COVERAGE
+  CMAKE_SHARED_LINKER_FLAGS_COVERAGE)
+
 find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
