@@ -1,3 +1,6 @@
+# NOTE: when updating this file, run utils/cache-deps.sh to upload dependencies
+# to Cachix so CI builds can use them.
+
 let
   default_nixpkgs = (import <nixpkgs> {}).fetchFromGitHub {
     owner = "NixOS";

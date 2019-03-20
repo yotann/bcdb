@@ -25,7 +25,7 @@ jobs:
       - run:
           name: Set up Cachix
           command: |
-            nix-env -iA nixpkgs.cachix
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
             cachix use bcdb
       - run:
           name: Install dependencies
