@@ -138,6 +138,11 @@ static void PreprocessModule(Module &M) {
     createConstantMergePass()->runOnModule(M);
     RenameAnonymousConstants(M);
   }
+
+  // LLVM may output MD kinds inconsistently depending on whether getMDKindID()
+  // has been called or not. We call it here to try to make sure output bitcode
+  // always includes the same set of MD kinds, improving deduplication.
+  M.getMDKindID("srcloc");
 }
 
 Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
