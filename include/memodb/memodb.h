@@ -1,34 +1,33 @@
 #ifndef MEMODB_MEMODB_H
 #define MEMODB_MEMODB_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
+#include <memory>
 #include <stddef.h>
 
-typedef struct memodb_db memodb_db;
-typedef struct memodb_value memodb_value;
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Error.h>
 
-int memodb_db_open(memodb_db **db, const char *uri, int create_if_missing);
-void memodb_db_close(memodb_db *db);
+class memodb_value {
+public:
+  virtual ~memodb_value() {}
+};
 
-void memodb_value_free(memodb_value *value);
+class memodb_db {
+public:
+  virtual std::unique_ptr<memodb_value>
+  blob_create(llvm::ArrayRef<uint8_t> data) = 0;
+  virtual const void *blob_get_buffer(memodb_value *blob) = 0;
+  virtual int blob_get_size(memodb_value *blob, size_t *size) = 0;
+  virtual memodb_value *map_create(const char **keys, memodb_value **values,
+                                   size_t count) = 0;
+  virtual memodb_value *map_lookup(memodb_value *map, const char *key) = 0;
+  virtual memodb_value *head_get(const char *name) = 0;
+  virtual llvm::Error head_set(llvm::StringRef name, memodb_value *value) = 0;
+  virtual ~memodb_db() {}
+};
 
-memodb_value *memodb_blob_create(memodb_db *db, const void *data, size_t size);
-const void *memodb_blob_get_buffer(memodb_db *db, memodb_value *blob);
-int memodb_blob_get_size(memodb_db *db, memodb_value *blob, size_t *size);
-
-memodb_value *memodb_map_create(memodb_db *db, const char **keys,
-                                memodb_value **values, size_t count);
-memodb_value *memodb_map_lookup(memodb_db *db, memodb_value *map,
-                                const char *key);
-
-memodb_value *memodb_head_get(memodb_db *db, const char *name);
-int memodb_head_set(memodb_db *db, const char *name, memodb_value *value);
-
-#ifdef __cplusplus
-} // extern "C"
-#endif
+llvm::Expected<std::unique_ptr<memodb_db>>
+memodb_db_open(llvm::StringRef uri, bool create_if_missing = false);
 
 #endif // MEMODB_MEMODB_H

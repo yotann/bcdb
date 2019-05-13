@@ -16,10 +16,10 @@ namespace bcdb {
 
 class BCDB {
   llvm::LLVMContext Context;
-  memodb_db *db;
-  BCDB(memodb_db *db);
+  std::unique_ptr<memodb_db> db;
 
 public:
+  BCDB(std::unique_ptr<memodb_db> db);
   static llvm::Error Init(llvm::StringRef uri);
   static llvm::Expected<std::unique_ptr<BCDB>> Open(llvm::StringRef uri);
 

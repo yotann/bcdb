@@ -6,19 +6,30 @@
 #include <string>
 
 namespace {
+class GitError : public llvm::StringError {
+public:
+  GitError();
+};
+} // end anonymous namespace
+
+GitError::GitError()
+    : StringError(giterr_last()->message, llvm::inconvertibleErrorCode()) {}
+
+namespace {
 class git_db : public memodb_db {
   git_repository *repo = nullptr;
 
 public:
-  int open(const char *path, int create_if_missing);
-  memodb_value *blob_create(const void *data, size_t size) override;
+  llvm::Error open(const char *path, bool create_if_missing);
+  std::unique_ptr<memodb_value>
+  blob_create(llvm::ArrayRef<uint8_t> data) override;
   const void *blob_get_buffer(memodb_value *blob) override;
   int blob_get_size(memodb_value *blob, size_t *size) override;
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
   memodb_value *map_lookup(memodb_value *map, const char *key) override;
   memodb_value *head_get(const char *name) override;
-  int head_set(const char *name, memodb_value *value) override;
+  llvm::Error head_set(llvm::StringRef name, memodb_value *value) override;
   ~git_db() override {
     git_repository_free(repo);
     git_libgit2_shutdown();
@@ -40,24 +51,26 @@ struct TreeBuilder {
 };
 } // end anonymous namespace
 
-int git_db::open(const char *path, int create_if_missing) {
+llvm::Error git_db::open(const char *path, bool create_if_missing) {
   assert(!repo);
   git_libgit2_init();
   int rc = git_repository_open_bare(&repo, path);
   if (rc == GIT_ENOTFOUND && create_if_missing)
     rc = git_repository_init(&repo, path, /*is_bare*/ 1);
   if (rc)
-    return -1;
-  return 0;
+    return llvm::make_error<GitError>();
+  return llvm::Error::success();
 }
 
-memodb_value *git_db::blob_create(const void *data, size_t size) {
+std::unique_ptr<memodb_value>
+git_db::blob_create(llvm::ArrayRef<uint8_t> data) {
   git_value value;
   value.is_dir = false;
-  int rc = git_blob_create_frombuffer(&value.id, repo, data, size);
+  int rc =
+      git_blob_create_frombuffer(&value.id, repo, data.data(), data.size());
   if (rc)
     return nullptr;
-  return new git_value(value);
+  return std::make_unique<git_value>(value);
 }
 
 const void *git_db::blob_get_buffer(memodb_value *blob) {
@@ -107,11 +120,11 @@ memodb_value *git_db::head_get(const char *name) {
   return new git_value(result);
 }
 
-int git_db::head_set(const char *name, memodb_value *value) {
+llvm::Error git_db::head_set(llvm::StringRef name, memodb_value *value) {
   git_signature *signature;
   int rc = git_signature_now(&signature, "MemoDB", "memodb");
   if (rc)
-    return -1;
+    return llvm::make_error<GitError>();
 
   auto tree_value = static_cast<const git_value *>(value);
 
@@ -119,7 +132,7 @@ int git_db::head_set(const char *name, memodb_value *value) {
   rc = git_tree_lookup(&tree, repo, &tree_value->id);
   if (rc) {
     git_signature_free(signature);
-    return -1;
+    return llvm::make_error<GitError>();
   }
 
   git_oid commit_id;
@@ -130,21 +143,23 @@ int git_db::head_set(const char *name, memodb_value *value) {
   git_signature_free(signature);
   git_tree_free(tree);
   if (rc)
-    return -1;
+    return llvm::make_error<GitError>();
 
   // TODO: escape ref_name
-  std::string ref_name = std::string("refs/heads/") + name;
+  std::string ref_name = std::string("refs/heads/") + name.str();
   rc = git_reference_create(/*out*/ nullptr, repo, ref_name.c_str(), &commit_id,
                             /*force*/ 1, /*log_message*/ "updated");
   if (rc)
-    return -1;
+    return llvm::make_error<GitError>();
 
-  return 0;
+  return llvm::Error::success();
 }
 
-int memodb_git_open(memodb_db **db_out, const char *path,
-                    int create_if_missing) {
-  git_db *db = new git_db;
-  *db_out = db;
-  return db->open(path, create_if_missing);
+llvm::Expected<std::unique_ptr<memodb_db>>
+memodb_git_open(llvm::StringRef path, bool create_if_missing) {
+  auto db = std::make_unique<git_db>();
+  llvm::Error error = db->open(path.str().c_str(), create_if_missing);
+  if (error)
+    return error;
+  return std::move(db);
 }
