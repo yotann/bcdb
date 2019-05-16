@@ -1,0 +1,23 @@
+design options for memodb_value:
+- a virtual object
+  - forces users to use unique_ptr/shared_ptr
+- just an int ID
+  - only works for SQLite
+  - prevents garbage collection of values stored in memory
+  - user needs to keep track of which memodb_db contains the object
+- the hash of the object contents
+  - high RAM usage if there are lots of duplicate objects
+  - prevents garbage collection of values stored in memory
+  - user needs to keep track of which memodb_db contains the object
+- BEST OPTION: a class containing a unique_ptr<memodb_value_impl>
+  - reduced boilerplate in user code
+  - flexibility to change to a different memodb_value_impl at runtime
+  - increased complexity for multithreading
+  - 
+- an actual concrete value
+  - references to other values are stored based on one of the other methods
+  - difficult to get just partial information about the value,
+    e.g., a single entry in a map, or just the length of a blob without any contents
+
+how do we keep track of multiple dbs that have a copy of the same value?
+- store the hash in memodb_value_impl
