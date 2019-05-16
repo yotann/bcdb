@@ -278,6 +278,6 @@ memodb_sqlite_open(llvm::StringRef path, bool create_if_missing) {
   auto db = std::make_unique<sqlite_db>();
   llvm::Error error = db->open(path.str().c_str(), create_if_missing);
   if (error)
-    return error;
+    return std::move(error);
   return std::move(db);
 }
