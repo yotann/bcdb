@@ -37,6 +37,8 @@ Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef uri) {
 
 BCDB::BCDB(std::unique_ptr<memodb_db> db) : db(std::move(db)) {}
 
+BCDB::~BCDB() {}
+
 namespace {
 class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;
