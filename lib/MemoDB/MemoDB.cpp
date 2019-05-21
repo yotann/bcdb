@@ -4,9 +4,7 @@
 
 llvm::Expected<std::unique_ptr<memodb_db>>
 memodb_db_open(llvm::StringRef uri, bool create_if_missing) {
-  if (uri.startswith("git:")) {
-    return memodb_git_open(uri.substr(4), create_if_missing);
-  } else if (uri.startswith("sqlite:")) {
+  if (uri.startswith("sqlite:")) {
     return memodb_sqlite_open(uri.substr(7), create_if_missing);
   } else {
     return llvm::make_error<llvm::StringError>(
