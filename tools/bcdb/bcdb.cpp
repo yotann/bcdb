@@ -108,6 +108,21 @@ static int Init() {
   return 0;
 }
 
+// bcdb list-modules
+
+static cl::SubCommand ListModulesCommand("list-modules",
+                                         "List all modules in the database");
+
+static int ListModules() {
+  ExitOnError Err("bcdb list-modules: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::vector<std::string> names = Err(db->ListModules());
+  for (auto &name : names) {
+    outs() << name << "\n";
+  }
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -122,6 +137,8 @@ int main(int argc, char **argv) {
     return Get();
   } else if (InitCommand) {
     return Init();
+  } else if (ListModulesCommand) {
+    return ListModules();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

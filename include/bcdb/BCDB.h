@@ -6,6 +6,8 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace llvm {
 class Module;
@@ -26,6 +28,7 @@ public:
   ~BCDB();
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
   llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
+  llvm::Expected<std::vector<std::string>> ListModules();
 };
 
 } // end namespace bcdb

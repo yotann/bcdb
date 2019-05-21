@@ -3,6 +3,8 @@
 
 #include <memory>
 #include <stddef.h>
+#include <string>
+#include <vector>
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
@@ -22,6 +24,7 @@ public:
   virtual memodb_value *map_create(const char **keys, memodb_value **values,
                                    size_t count) = 0;
   virtual memodb_value *map_lookup(memodb_value *map, const char *key) = 0;
+  virtual llvm::Expected<std::vector<std::string>> list_heads() = 0;
   virtual memodb_value *head_get(const char *name) = 0;
   virtual llvm::Error head_set(llvm::StringRef name, memodb_value *value) = 0;
   virtual ~memodb_db() {}

@@ -28,6 +28,9 @@ public:
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
   memodb_value *map_lookup(memodb_value *map, const char *key) override;
+  llvm::Expected<std::vector<std::string>> list_heads() override {
+    return llvm::make_error<GitError>(); // FIXME
+  }
   memodb_value *head_get(const char *name) override;
   llvm::Error head_set(llvm::StringRef name, memodb_value *value) override;
   ~git_db() override {

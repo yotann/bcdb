@@ -39,6 +39,10 @@ BCDB::BCDB(std::unique_ptr<memodb_db> db) : db(std::move(db)) {}
 
 BCDB::~BCDB() {}
 
+Expected<std::vector<std::string>> BCDB::ListModules() {
+  return db->list_heads();
+}
+
 namespace {
 class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;

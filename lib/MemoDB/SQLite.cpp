@@ -51,6 +51,7 @@ public:
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
   memodb_value *map_lookup(memodb_value *map, const char *key) override;
+  llvm::Expected<std::vector<std::string>> list_heads() override;
   memodb_value *head_get(const char *name) override;
   llvm::Error head_set(llvm::StringRef name, memodb_value *value) override;
   ~sqlite_db() override { sqlite3_close(db); }
@@ -253,6 +254,21 @@ memodb_value *sqlite_db::map_lookup(memodb_value *map, const char *key) {
   if (stmt.step() != SQLITE_ROW)
     return nullptr;
   return new sqlite_value(sqlite3_column_int64(stmt.stmt, 0));
+}
+
+llvm::Expected<std::vector<std::string>> sqlite_db::list_heads() {
+  std::vector<std::string> result;
+  Stmt stmt(db, "SELECT name FROM head");
+  while (true) {
+    auto rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      return llvm::make_error<SQLiteError>(db);
+    result.emplace_back(
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
+  }
+  return result;
 }
 
 memodb_value *sqlite_db::head_get(const char *name) {
