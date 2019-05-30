@@ -29,6 +29,9 @@ public:
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
   llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
   llvm::Expected<std::vector<std::string>> ListModules();
+  llvm::Expected<std::vector<std::string>>
+  ListFunctionsInModule(llvm::StringRef Name);
+  llvm::Expected<std::vector<std::string>> ListAllFunctions();
 };
 
 } // end namespace bcdb

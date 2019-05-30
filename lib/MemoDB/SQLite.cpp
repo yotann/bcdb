@@ -1,5 +1,7 @@
 #include "memodb_internal.h"
 
+#include <llvm/Support/ScopedPrinter.h>
+
 #include <cassert>
 #include <cstring>
 #include <sodium.h>
@@ -44,6 +46,7 @@ class sqlite_db : public memodb_db {
 
 public:
   llvm::Error open(const char *path, bool create_if_missing);
+  std::string value_get_id(memodb_value *value) override;
   std::unique_ptr<memodb_value>
   blob_create(llvm::ArrayRef<uint8_t> data) override;
   const void *blob_get_buffer(memodb_value *blob) override;
@@ -51,6 +54,8 @@ public:
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
   memodb_value *map_lookup(memodb_value *map, const char *key) override;
+  llvm::Expected<std::map<std::string, std::shared_ptr<memodb_value>>>
+  map_list_items(memodb_value *map) override;
   llvm::Expected<std::vector<std::string>> list_heads() override;
   memodb_value *head_get(const char *name) override;
   llvm::Error head_set(llvm::StringRef name, memodb_value *value) override;
@@ -154,6 +159,11 @@ llvm::Error sqlite_db::open(const char *path, bool create_if_missing) {
   return llvm::Error::success();
 }
 
+std::string sqlite_db::value_get_id(memodb_value *value) {
+  auto id = static_cast<sqlite_value *>(value)->id;
+  return llvm::to_string(id);
+}
+
 std::unique_ptr<memodb_value>
 sqlite_db::blob_create(llvm::ArrayRef<uint8_t> data) {
   unsigned char hash[crypto_generichash_BYTES];
@@ -254,6 +264,27 @@ memodb_value *sqlite_db::map_lookup(memodb_value *map, const char *key) {
   if (stmt.step() != SQLITE_ROW)
     return nullptr;
   return new sqlite_value(sqlite3_column_int64(stmt.stmt, 0));
+}
+
+llvm::Expected<std::map<std::string, std::shared_ptr<memodb_value>>>
+sqlite_db::map_list_items(memodb_value *map) {
+  const sqlite_value *map_value = static_cast<const sqlite_value *>(map);
+  Stmt stmt(db, "SELECT key, value FROM map WHERE vid = ?1");
+  stmt.bind_int(1, map_value->id);
+  std::map<std::string, std::shared_ptr<memodb_value>> result;
+  while (true) {
+    auto rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      return llvm::make_error<SQLiteError>(db);
+    std::string key(
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
+    auto value =
+        std::make_shared<sqlite_value>(sqlite3_column_int64(stmt.stmt, 1));
+    result[std::move(key)] = std::move(value);
+  }
+  return result;
 }
 
 llvm::Expected<std::vector<std::string>> sqlite_db::list_heads() {

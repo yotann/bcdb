@@ -43,6 +43,44 @@ Expected<std::vector<std::string>> BCDB::ListModules() {
   return db->list_heads();
 }
 
+Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
+  memodb_value *head = db->head_get(Name.str().c_str());
+  if (!head)
+    return make_error<StringError>("could not get head",
+                                   inconvertibleErrorCode());
+  memodb_value *parent = db->map_lookup(head, "functions");
+  delete head;
+  if (!parent)
+    return make_error<StringError>("could not look up function",
+                                   inconvertibleErrorCode());
+  auto items = db->map_list_items(parent);
+  delete parent;
+  if (!items)
+    return items.takeError();
+  std::vector<std::string> result;
+  result.reserve(items->size());
+  for (auto &item : *items) {
+    result.push_back(db->value_get_id(item.second.get()));
+  }
+  return result;
+}
+
+Expected<std::vector<std::string>> BCDB::ListAllFunctions() {
+  auto modules = ListModules();
+  if (!modules)
+    return modules.takeError();
+  std::vector<std::string> result;
+  for (auto &module : *modules) {
+    auto functions = ListFunctionsInModule(module);
+    if (!functions)
+      return functions.takeError();
+    result.insert(result.end(), functions->begin(), functions->end());
+  }
+  std::sort(result.begin(), result.end());
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
+}
+
 namespace {
 class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;

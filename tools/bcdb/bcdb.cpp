@@ -108,6 +108,32 @@ static int Init() {
   return 0;
 }
 
+// bcdb list-function-ids
+
+static cl::SubCommand
+    ListFunctionsCommand("list-function-ids",
+                         "List function IDs in the database or a specific module");
+
+static cl::opt<std::string> ListFunctionsName("name",
+                                              cl::desc("Name of the module"),
+                                              cl::init(""),
+                                              cl::sub(ListFunctionsCommand));
+
+static int ListFunctions() {
+  ExitOnError Err("bcdb list-function-ids: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::vector<std::string> names;
+  if (!ListFunctionsName.empty()) {
+    names = Err(db->ListFunctionsInModule(ListFunctionsName));
+  } else {
+    names = Err(db->ListAllFunctions());
+  }
+  for (auto &name : names) {
+    outs() << name << "\n";
+  }
+  return 0;
+}
+
 // bcdb list-modules
 
 static cl::SubCommand ListModulesCommand("list-modules",
@@ -137,6 +163,8 @@ int main(int argc, char **argv) {
     return Get();
   } else if (InitCommand) {
     return Init();
+  } else if (ListFunctionsCommand) {
+    return ListFunctions();
   } else if (ListModulesCommand) {
     return ListModules();
   } else {
