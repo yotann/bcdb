@@ -189,6 +189,29 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   return error;
 }
 
+Expected<std::unique_ptr<Module>> LoadModuleFromValue(memodb_db *db,
+                                                      memodb_value *value,
+                                                      StringRef Name,
+                                                      LLVMContext &Context) {
+  size_t buffer_size;
+  int rc = db->blob_get_size(value, &buffer_size);
+  const char *buffer =
+      reinterpret_cast<const char *>(db->blob_get_buffer(value));
+  if (rc || !buffer)
+    return make_error<StringError>("could not read module blob",
+                                   inconvertibleErrorCode());
+  StringRef buffer_ref(buffer, buffer_size);
+  auto result = parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context);
+  return result;
+}
+
+Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
+  auto value = db->get_value_by_id(Id);
+  if (!value)
+    return value.takeError();
+  return LoadModuleFromValue(db.get(), value->get(), Id, Context);
+}
+
 namespace {
 class BCDBSplitLoader : public SplitLoader {
   LLVMContext &Context;
@@ -201,17 +224,7 @@ class BCDBSplitLoader : public SplitLoader {
     if (!value)
       return make_error<StringError>("could not look up module",
                                      inconvertibleErrorCode());
-    size_t buffer_size;
-    int rc = db->blob_get_size(value, &buffer_size);
-    const char *buffer =
-        reinterpret_cast<const char *>(db->blob_get_buffer(value));
-    if (rc || !buffer) {
-      delete value;
-      return make_error<StringError>("could not read module blob",
-                                     inconvertibleErrorCode());
-    }
-    StringRef buffer_ref(buffer, buffer_size);
-    auto result = parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context);
+    auto result = LoadModuleFromValue(db, value, Name, Context);
     delete value;
     return result;
   }

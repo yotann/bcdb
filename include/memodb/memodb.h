@@ -19,6 +19,8 @@ public:
 class memodb_db {
 public:
   virtual std::string value_get_id(memodb_value *value) = 0;
+  virtual llvm::Expected<std::unique_ptr<memodb_value>>
+  get_value_by_id(llvm::StringRef id) = 0;
   virtual std::unique_ptr<memodb_value>
   blob_create(llvm::ArrayRef<uint8_t> data) = 0;
   virtual const void *blob_get_buffer(memodb_value *blob) = 0;

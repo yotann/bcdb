@@ -59,43 +59,60 @@ static int Add() {
   return 0;
 }
 
-// bcdb get
+// bcdb get, get-function
 
 static cl::SubCommand GetCommand("get", "Retrieve a module");
+static cl::SubCommand GetFunctionCommand("get-function", "Retrieve a function");
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
                                     cl::sub(GetCommand));
 
+static cl::opt<std::string> GetId("id", cl::Required,
+                                  cl::desc("ID of the function to get"),
+                                  cl::sub(GetFunctionCommand));
+
 static cl::opt<std::string>
     GetOutputFilename("o", cl::desc("<output bitcode file>"), cl::init("-"),
-                      cl::value_desc("filename"), cl::sub(GetCommand));
+                      cl::value_desc("filename"), cl::sub(GetCommand),
+                      cl::sub(GetFunctionCommand));
 
 static cl::opt<bool> GetForce("f",
                               cl::desc("Enable binary output on terminals"),
-                              cl::sub(GetCommand));
+                              cl::sub(GetCommand), cl::sub(GetFunctionCommand));
+
+static int WriteModule(Module &M) {
+  ExitOnError Err("module write: ");
+  std::error_code EC;
+  ToolOutputFile Out(GetOutputFilename, EC, sys::fs::F_None);
+  Err(errorCodeToError(EC));
+
+  if (verifyModule(M, &errs())) {
+    return 1;
+  }
+  if (GetForce || !CheckBitcodeOutputToConsole(Out.os(), true)) {
+#if LLVM_VERSION_MAJOR >= 7
+    WriteBitcodeToFile(M, Out.os());
+#else
+    WriteBitcodeToFile(&M, Out.os());
+#endif
+    Out.keep();
+  }
+  return 0;
+}
 
 static int Get() {
   ExitOnError Err("bcdb get: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
   std::unique_ptr<Module> M = Err(db->Get(GetName));
+  return WriteModule(*M);
+}
 
-  std::error_code EC;
-  ToolOutputFile Out(GetOutputFilename, EC, sys::fs::F_None);
-  Err(errorCodeToError(EC));
-
-  if (verifyModule(*M, &errs())) {
-    return 1;
-  }
-  if (GetForce || !CheckBitcodeOutputToConsole(Out.os(), true)) {
-#if LLVM_VERSION_MAJOR >= 7
-    WriteBitcodeToFile(*M, Out.os());
-#else
-    WriteBitcodeToFile(M.get(), Out.os());
-#endif
-    Out.keep();
-  }
-  return 0;
+static int GetFunction() {
+  ExitOnError Err("bcdb get-function: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::unique_ptr<Module> M = Err(db->GetFunctionById(GetId));
+  return WriteModule(*M);
 }
 
 // bcdb init
@@ -110,9 +127,9 @@ static int Init() {
 
 // bcdb list-function-ids
 
-static cl::SubCommand
-    ListFunctionsCommand("list-function-ids",
-                         "List function IDs in the database or a specific module");
+static cl::SubCommand ListFunctionsCommand(
+    "list-function-ids",
+    "List function IDs in the database or a specific module");
 
 static cl::opt<std::string> ListFunctionsName("name",
                                               cl::desc("Name of the module"),
@@ -161,6 +178,8 @@ int main(int argc, char **argv) {
     return Add();
   } else if (GetCommand) {
     return Get();
+  } else if (GetFunctionCommand) {
+    return GetFunction();
   } else if (InitCommand) {
     return Init();
   } else if (ListFunctionsCommand) {

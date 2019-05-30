@@ -28,6 +28,8 @@ public:
   ~BCDB();
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
   llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
+  llvm::Expected<std::unique_ptr<llvm::Module>>
+  GetFunctionById(llvm::StringRef Id);
   llvm::Expected<std::vector<std::string>> ListModules();
   llvm::Expected<std::vector<std::string>>
   ListFunctionsInModule(llvm::StringRef Name);

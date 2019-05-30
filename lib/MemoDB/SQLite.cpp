@@ -1,5 +1,8 @@
 #include "memodb_internal.h"
 
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Errc.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/ScopedPrinter.h>
 
 #include <cassert>
@@ -47,6 +50,8 @@ class sqlite_db : public memodb_db {
 public:
   llvm::Error open(const char *path, bool create_if_missing);
   std::string value_get_id(memodb_value *value) override;
+  llvm::Expected<std::unique_ptr<memodb_value>>
+  get_value_by_id(llvm::StringRef id) override;
   std::unique_ptr<memodb_value>
   blob_create(llvm::ArrayRef<uint8_t> data) override;
   const void *blob_get_buffer(memodb_value *blob) override;
@@ -162,6 +167,15 @@ llvm::Error sqlite_db::open(const char *path, bool create_if_missing) {
 std::string sqlite_db::value_get_id(memodb_value *value) {
   auto id = static_cast<sqlite_value *>(value)->id;
   return llvm::to_string(id);
+}
+
+llvm::Expected<std::unique_ptr<memodb_value>>
+sqlite_db::get_value_by_id(llvm::StringRef id) {
+  sqlite_value value(-1);
+  if (id.getAsInteger(10, value.id))
+    return llvm::make_error<llvm::StringError>("invalid value ID",
+                                               llvm::inconvertibleErrorCode());
+  return std::make_unique<sqlite_value>(value);
 }
 
 std::unique_ptr<memodb_value>
