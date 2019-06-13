@@ -3,6 +3,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/ScopedPrinter.h>
 
 #include <cassert>
@@ -34,24 +35,15 @@ static const char SQLITE_INIT_STMTS[] =
     "CREATE UNIQUE INDEX IF NOT EXISTS map_index ON map(vid, key);\n";
 
 namespace {
-class SQLiteError : public llvm::StringError {
-public:
-  SQLiteError(sqlite3 *db);
-};
-} // end anonymous namespace
-
-SQLiteError::SQLiteError(sqlite3 *db)
-    : StringError(sqlite3_errmsg(db), llvm::inconvertibleErrorCode()) {}
-
-namespace {
 class sqlite_db : public memodb_db {
   sqlite3 *db = nullptr;
 
+  void fatal_error();
+
 public:
-  llvm::Error open(const char *path, bool create_if_missing);
+  void open(const char *path, bool create_if_missing);
   std::string value_get_id(memodb_value *value) override;
-  llvm::Expected<std::unique_ptr<memodb_value>>
-  get_value_by_id(llvm::StringRef id) override;
+  std::unique_ptr<memodb_value> get_value_by_id(llvm::StringRef id) override;
   std::unique_ptr<memodb_value>
   blob_create(llvm::ArrayRef<uint8_t> data) override;
   const void *blob_get_buffer(memodb_value *blob) override;
@@ -59,11 +51,11 @@ public:
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
   memodb_value *map_lookup(memodb_value *map, const char *key) override;
-  llvm::Expected<std::map<std::string, std::shared_ptr<memodb_value>>>
+  std::map<std::string, std::shared_ptr<memodb_value>>
   map_list_items(memodb_value *map) override;
-  llvm::Expected<std::vector<std::string>> list_heads() override;
+  std::vector<std::string> list_heads() override;
   memodb_value *head_get(const char *name) override;
-  llvm::Error head_set(llvm::StringRef name, memodb_value *value) override;
+  void head_set(llvm::StringRef name, memodb_value *value) override;
   ~sqlite_db() override { sqlite3_close(db); }
 };
 } // end anonymous namespace
@@ -146,13 +138,15 @@ public:
 };
 } // end anonymous namespace
 
-llvm::Error sqlite_db::open(const char *path, bool create_if_missing) {
+void sqlite_db::fatal_error() { llvm::report_fatal_error(sqlite3_errmsg(db)); }
+
+void sqlite_db::open(const char *path, bool create_if_missing) {
   assert(!db);
   int flags =
       SQLITE_OPEN_READWRITE | (create_if_missing ? SQLITE_OPEN_CREATE : 0);
   int rc = sqlite3_open_v2(path, &db, flags, /*zVfs*/ nullptr);
   if (rc != SQLITE_OK)
-    return llvm::make_error<SQLiteError>(db);
+    fatal_error();
 
   rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL; PRAGMA synchronous = 1",
                     nullptr, nullptr, nullptr);
@@ -160,8 +154,7 @@ llvm::Error sqlite_db::open(const char *path, bool create_if_missing) {
 
   rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
   if (rc != SQLITE_OK)
-    return llvm::make_error<SQLiteError>(db);
-  return llvm::Error::success();
+    fatal_error();
 }
 
 std::string sqlite_db::value_get_id(memodb_value *value) {
@@ -169,12 +162,10 @@ std::string sqlite_db::value_get_id(memodb_value *value) {
   return llvm::to_string(id);
 }
 
-llvm::Expected<std::unique_ptr<memodb_value>>
-sqlite_db::get_value_by_id(llvm::StringRef id) {
+std::unique_ptr<memodb_value> sqlite_db::get_value_by_id(llvm::StringRef id) {
   sqlite_value value(-1);
   if (id.getAsInteger(10, value.id))
-    return llvm::make_error<llvm::StringError>("invalid value ID",
-                                               llvm::inconvertibleErrorCode());
+    return nullptr;
   return std::make_unique<sqlite_value>(value);
 }
 
@@ -280,7 +271,7 @@ memodb_value *sqlite_db::map_lookup(memodb_value *map, const char *key) {
   return new sqlite_value(sqlite3_column_int64(stmt.stmt, 0));
 }
 
-llvm::Expected<std::map<std::string, std::shared_ptr<memodb_value>>>
+std::map<std::string, std::shared_ptr<memodb_value>>
 sqlite_db::map_list_items(memodb_value *map) {
   const sqlite_value *map_value = static_cast<const sqlite_value *>(map);
   Stmt stmt(db, "SELECT key, value FROM map WHERE vid = ?1");
@@ -291,7 +282,7 @@ sqlite_db::map_list_items(memodb_value *map) {
     if (rc == SQLITE_DONE)
       break;
     if (rc != SQLITE_ROW)
-      return llvm::make_error<SQLiteError>(db);
+      fatal_error();
     std::string key(
         reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
     auto value =
@@ -301,7 +292,7 @@ sqlite_db::map_list_items(memodb_value *map) {
   return result;
 }
 
-llvm::Expected<std::vector<std::string>> sqlite_db::list_heads() {
+std::vector<std::string> sqlite_db::list_heads() {
   std::vector<std::string> result;
   Stmt stmt(db, "SELECT name FROM head");
   while (true) {
@@ -309,7 +300,7 @@ llvm::Expected<std::vector<std::string>> sqlite_db::list_heads() {
     if (rc == SQLITE_DONE)
       break;
     if (rc != SQLITE_ROW)
-      return llvm::make_error<SQLiteError>(db);
+      fatal_error();
     result.emplace_back(
         reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
   }
@@ -324,21 +315,18 @@ memodb_value *sqlite_db::head_get(const char *name) {
   return new sqlite_value(sqlite3_column_int64(stmt.stmt, 0));
 }
 
-llvm::Error sqlite_db::head_set(llvm::StringRef name, memodb_value *value) {
+void sqlite_db::head_set(llvm::StringRef name, memodb_value *value) {
   auto v = static_cast<const sqlite_value *>(value);
   Stmt insert_stmt(db, "INSERT OR REPLACE INTO head(name, vid) VALUES(?1,?2)");
   insert_stmt.bind_text(1, name);
   insert_stmt.bind_int(2, v->id);
   if (insert_stmt.step() != SQLITE_DONE)
-    return llvm::make_error<SQLiteError>(db);
-  return llvm::Error::success();
+    fatal_error();
 }
 
-llvm::Expected<std::unique_ptr<memodb_db>>
-memodb_sqlite_open(llvm::StringRef path, bool create_if_missing) {
+std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
+                                              bool create_if_missing) {
   auto db = std::make_unique<sqlite_db>();
-  llvm::Error error = db->open(path.str().c_str(), create_if_missing);
-  if (error)
-    return std::move(error);
+  db->open(path.str().c_str(), create_if_missing);
   return std::move(db);
 }

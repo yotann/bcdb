@@ -55,11 +55,9 @@ Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
                                    inconvertibleErrorCode());
   auto items = db->map_list_items(parent);
   delete parent;
-  if (!items)
-    return items.takeError();
   std::vector<std::string> result;
-  result.reserve(items->size());
-  for (auto &item : *items) {
+  result.reserve(items.size());
+  for (auto &item : items) {
     result.push_back(db->value_get_id(item.second.get()));
   }
   return result;
@@ -184,9 +182,9 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   Expected<memodb_value *> ValueOrErr = Saver.finish();
   if (!ValueOrErr)
     return ValueOrErr.takeError();
-  Error error = db->head_set(Name, *ValueOrErr);
+  db->head_set(Name, *ValueOrErr);
   delete *ValueOrErr;
-  return error;
+  return Error::success();
 }
 
 Expected<std::unique_ptr<Module>> LoadModuleFromValue(memodb_db *db,
@@ -207,9 +205,7 @@ Expected<std::unique_ptr<Module>> LoadModuleFromValue(memodb_db *db,
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
   auto value = db->get_value_by_id(Id);
-  if (!value)
-    return value.takeError();
-  return LoadModuleFromValue(db.get(), value->get(), Id, Context);
+  return LoadModuleFromValue(db.get(), value.get(), Id, Context);
 }
 
 namespace {

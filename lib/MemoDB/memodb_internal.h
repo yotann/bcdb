@@ -6,7 +6,7 @@
 
 #include "memodb/memodb.h"
 
-llvm::Expected<std::unique_ptr<memodb_db>>
-memodb_sqlite_open(llvm::StringRef path, bool create_if_missing);
+std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
+                                              bool create_if_missing);
 
 #endif // MEMODB_INTERNAL_H_INCLUDED
