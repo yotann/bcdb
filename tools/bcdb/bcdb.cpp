@@ -1,4 +1,5 @@
 #include "bcdb/BCDB.h"
+#include "bcdb/Split.h"
 
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/LLVMContext.h>
@@ -63,6 +64,8 @@ static int Add() {
 
 static cl::SubCommand GetCommand("get", "Retrieve a module");
 static cl::SubCommand GetFunctionCommand("get-function", "Retrieve a function");
+static cl::SubCommand MeltCommand("melt",
+                                  "Load all functions into a single module");
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
@@ -75,11 +78,20 @@ static cl::opt<std::string> GetId("id", cl::Required,
 static cl::opt<std::string>
     GetOutputFilename("o", cl::desc("<output bitcode file>"), cl::init("-"),
                       cl::value_desc("filename"), cl::sub(GetCommand),
-                      cl::sub(GetFunctionCommand));
+                      cl::sub(GetFunctionCommand), cl::sub(MeltCommand));
 
 static cl::opt<bool> GetForce("f",
                               cl::desc("Enable binary output on terminals"),
-                              cl::sub(GetCommand), cl::sub(GetFunctionCommand));
+                              cl::sub(GetCommand), cl::sub(GetFunctionCommand),
+                              cl::sub(MeltCommand));
+
+static Expected<bool> ShouldWriteModule() {
+  std::error_code EC;
+  ToolOutputFile Out(GetOutputFilename, EC, sys::fs::F_None);
+  if (EC)
+    return errorCodeToError(EC);
+  return GetForce || !CheckBitcodeOutputToConsole(Out.os(), true);
+}
 
 static int WriteModule(Module &M) {
   ExitOnError Err("module write: ");
@@ -113,6 +125,23 @@ static int GetFunction() {
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
   std::unique_ptr<Module> M = Err(db->GetFunctionById(GetId));
   return WriteModule(*M);
+}
+
+static int Melt() {
+  ExitOnError Err("bcdb melt: ");
+  // Don't do the melt if we're just going to fail when writing the module.
+  if (!Err(ShouldWriteModule()))
+    return 0;
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::vector<std::string> names = Err(db->ListAllFunctions());
+  int i = 0;
+  Melter Melter(db->GetContext());
+  for (auto &name : names) {
+    auto MPart = Err(db->GetFunctionById(name));
+    Err(Melter.Merge(std::move(MPart)));
+    errs() << i++ << "," << names.size() << "," << name << "\n";
+  }
+  return WriteModule(Melter.GetModule());
 }
 
 // bcdb init
@@ -186,6 +215,8 @@ int main(int argc, char **argv) {
     return ListFunctions();
   } else if (ListModulesCommand) {
     return ListModules();
+  } else if (MeltCommand) {
+    return Melt();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

@@ -1,6 +1,8 @@
 #ifndef BCDB_SPLIT_H
 #define BCDB_SPLIT_H
 
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/Linker/IRMover.h>
 #include <llvm/Support/Error.h>
 #include <memory>
 
@@ -25,6 +27,16 @@ public:
                                    llvm::StringRef Name) = 0;
   virtual llvm::Error saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
   virtual ~SplitSaver() {}
+};
+
+class Melter {
+  std::unique_ptr<llvm::Module> M;
+  llvm::IRMover Mover;
+
+public:
+  Melter(llvm::LLVMContext &Context);
+  llvm::Error Merge(std::unique_ptr<llvm::Module> MPart);
+  llvm::Module &GetModule();
 };
 
 llvm::Expected<std::unique_ptr<llvm::Module>> JoinModule(SplitLoader &Loader);

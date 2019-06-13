@@ -34,6 +34,7 @@ public:
   llvm::Expected<std::vector<std::string>>
   ListFunctionsInModule(llvm::StringRef Name);
   llvm::Expected<std::vector<std::string>> ListAllFunctions();
+  llvm::LLVMContext &GetContext() { return Context; }
 };
 
 } // end namespace bcdb

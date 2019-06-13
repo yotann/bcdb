@@ -24,6 +24,30 @@ static bool isStub(const Function &F) {
   return true;
 }
 
+bcdb::Melter::Melter(llvm::LLVMContext &Context)
+    : M(std::make_unique<Module>("melted", Context)), Mover(*M) {}
+
+Error bcdb::Melter::Merge(std::unique_ptr<Module> MPart) {
+  Function *Def = nullptr;
+  for (Function &F : *MPart) {
+    if (!F.isDeclaration()) {
+      if (Def) {
+        return make_error<StringError>("multiple functions in function module",
+                                       errc::invalid_argument);
+      }
+      Def = &F;
+    }
+  }
+  return Mover.move(std::move(MPart), {Def},
+                    [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+#if LLVM_VERSION_MAJOR <= 4
+                    /* LinkModuleInlineAsm */ false,
+#endif
+                    /* IsPerformingImport */ false);
+}
+
+Module &Melter::GetModule() { return *M; }
+
 Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
   Expected<std::unique_ptr<Module>> ModuleOrErr = Loader.loadRemainder();
   if (!ModuleOrErr)
