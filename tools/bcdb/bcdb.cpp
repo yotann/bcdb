@@ -195,6 +195,28 @@ static int ListModules() {
   return 0;
 }
 
+
+//Subcommand linked to DeleteHead
+static cl::Subcommand DeleteHeadCommand("delete-head",
+                                        "Delete head from the database head table");
+
+// static cl::opt<std::string> DeleteHeadname(cl::Positional, cl::Required,
+//                                         cl::desc("<head name>"),
+//                                         cl::value_desc("name of head to delete"),
+//                                         cl::sub(DeleteHeadCommand));
+
+static cl::opt<std::string> AddName("name", cl::desc("name of head to delete"),
+                                  cl::sub(DeleteHeadCommand));
+
+static int DeleteHead(){
+  ExitOnError Err("bcdb delete-head: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  StringRef Name = DeleteHeadname;
+  Err(db->DeleteHead(Name));
+  return 0;
+}
+
+
 // main
 
 int main(int argc, char **argv) {
@@ -217,6 +239,8 @@ int main(int argc, char **argv) {
     return ListModules();
   } else if (MeltCommand) {
     return Melt();
+  } else if (DeleteHeadCommand) {
+    return DeleteHead();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;
