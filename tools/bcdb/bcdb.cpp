@@ -197,7 +197,7 @@ static int ListModules() {
 
 
 //Subcommand linked to DeleteHead
-static cl::Subcommand DeleteHeadCommand("delete-head",
+static cl::SubCommand DeleteHeadCommand("delete-head",
                                         "Delete head from the database head table");
 
 // static cl::opt<std::string> DeleteHeadname(cl::Positional, cl::Required,
@@ -205,7 +205,7 @@ static cl::Subcommand DeleteHeadCommand("delete-head",
 //                                         cl::value_desc("name of head to delete"),
 //                                         cl::sub(DeleteHeadCommand));
 
-static cl::opt<std::string> AddName("name", cl::desc("name of head to delete"),
+static cl::opt<std::string> DeleteHeadname("name", cl::desc("name of head to delete"),
                                   cl::sub(DeleteHeadCommand));
 
 static int DeleteHead(){
