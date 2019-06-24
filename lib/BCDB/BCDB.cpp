@@ -79,8 +79,7 @@ Expected<std::vector<std::string>> BCDB::ListAllFunctions() {
   return result;
 }
 
-//New delete_head BCDB function
-Error BCDB::DeleteHead(llvm::StringRef Name){
+Error BCDB::Delete(llvm::StringRef Name){
   db->head_delete(Name);
   return Error::success();
 }
