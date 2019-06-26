@@ -196,14 +196,14 @@ static int ListModules() {
 }
 
 
-static cl::SubCommand DeleteCommand("delete-head",
+static cl::SubCommand DeleteCommand("delete",
                                     "Remove a module");
 
 static cl::opt<std::string> DeleteHeadname("name", cl::desc("name of head to delete"),
                                   cl::sub(DeleteCommand));
 
 static int Delete(){
-  ExitOnError Err("bcdb delete-head: ");
+  ExitOnError Err("bcdb delete: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
   StringRef Name = DeleteHeadname;
   Err(db->Delete(Name));
