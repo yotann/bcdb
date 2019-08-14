@@ -32,7 +32,7 @@ public:
   virtual memodb_value *head_get(const char *name) = 0;
   virtual void head_set(llvm::StringRef name, memodb_value *value) = 0;
   virtual ~memodb_db() {}
-  virtual void head_delete(llvm::StringRef name);
+  virtual void head_delete(llvm::StringRef name) = 0;
 };
 
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
