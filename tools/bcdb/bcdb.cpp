@@ -60,12 +60,29 @@ static int Add() {
   return 0;
 }
 
+// bcdb delete
+
+static cl::SubCommand DeleteCommand("delete", "Remove a module");
+
+static cl::opt<std::string> DeleteHeadname("name",
+                                           cl::desc("name of head to delete"),
+                                           cl::sub(DeleteCommand));
+
+static int Delete() {
+  ExitOnError Err("bcdb delete: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  StringRef Name = DeleteHeadname;
+  Err(db->Delete(Name));
+  return 0;
+}
+
 // bcdb get, get-function
 
 static cl::SubCommand GetCommand("get", "Retrieve a module");
 static cl::SubCommand GetFunctionCommand("get-function", "Retrieve a function");
 static cl::SubCommand MeltCommand("melt",
                                   "Load all functions into a single module");
+static cl::SubCommand MergeCommand("merge", "Merge modules");
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
@@ -78,12 +95,13 @@ static cl::opt<std::string> GetId("id", cl::Required,
 static cl::opt<std::string>
     GetOutputFilename("o", cl::desc("<output bitcode file>"), cl::init("-"),
                       cl::value_desc("filename"), cl::sub(GetCommand),
-                      cl::sub(GetFunctionCommand), cl::sub(MeltCommand));
+                      cl::sub(GetFunctionCommand), cl::sub(MeltCommand),
+                      cl::sub(MergeCommand));
 
 static cl::opt<bool> GetForce("f",
                               cl::desc("Enable binary output on terminals"),
                               cl::sub(GetCommand), cl::sub(GetFunctionCommand),
-                              cl::sub(MeltCommand));
+                              cl::sub(MeltCommand), cl::sub(MergeCommand));
 
 static Expected<bool> ShouldWriteModule() {
   std::error_code EC;
@@ -195,21 +213,22 @@ static int ListModules() {
   return 0;
 }
 
+// bcdb merge
 
-static cl::SubCommand DeleteCommand("delete",
-                                    "Remove a module");
+static cl::list<std::string> MergeNames(cl::Positional, cl::OneOrMore,
+                                        cl::desc("<module names>"),
+                                        cl::sub(MergeCommand));
 
-static cl::opt<std::string> DeleteHeadname("name", cl::desc("name of head to delete"),
-                                  cl::sub(DeleteCommand));
-
-static int Delete(){
-  ExitOnError Err("bcdb delete: ");
+static int Merge() {
+  ExitOnError Err("bcdb merge: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
-  StringRef Name = DeleteHeadname;
-  Err(db->Delete(Name));
-  return 0;
+  std::map<std::pair<std::string, std::string>, Value *> Mapping;
+  std::vector<StringRef> Names;
+  for (auto &Name : MergeNames)
+    Names.push_back(Name);
+  std::unique_ptr<Module> M = Err(db->Merge(Names, Mapping));
+  return WriteModule(*M);
 }
-
 
 // main
 
@@ -221,6 +240,8 @@ int main(int argc, char **argv) {
 
   if (AddCommand) {
     return Add();
+  } else if (DeleteCommand) {
+    return Delete();
   } else if (GetCommand) {
     return Get();
   } else if (GetFunctionCommand) {
@@ -233,8 +254,8 @@ int main(int argc, char **argv) {
     return ListModules();
   } else if (MeltCommand) {
     return Melt();
-  } else if (DeleteCommand) {
-    return Delete();
+  } else if (MergeCommand) {
+    return Merge();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

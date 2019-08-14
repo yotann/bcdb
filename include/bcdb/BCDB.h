@@ -4,7 +4,9 @@
 #include "memodb/memodb.h"
 
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Value.h>
 #include <llvm/Support/Error.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,6 +38,12 @@ public:
   llvm::Expected<std::vector<std::string>> ListAllFunctions();
   llvm::LLVMContext &GetContext() { return Context; }
   llvm::Error Delete(llvm::StringRef Name);
+  llvm::Expected<std::unique_ptr<llvm::Module>>
+  Merge(std::vector<llvm::StringRef> Names,
+        std::map<std::pair<std::string, std::string>, llvm::Value *> &Mapping);
+
+  llvm::Expected<std::unique_ptr<llvm::Module>>
+  LoadParts(llvm::StringRef Name, std::map<std::string, std::string> &PartIDs);
 };
 
 } // end namespace bcdb

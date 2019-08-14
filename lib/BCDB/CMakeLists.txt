@@ -1,5 +1,6 @@
 add_llvm_library(BCDB
   BCDB.cpp
+  Merge.cpp
 )
 target_link_libraries(BCDB PRIVATE
   BCDBBitcode

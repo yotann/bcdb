@@ -6,6 +6,7 @@
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
@@ -79,7 +80,7 @@ Expected<std::vector<std::string>> BCDB::ListAllFunctions() {
   return result;
 }
 
-Error BCDB::Delete(llvm::StringRef Name){
+Error BCDB::Delete(llvm::StringRef Name) {
   db->head_delete(Name);
   return Error::success();
 }
@@ -192,10 +193,9 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   return Error::success();
 }
 
-Expected<std::unique_ptr<Module>> LoadModuleFromValue(memodb_db *db,
-                                                      memodb_value *value,
-                                                      StringRef Name,
-                                                      LLVMContext &Context) {
+static Expected<std::unique_ptr<Module>>
+LoadModuleFromValue(memodb_db *db, memodb_value *value, StringRef Name,
+                    LLVMContext &Context) {
   size_t buffer_size;
   int rc = db->blob_get_size(value, &buffer_size);
   const char *buffer =
@@ -206,6 +206,52 @@ Expected<std::unique_ptr<Module>> LoadModuleFromValue(memodb_db *db,
   StringRef buffer_ref(buffer, buffer_size);
   auto result = parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context);
   return result;
+}
+
+// FIXME: duplicated from lib/Split/Join.cpp
+static bool isStub(const Function &F) {
+  if (F.isDeclaration() || F.size() != 1)
+    return false;
+  const BasicBlock &BB = F.getEntryBlock();
+  if (BB.size() != 1 || !isa<UnreachableInst>(BB.front()))
+    return false;
+  return true;
+}
+
+Expected<std::unique_ptr<Module>>
+BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
+  memodb_value *head = db->head_get(Name.str().c_str());
+  if (!head)
+    return make_error<StringError>("could not get head",
+                                   inconvertibleErrorCode());
+
+  memodb_value *remainder = db->map_lookup(head, "remainder");
+  memodb_value *functions = db->map_lookup(head, "functions");
+  if (!remainder || !functions)
+    return make_error<StringError>("could not look up parts of module",
+                                   inconvertibleErrorCode());
+
+  auto Remainder = LoadModuleFromValue(db.get(), remainder, Name, Context);
+  if (!Remainder)
+    return Remainder.takeError();
+
+  for (Function &F : **Remainder) {
+    if (isStub(F)) {
+      StringRef Name = F.getName();
+      memodb_value *value = db->map_lookup(functions, Name.str().c_str());
+      if (!value)
+        return make_error<StringError>("could not look up function",
+                                       inconvertibleErrorCode());
+      PartIDs[Name] = db->value_get_id(value);
+      delete value;
+    }
+  }
+
+  delete head;
+  delete remainder;
+  delete functions;
+
+  return Remainder;
 }
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
