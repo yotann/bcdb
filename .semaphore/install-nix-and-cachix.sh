@@ -3,10 +3,10 @@ set -eu
 
 PROFILE=/nix/var/nix/profiles/per-user/$USER/profile/etc/profile.d/nix.sh
 
+sudo chmod 777 / # Allow cache restore to create /nix
 cache restore nix-with-cachix
-if [ -d nix ]; then
+if [ -d /nix ]; then
   # Restore Nix from cache.
-  sudo mv nix /nix
   . $PROFILE
   ln -s /nix/var/nix/profiles/per-user/$USER/channels ~/.nix-defexpr/
 else
