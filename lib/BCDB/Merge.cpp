@@ -37,61 +37,68 @@ private:
 
   Expected<GlobalValue *> LoadID(StringRef ID);
   void MakeWrapper(GlobalValue *GV, StringRef Name);
+  void ReplaceGlobal(StringRef Name, GlobalValue *New);
 };
 } // end anonymous namespace
 
-void Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
-  errs() << "making wrapper " << Name << " for function " << GV->getName()
-         << " in module " << GV->getParent() << "\n";
-  Function *F = cast<Function>(GV);
-  Function *G;
-  if (F->isVarArg()) {
-    // No easy way to do this: https://stackoverflow.com/q/7015477
-    ValueToValueMapTy VMap;
-    G = CloneFunction(F, VMap, /* CodeInfo */ nullptr);
-    G->setName(Name);
-  } else {
-    // see llvm::MergeFunctions::writeThunk
-    G = Function::Create(F->getFunctionType(), F->getLinkage(), Name, M.get());
-    G->copyAttributesFrom(F);
-
-    BasicBlock *BB = BasicBlock::Create(G->getContext(), "", G);
-    IRBuilder<> Builder(BB);
-    std::vector<Value *> Args;
-    for (auto A : zip(G->args(), F->args()))
-      Args.push_back(
-          Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
-    CallInst *CI = Builder.CreateCall(F, Args);
-    CI->setTailCall();
-    CI->setCallingConv(F->getCallingConv());
-    CI->setAttributes(F->getAttributes());
-    if (G->getReturnType()->isVoidTy()) {
-      Builder.CreateRetVoid();
-    } else {
-      Builder.CreateRet(CI);
-    }
-  }
-
+void Merger::ReplaceGlobal(StringRef Name, GlobalValue *New) {
+  New->setName(Name);
   GlobalValue *Old = M->getNamedValue(Name);
-  if (Old != G) {
+  if (Old != New) {
     assert(Old->isDeclaration());
     // We might need a cast if the old declaration had an opaque pointer where
     // the new definition has a struct pointer, or vice versa.
     Old->replaceAllUsesWith(
-        Old->getType() == G->getType()
-            ? G
-            : ConstantExpr::getPointerCast(G, Old->getType()));
+        Old->getType() == New->getType()
+            ? New
+            : ConstantExpr::getPointerCast(New, Old->getType()));
     Old->eraseFromParent();
-    G->setName(Name);
+    New->setName(Name);
   }
 }
 
+void Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
+  // errs() << "making wrapper " << Name << " for function " << GV->getName()
+  //        << " in module " << GV->getParent() << "\n";
+  Function *F = cast<Function>(GV);
+  if (F->isVarArg()) {
+    // No easy way to do this: https://stackoverflow.com/q/7015477
+    ValueToValueMapTy VMap;
+    Function *G = CloneFunction(F, VMap, /* CodeInfo */ nullptr);
+    ReplaceGlobal(Name, G);
+    return;
+  }
+
+  // see llvm::MergeFunctions::writeThunk
+  Function *G =
+      Function::Create(F->getFunctionType(), F->getLinkage(), Name, M.get());
+  G->copyAttributesFrom(F);
+
+  BasicBlock *BB = BasicBlock::Create(G->getContext(), "", G);
+  IRBuilder<> Builder(BB);
+  std::vector<Value *> Args;
+  for (auto A : zip(G->args(), F->args()))
+    Args.push_back(
+        Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
+  CallInst *CI = Builder.CreateCall(F, Args);
+  CI->setTailCall();
+  CI->setCallingConv(F->getCallingConv());
+  CI->setAttributes(F->getAttributes());
+  if (G->getReturnType()->isVoidTy()) {
+    Builder.CreateRetVoid();
+  } else {
+    Builder.CreateRet(CI);
+  }
+
+  ReplaceGlobal(Name, G);
+}
+
 Expected<GlobalValue *> Merger::LoadID(StringRef ID) {
-  errs() << "Loading " << ID << "\n";
   auto &Result = LoadedIDs[ID];
   if (Result)
     return Result;
 
+  // errs() << "Loading " << ID << "\n";
   auto MPartOrErr = bcdb.GetFunctionById(ID);
   if (!MPartOrErr)
     return MPartOrErr.takeError();
@@ -169,9 +176,9 @@ Error Merger::Add(StringRef Name) {
   for (auto &G :
        concat<GlobalValue>(Remainder->global_objects(), Remainder->aliases(),
                            Remainder->ifuncs())) {
-    errs() << "considering global " << G.getName() << "\n";
+    // errs() << "considering global " << G.getName() << "\n";
     if (!PartIDs.count(G.getName())) {
-      errs() << "linking global " << G << "\n";
+      // errs() << "linking global " << G << "\n";
       if (isa<GlobalObject>(G) && !G.isDeclaration())
         ValuesToLink.push_back(&G);
       GlobalValue *G2 = M->getNamedValue(G.getName());
@@ -187,7 +194,7 @@ Error Merger::Add(StringRef Name) {
   }
 
   for (auto &A : Remainder->aliases()) {
-    errs() << "rewriting alias " << A << "\n";
+    // errs() << "rewriting alias " << A << "\n";
     if (auto GV = dyn_cast<GlobalValue>(A.getAliasee()->stripPointerCasts())) {
       Constant *GV2;
       if (GV->getValueType()->isFunctionTy()) {
@@ -200,13 +207,8 @@ Error Merger::Add(StringRef Name) {
         GV2 = ConstantExpr::getBitCast(GV2, A.getType());
       auto A2 = GlobalAlias::create(A.getValueType(), 0, A.getLinkage(),
                                     A.getName(), GV2, M.get());
-      GlobalValue *Old = M->getNamedValue(A.getName());
-      if (Old != A2) {
-        Old->replaceAllUsesWith(A2);
-        Old->eraseFromParent();
-        A2->setName(A.getName());
-      }
-      errs() << "got " << *A2 << "\n";
+      ReplaceGlobal(A.getName(), A2);
+      // errs() << "got " << *A2 << "\n";
     } else {
       return make_error<StringError>("unsupported alias " + A.getName(),
                                      errc::invalid_argument);
