@@ -44,29 +44,45 @@ void Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
   errs() << "making wrapper " << Name << " for function " << GV->getName()
          << " in module " << GV->getParent() << "\n";
   Function *F = cast<Function>(GV);
+  Function *G;
   if (F->isVarArg()) {
     // No easy way to do this: https://stackoverflow.com/q/7015477
     ValueToValueMapTy VMap;
-    Function *G = CloneFunction(F, VMap, /* CodeInfo */ nullptr);
+    G = CloneFunction(F, VMap, /* CodeInfo */ nullptr);
     G->setName(Name);
-    return;
-  }
-  // see llvm::MergeFunctions::writeThunk
-  Function *G =
-      Function::Create(F->getFunctionType(), F->getLinkage(), Name, M.get());
-  BasicBlock *BB = BasicBlock::Create(G->getContext(), "", G);
-  IRBuilder<> Builder(BB);
-  std::vector<Value *> Args;
-  for (auto &A : G->args())
-    Args.push_back(&A);
-  CallInst *CI = Builder.CreateCall(F, Args);
-  CI->setTailCall();
-  CI->setCallingConv(F->getCallingConv());
-  CI->setAttributes(F->getAttributes());
-  if (G->getReturnType()->isVoidTy()) {
-    Builder.CreateRetVoid();
   } else {
-    Builder.CreateRet(CI);
+    // see llvm::MergeFunctions::writeThunk
+    G = Function::Create(F->getFunctionType(), F->getLinkage(), Name, M.get());
+    G->copyAttributesFrom(F);
+
+    BasicBlock *BB = BasicBlock::Create(G->getContext(), "", G);
+    IRBuilder<> Builder(BB);
+    std::vector<Value *> Args;
+    for (auto A : zip(G->args(), F->args()))
+      Args.push_back(
+          Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
+    CallInst *CI = Builder.CreateCall(F, Args);
+    CI->setTailCall();
+    CI->setCallingConv(F->getCallingConv());
+    CI->setAttributes(F->getAttributes());
+    if (G->getReturnType()->isVoidTy()) {
+      Builder.CreateRetVoid();
+    } else {
+      Builder.CreateRet(CI);
+    }
+  }
+
+  GlobalValue *Old = M->getNamedValue(Name);
+  if (Old != G) {
+    assert(Old->isDeclaration());
+    // We might need a cast if the old declaration had an opaque pointer where
+    // the new definition has a struct pointer, or vice versa.
+    Old->replaceAllUsesWith(
+        Old->getType() == G->getType()
+            ? G
+            : ConstantExpr::getPointerCast(G, Old->getType()));
+    Old->eraseFromParent();
+    G->setName(Name);
   }
 }
 
@@ -134,7 +150,9 @@ Error Merger::Add(StringRef Name) {
 
     if (LoadedNames.count(Name)) {
       if (LoadedNames[Name] != ID) {
-        return make_error<StringError>("conflicting definitions of " + Name,
+        return make_error<StringError>("conflicting definitions of " + Name +
+                                           ": " + LoadedNames[Name] + " and " +
+                                           ID,
                                        errc::invalid_argument);
       }
       continue;
@@ -148,11 +166,13 @@ Error Merger::Add(StringRef Name) {
   }
 
   std::vector<GlobalValue *> ValuesToLink;
-  for (auto &G : concat<GlobalValue>(Remainder->global_objects(), Remainder->aliases(), Remainder->ifuncs())) {
+  for (auto &G :
+       concat<GlobalValue>(Remainder->global_objects(), Remainder->aliases(),
+                           Remainder->ifuncs())) {
     errs() << "considering global " << G.getName() << "\n";
     if (!PartIDs.count(G.getName())) {
       errs() << "linking global " << G << "\n";
-      if (isa<GlobalObject>(G))
+      if (isa<GlobalObject>(G) && !G.isDeclaration())
         ValuesToLink.push_back(&G);
       GlobalValue *G2 = M->getNamedValue(G.getName());
       if (G2 && !G2->isDeclaration() && !G.isDeclaration()) {
