@@ -15,7 +15,7 @@
 #include <set>
 
 namespace {
-#include "mux_main.inc"
+#include "data/mux_main.inc"
 }
 
 using namespace bcdb;
@@ -100,7 +100,7 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
   std::vector<Constant *> Entries;
   for (auto Name : Names) {
     auto Base = sys::path::filename(Name);
-    Constant *EntryName = Builder.CreateGlobalStringPtr(Base);
+    Constant *EntryName = cast<Constant>(Builder.CreateGlobalStringPtr(Base));
     Constant *EntryMain = cast<Constant>(Mapping[std::make_pair(Name, "main")]);
     if (EntryMain->getType() != EntryType->getElementType(1))
       EntryMain =
