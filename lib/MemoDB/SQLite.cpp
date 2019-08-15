@@ -145,18 +145,15 @@ void sqlite_db::open(const char *path, bool create_if_missing) {
   assert(!db);
   int flags =
       SQLITE_OPEN_READWRITE | (create_if_missing ? SQLITE_OPEN_CREATE : 0);
-  //If db isn't created yet, create it with read/write access. Else, enable read/write access
   int rc = sqlite3_open_v2(path, &db, flags, /*zVfs*/ nullptr);
   if (rc != SQLITE_OK)
     fatal_error();
 
   rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL; PRAGMA synchronous = 1",
                     nullptr, nullptr, nullptr);
-  //Set journal mode to WAL and enable synchronous sync of disk operations
   // ignore return code
 
   rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
-  //Create tables using INIT statements defined above
   if (rc != SQLITE_OK)
     fatal_error();
 }
@@ -335,10 +332,9 @@ std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
   return std::move(db);
 }
 
-void sqlite_db::head_delete(llvm::StringRef name){
+void sqlite_db::head_delete(llvm::StringRef name) {
   Stmt delete_stmt(db, "DELETE FROM head WHERE name = ?1");
-  //Deletes the whole head record (row) with the matching name
   delete_stmt.bind_text(1, name);
-  if(delete_stmt.step() != SQLITE_DONE)
+  if (delete_stmt.step() != SQLITE_DONE)
     fatal_error();
 }
