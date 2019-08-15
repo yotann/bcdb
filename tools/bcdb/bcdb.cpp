@@ -83,6 +83,7 @@ static cl::SubCommand GetFunctionCommand("get-function", "Retrieve a function");
 static cl::SubCommand MeltCommand("melt",
                                   "Load all functions into a single module");
 static cl::SubCommand MergeCommand("merge", "Merge modules");
+static cl::SubCommand MuxCommand("mux", "Mux modules");
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
@@ -96,12 +97,13 @@ static cl::opt<std::string>
     GetOutputFilename("o", cl::desc("<output bitcode file>"), cl::init("-"),
                       cl::value_desc("filename"), cl::sub(GetCommand),
                       cl::sub(GetFunctionCommand), cl::sub(MeltCommand),
-                      cl::sub(MergeCommand));
+                      cl::sub(MergeCommand), cl::sub(MuxCommand));
 
 static cl::opt<bool> GetForce("f",
                               cl::desc("Enable binary output on terminals"),
                               cl::sub(GetCommand), cl::sub(GetFunctionCommand),
-                              cl::sub(MeltCommand), cl::sub(MergeCommand));
+                              cl::sub(MeltCommand), cl::sub(MergeCommand),
+                              cl::sub(MuxCommand));
 
 static Expected<bool> ShouldWriteModule() {
   std::error_code EC;
@@ -217,16 +219,31 @@ static int ListModules() {
 
 static cl::list<std::string> MergeNames(cl::Positional, cl::OneOrMore,
                                         cl::desc("<module names>"),
-                                        cl::sub(MergeCommand));
+                                        cl::sub(MergeCommand),
+                                        cl::sub(MuxCommand));
 
 static int Merge() {
   ExitOnError Err("bcdb merge: ");
+  if (!Err(ShouldWriteModule()))
+    return 0;
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
   std::map<std::pair<std::string, std::string>, Value *> Mapping;
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
   std::unique_ptr<Module> M = Err(db->Merge(Names, Mapping));
+  return WriteModule(*M);
+}
+
+static int Mux() {
+  ExitOnError Err("bcdb mux: ");
+  if (!Err(ShouldWriteModule()))
+    return 0;
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::vector<StringRef> Names;
+  for (auto &Name : MergeNames)
+    Names.push_back(Name);
+  std::unique_ptr<Module> M = Err(db->Mux(Names));
   return WriteModule(*M);
 }
 
@@ -256,6 +273,8 @@ int main(int argc, char **argv) {
     return Melt();
   } else if (MergeCommand) {
     return Merge();
+  } else if (MuxCommand) {
+    return Mux();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

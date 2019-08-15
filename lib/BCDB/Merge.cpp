@@ -166,9 +166,10 @@ public:
 namespace {
 class Merger {
 public:
-  Merger(BCDB &bcdb)
+  Merger(BCDB &bcdb,
+         std::map<std::pair<std::string, std::string>, Value *> &Mapping)
       : bcdb(bcdb), M(std::make_unique<Module>("muxed", bcdb.GetContext())),
-        Mover(*M) {}
+        Mover(*M), Mapping(Mapping) {}
   Error Add(StringRef Name);
   std::unique_ptr<Module> TakeModule() {
     for (GlobalObject &GO : M->global_objects())
@@ -181,6 +182,7 @@ private:
   BCDB &bcdb;
   std::unique_ptr<Module> M;
   IRMover Mover;
+  std::map<std::pair<std::string, std::string>, Value *> &Mapping;
   StringMap<GlobalValue::LinkageTypes> LinkageMap;
   std::set<Group> Groups;
   std::set<std::string> AssignedNames;
@@ -230,8 +232,6 @@ void Merger::ReplaceGlobal(StringRef Name, GlobalValue *New) {
 }
 
 void Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
-  // errs() << "making wrapper " << Name << " for function " << GV->getName()
-  //        << " in module " << GV->getParent() << "\n";
   Function *F = cast<Function>(GV);
   if (F->isVarArg()) {
     // No easy way to do this: https://stackoverflow.com/q/7015477
@@ -296,7 +296,6 @@ static void ApplyNewNames(Module &M,
 Expected<GlobalValue *>
 Merger::LoadID(StringRef ID, StringRef Name,
                std::map<std::string, std::string> &NewNames) {
-  // errs() << "Loading " << ID << "\n";
   auto MPartOrErr = bcdb.GetFunctionById(ID);
   if (!MPartOrErr)
     return MPartOrErr.takeError();
@@ -332,11 +331,11 @@ Merger::LoadID(StringRef ID, StringRef Name,
   return M->getNamedValue(Name);
 }
 
-Error Merger::Add(StringRef Name) {
-  errs() << "Adding " << Name << "\n";
+Error Merger::Add(StringRef ModuleName) {
+  errs() << "Adding " << ModuleName << "\n";
 
   std::map<std::string, std::string> PartIDs;
-  auto RemainderOrErr = bcdb.LoadParts(Name, PartIDs);
+  auto RemainderOrErr = bcdb.LoadParts(ModuleName, PartIDs);
   if (!RemainderOrErr)
     return RemainderOrErr.takeError();
   std::unique_ptr<Module> Remainder = std::move(*RemainderOrErr);
@@ -409,7 +408,8 @@ Error Merger::Add(StringRef Name) {
 
   // Make all globals external so function modules can link to them.
   for (GlobalObject &GO : Remainder->global_objects()) {
-    LinkageMap[NewNames[GO.getName()]] = GO.getLinkage();
+    auto NewName = NewNames[GO.getName()];
+    LinkageMap[NewName] = GO.getLinkage();
     GO.setLinkage(GlobalValue::ExternalLinkage);
   }
 
@@ -482,19 +482,25 @@ Error Merger::Add(StringRef Name) {
   if (Err)
     return std::move(Err);
 
+  for (auto &N : NewNames) {
+    if (LinkageMap[N.second] != GlobalValue::InternalLinkage &&
+        LinkageMap[N.second] != GlobalValue::PrivateLinkage) {
+      Mapping[std::make_pair(ModuleName, N.first)] = M->getNamedValue(N.second);
+    }
+  }
+
   return Error::success();
 }
 
 Expected<std::unique_ptr<Module>>
 BCDB::Merge(std::vector<StringRef> Names,
             std::map<std::pair<std::string, std::string>, Value *> &Mapping) {
-  Merger Merger(*this);
+  Merger Merger(*this, Mapping);
   for (StringRef Name : Names) {
     Error Err = Merger.Add(Name);
     if (Err)
       return std::move(Err);
   }
   auto M = Merger.TakeModule();
-  // errs() << *M;
   return std::move(M);
 }

@@ -41,6 +41,8 @@ public:
   llvm::Expected<std::unique_ptr<llvm::Module>>
   Merge(std::vector<llvm::StringRef> Names,
         std::map<std::pair<std::string, std::string>, llvm::Value *> &Mapping);
+  llvm::Expected<std::unique_ptr<llvm::Module>>
+  Mux(std::vector<llvm::StringRef> Names);
 
   llvm::Expected<std::unique_ptr<llvm::Module>>
   LoadParts(llvm::StringRef Name, std::map<std::string, std::string> &PartIDs);
