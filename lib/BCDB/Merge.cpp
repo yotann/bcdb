@@ -102,51 +102,45 @@ template <> struct llvm::GraphTraits<GlobalGraph *> {
 };
 GlobalSet llvm::GraphTraits<GlobalGraph *>::Empty;
 
-// - for each SCC:
-//   - make a structure of the element Names, element IDs/initializers, and the
-//   referent_name->group pairs (or just groups ordered by referent_name)
-//   - look up the structure in the group table
-//     - if it exists, redirect element Names -> group -> new Names
-//     - if it doesn't exist, add a new one and assign new Names
-// - import everything using the new Names
-//   - if group.Name already has a GV, just reuse that
-//   - if group.Name doesn't have a GV yet, we need to add one
-
 namespace {
+class Group;
+
 class Entry {
 public:
-  std::string Name;
   std::string Def;
   bool HasID;
-  mutable std::string NewName;
   mutable std::string NewID;
+  mutable StringMap<std::string> NewNames;
 
   bool operator<(const Entry &Other) const {
-    if (Name < Other.Name)
-      return true;
-    if (Name > Other.Name)
-      return false;
     if (Def < Other.Def)
       return true;
     if (Def > Other.Def)
       return false;
     return HasID < Other.HasID;
   }
+
+  bool operator==(const Entry &Other) const {
+    return Def == Other.Def && HasID == Other.HasID;
+  }
 };
 
 class Group {
 public:
   std::vector<Entry> Entries;
-  std::vector<const Group *> Refs;
+  std::vector<std::pair<std::string, const Entry *>> Refs;
 
-  void AddEntry(std::string Name, std::string Def, bool HasID) {
-    Entries.push_back({std::move(Name), std::move(Def), HasID, {}, {}});
+  void AddEntry(std::string Def, bool HasID) {
+    Entries.push_back({std::move(Def), HasID, {}});
   }
 
-  void AddRef(const Group *Ref) { Refs.push_back(Ref); }
+  void AddRef(StringRef Name, const Entry *Ref) {
+    Refs.emplace_back(Name, Ref);
+  }
 
   void Finish() {
     std::sort(Entries.begin(), Entries.end());
+    Entries.erase(std::unique(Entries.begin(), Entries.end()), Entries.end());
     std::sort(Refs.begin(), Refs.end());
     Refs.erase(std::unique(Refs.begin(), Refs.end()), Refs.end());
   }
@@ -159,20 +153,12 @@ public:
     return Refs < Other.Refs;
   }
 
-  StringRef GetNewName(StringRef Name) const {
+  const Entry *GetEntry(StringRef Def) const {
     for (const Entry &E : Entries) {
-      if (E.Name == Name)
-        return E.NewName;
+      if (E.Def == Def)
+        return &E;
     }
-    return ""; // FIXME
-  }
-
-  StringRef GetNewID(StringRef Name) const {
-    for (const Entry &E : Entries) {
-      if (E.Name == Name)
-        return E.NewID;
-    }
-    return ""; // FIXME
+    return nullptr;
   }
 };
 } // end anonymous namespace
@@ -205,25 +191,24 @@ private:
   void MakeWrapper(GlobalValue *GV, StringRef Name);
   void ReplaceGlobal(StringRef Name, GlobalValue *New);
   void AssignNewNames(const Group &Group);
+  std::string ReserveName(StringRef Prefix);
 };
 } // end anonymous namespace
 
+std::string Merger::ReserveName(StringRef Prefix) {
+  int i = 0;
+  std::string Result = Prefix;
+  while (AssignedNames.count(Result)) {
+    Result = (Prefix + "." + to_string(i++)).str();
+  }
+  AssignedNames.insert(Result);
+  return Result;
+}
+
 void Merger::AssignNewNames(const Group &Group) {
   for (const Entry &E : Group.Entries) {
-    int i = 0;
-    E.NewName = E.Name;
-    while (AssignedNames.count(E.NewName)) {
-      E.NewName = E.Name + "." + to_string(i++);
-    }
-    AssignedNames.insert(E.NewName);
-
     if (E.HasID) {
-      i = 0;
-      E.NewID = "__bcdb_id_" + E.Def;
-      while (AssignedNames.count(E.NewID)) {
-        E.NewID = "__bcdb_id_" + E.Def + "." + to_string(i++);
-      }
-      AssignedNames.insert(E.NewID);
+      E.NewID = ReserveName("__bcdb_id_" + E.Def);
     }
   }
 }
@@ -372,7 +357,7 @@ Error Merger::Add(StringRef Name) {
     Graph.Set(Remainder->getNamedValue(Name), std::move(*RefsOrErr));
   }
 
-  std::map<GlobalValue *, const Group *> LocalGroups;
+  std::map<GlobalValue *, const Entry *> LocalEntries;
   std::map<std::string, std::string> NewNames;
   for (auto &SCC : make_range(scc_begin(&Graph), scc_end(&Graph))) {
     Group G;
@@ -380,17 +365,16 @@ Error Merger::Add(StringRef Name) {
       GlobalValue *GV = X.second;
       if (GV) {
         std::string Def;
-        bool HasID;
+        bool HasID = false;
         if (PartIDs.count(GV->getName())) {
           Def = PartIDs[GV->getName()];
           HasID = true;
         } else if (!GV->isDeclaration()) {
           Def = to_string(*GV);
-          HasID = false;
         }
-        G.AddEntry(GV->getName(), std::move(Def), HasID);
+        G.AddEntry(std::move(Def), HasID);
         for (GlobalValue *Ref : Graph.G[GV]) {
-          G.AddRef(LocalGroups[Ref]);
+          G.AddRef(Ref->getName(), LocalEntries[Ref]);
         }
       }
     }
@@ -402,10 +386,21 @@ Error Merger::Add(StringRef Name) {
       for (auto &X : SCC) {
         GlobalValue *GV = X.second;
         if (GV) {
-          LocalGroups[GV] = &*I.first;
-          if (!GV->isDeclaration())
-            NewNames[GV->getName()] = I.first->GetNewName(GV->getName());
-          else
+          std::string Def;
+          if (PartIDs.count(GV->getName())) {
+            Def = PartIDs[GV->getName()];
+          } else if (!GV->isDeclaration()) {
+            Def = to_string(*GV);
+          }
+          auto Entry = I.first->GetEntry(Def);
+          LocalEntries[GV] = Entry;
+          if (!GV->isDeclaration()) {
+            auto &NewName = Entry->NewNames[GV->getName()];
+            if (NewName.empty()) {
+              NewName = ReserveName(GV->getName());
+            }
+            NewNames[GV->getName()] = NewName;
+          } else
             NewNames[GV->getName()] = GV->getName();
         }
       }
@@ -418,18 +413,13 @@ Error Merger::Add(StringRef Name) {
     GO.setLinkage(GlobalValue::ExternalLinkage);
   }
 
-  // FIXME: we're missing opportunities to deduplicate functions with different
-  // names
-
-  // need to figure out if this ID has already been added in a reusable way
-  // if not, store the ID somewhere
   for (const auto &item : PartIDs) {
     StringRef Name = item.first;
     StringRef ID = item.second;
 
-    const Group *G = LocalGroups[Remainder->getNamedValue(Name)];
-    auto NewName = G->GetNewName(Name);
-    auto NewID = G->GetNewID(Name);
+    const Entry *Entry = LocalEntries[Remainder->getNamedValue(Name)];
+    auto NewName = NewNames[Name];
+    auto NewID = Entry->NewID;
 
     errs() << Name << ' ' << ID << ' ' << NewName << ' ' << NewID << '\n';
 
