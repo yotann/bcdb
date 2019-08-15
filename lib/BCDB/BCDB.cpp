@@ -155,8 +155,7 @@ static void RenameAnonymousConstants(Module &M) {
       continue;
     if (!GV.hasInitializer())
       continue;
-    if (GV.getName() != "str" && GV.getName() != ".str" &&
-        !GV.getName().startswith(".str."))
+    if (GV.getName() != "str" && !GV.getName().contains('.'))
       continue;
 
     auto Hash = static_cast<size_t>(HashConstant(GV.getInitializer()));
