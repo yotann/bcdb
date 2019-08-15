@@ -153,9 +153,10 @@ static void RenameAnonymousConstants(Module &M) {
   for (GlobalVariable &GV : M.globals()) {
     if (!GV.hasPrivateLinkage())
       continue;
-    if (!GV.getName().startswith(".str."))
-      continue;
     if (!GV.hasInitializer())
+      continue;
+    if (GV.getName() != "str" && GV.getName() != ".str" &&
+        !GV.getName().startswith(".str."))
       continue;
 
     auto Hash = static_cast<size_t>(HashConstant(GV.getInitializer()));
@@ -163,7 +164,7 @@ static void RenameAnonymousConstants(Module &M) {
       continue;
     SmallString<64> TempStr(".sh.");
     raw_svector_ostream TmpStream(TempStr);
-    TmpStream << (Hash & 0xffff);
+    TmpStream << (Hash & 0xffffffff);
     GV.setName(TmpStream.str());
   }
 }
