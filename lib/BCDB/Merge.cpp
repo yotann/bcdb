@@ -7,6 +7,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/ModuleSlotTracker.h>
 #include <llvm/Linker/IRMover.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
@@ -358,6 +359,7 @@ Error Merger::Add(StringRef ModuleName) {
 
   std::map<GlobalValue *, const Entry *> LocalEntries;
   std::map<std::string, std::string> NewNames;
+  ModuleSlotTracker MST(Remainder.get());
   for (auto &SCC : make_range(scc_begin(&Graph), scc_end(&Graph))) {
     Group G;
     for (auto &X : SCC) {
@@ -369,7 +371,8 @@ Error Merger::Add(StringRef ModuleName) {
           Def = PartIDs[GV->getName()];
           HasID = true;
         } else if (!GV->isDeclaration()) {
-          Def = to_string(*GV);
+          raw_string_ostream os(Def);
+          GV->print(os, MST);
         }
         G.AddEntry(std::move(Def), HasID);
         for (GlobalValue *Ref : Graph.G[GV]) {
@@ -389,7 +392,8 @@ Error Merger::Add(StringRef ModuleName) {
           if (PartIDs.count(GV->getName())) {
             Def = PartIDs[GV->getName()];
           } else if (!GV->isDeclaration()) {
-            Def = to_string(*GV);
+            raw_string_ostream os(Def);
+            GV->print(os, MST);
           }
           auto Entry = I.first->GetEntry(Def);
           LocalEntries[GV] = Entry;
