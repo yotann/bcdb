@@ -33,8 +33,9 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
     if (auto GV = M->getNamedValue(Name))
       GV->setName("");
 
-  StringRef Buffer(reinterpret_cast<char*>(mux_main_bc), mux_main_bc_len);
-  auto MainModOrErr = parseBitcodeFile(MemoryBufferRef(Buffer, "main"), Context);
+  StringRef Buffer(reinterpret_cast<char *>(mux_main_bc), mux_main_bc_len);
+  auto MainModOrErr =
+      parseBitcodeFile(MemoryBufferRef(Buffer, "main"), Context);
   if (!MainModOrErr)
     return MainModOrErr.takeError();
   auto MainMod = std::move(*MainModOrErr);
@@ -45,8 +46,7 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
   for (auto &GO : MainMod->global_objects())
     if (!GO.isDeclaration())
       ValuesToLink.push_back(&GO);
-  if (Error Err = Mover.move(std::move(MainMod),
-                             ValuesToLink,
+  if (Error Err = Mover.move(std::move(MainMod), ValuesToLink,
                              [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
                              /* LinkModuleInlineAsm */ false,
@@ -99,6 +99,12 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
 
   std::vector<Constant *> Entries;
   for (auto Name : Names) {
+    if (!Mapping[std::make_pair(Name, "main")]) {
+      // FIXME actually call these
+      handleInitFini(Mapping[std::make_pair(Name, "llvm.global_ctors")]);
+      handleInitFini(Mapping[std::make_pair(Name, "llvm.global_dtors")]);
+      continue;
+    }
     auto Base = sys::path::filename(Name);
     Constant *EntryName = cast<Constant>(Builder.CreateGlobalStringPtr(Base));
     Constant *EntryMain = cast<Constant>(Mapping[std::make_pair(Name, "main")]);
