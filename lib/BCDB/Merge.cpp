@@ -191,7 +191,7 @@ private:
   Expected<GlobalValue *> LoadID(StringRef ID, StringRef Name,
                                  std::map<std::string, std::string> &NewNames);
   Expected<GlobalSet> LoadRefs(StringRef ID, Module &Remainder);
-  void MakeWrapper(GlobalValue *GV, StringRef Name);
+  Function *MakeWrapper(GlobalValue *GV, StringRef Name);
   void ReplaceGlobal(StringRef Name, GlobalValue *New);
   void AssignNewNames(const Group &Group);
   std::string ReserveName(StringRef Prefix);
@@ -232,14 +232,14 @@ void Merger::ReplaceGlobal(StringRef Name, GlobalValue *New) {
   }
 }
 
-void Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
+Function *Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
   Function *F = cast<Function>(GV);
   if (F->isVarArg()) {
     // No easy way to do this: https://stackoverflow.com/q/7015477
     ValueToValueMapTy VMap;
     Function *G = CloneFunction(F, VMap, /* CodeInfo */ nullptr);
     ReplaceGlobal(Name, G);
-    return;
+    return G;
   }
 
   // see llvm::MergeFunctions::writeThunk
@@ -264,6 +264,7 @@ void Merger::MakeWrapper(GlobalValue *GV, StringRef Name) {
   }
 
   ReplaceGlobal(Name, G);
+  return G;
 }
 
 Expected<GlobalSet> Merger::LoadRefs(StringRef ID, Module &Remainder) {
@@ -439,7 +440,14 @@ Error Merger::Add(StringRef ModuleName) {
       GV = *GVOrErr;
     }
 
-    MakeWrapper(GV, NewName);
+    Function *Def = MakeWrapper(GV, NewName);
+    Function *Stub = Remainder->getFunction(Name);
+    Def->copyAttributesFrom(Stub);
+    if (Stub->getComdat()) {
+      Comdat *CD = M->getOrInsertComdat(Stub->getComdat()->getName());
+      CD->setSelectionKind(Stub->getComdat()->getSelectionKind());
+      Def->setComdat(CD);
+    }
   }
 
   ApplyNewNames(*Remainder, NewNames);
