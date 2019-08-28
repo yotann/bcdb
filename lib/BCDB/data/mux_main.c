@@ -25,7 +25,7 @@ extern struct Main __bcdb_main;
 
 static void (**fini)(void);
 
-void do_fini(void) {
+static void do_fini(void) {
   void (**ptr)(void);
   ptr = fini;
   while (*ptr) {

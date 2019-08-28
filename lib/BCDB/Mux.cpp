@@ -5,6 +5,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Linker/IRMover.h>
+#include <llvm/Linker/Linker.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/Path.h>
@@ -45,18 +46,7 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
   auto MainMod = std::move(*MainModOrErr);
   MainMod->setTargetTriple("");
 
-  IRMover Mover(*M);
-  std::vector<GlobalValue *> ValuesToLink;
-  for (auto &GO : MainMod->global_objects())
-    if (!GO.isDeclaration())
-      ValuesToLink.push_back(&GO);
-  if (Error Err = Mover.move(std::move(MainMod), ValuesToLink,
-                             [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-#if LLVM_VERSION_MAJOR <= 4
-                             /* LinkModuleInlineAsm */ false,
-#endif
-                             /* IsPerformingImport */ false))
-    return std::move(Err);
+  Linker::linkModules(*M, std::move(MainMod));
 
   IRBuilder<> Builder(&M->getFunction("main")->front());
   GlobalVariable *StubMain = M->getGlobalVariable("__bcdb_main");
