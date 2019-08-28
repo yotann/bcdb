@@ -28,6 +28,10 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
     return MOrErr.takeError();
   auto M = std::move(*MOrErr);
 
+  for (auto &GV : M->global_objects())
+    if (!GV.isDeclaration())
+      GV.setLinkage(GlobalValue::InternalLinkage);
+
   for (auto &Name :
        {"main", "__bcdb_main", "llvm.global_ctors", "llvm.global_dtors"})
     if (auto GV = M->getNamedValue(Name))
