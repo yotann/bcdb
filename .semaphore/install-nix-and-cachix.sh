@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -eu
 
-PROFILE=/nix/var/nix/profiles/per-user/$USER/profile/etc/profile.d/nix.sh
+PROFILE=~/.nix-profile/etc/profile.d/nix.sh
 
 sudo chmod 777 / # Allow cache restore to create /nix
 cache restore nix-with-cachix
 if [ -d /nix ]; then
   # Restore Nix from cache.
-  . $PROFILE
+  mkdir ~/.nix-defexpr
+  ln -s /nix/var/nix/profiles/per-user/$USER/profile ~/.nix-profile
   ln -s /nix/var/nix/profiles/per-user/$USER/channels ~/.nix-defexpr/
+  . $PROFILE
 else
   # Install Nix and Cachix.
   bash <(curl https://nixos.org/nix/install)
