@@ -40,7 +40,7 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
 
   StringRef Buffer(reinterpret_cast<char *>(mux_main_bc), mux_main_bc_len);
   auto MainModOrErr =
-      parseBitcodeFile(MemoryBufferRef(Buffer, "main"), Context);
+      parseBitcodeFile(MemoryBufferRef(Buffer, "main"), *Context);
   if (!MainModOrErr)
     return MainModOrErr.takeError();
   auto MainMod = std::move(*MainModOrErr);
@@ -85,7 +85,7 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
     auto *G = new GlobalVariable(*M, CA->getType(), /* isConstant */ true,
                                  GlobalValue::PrivateLinkage, CA);
 
-    Constant *Zero = ConstantInt::get(Type::getInt32Ty(Context), 0);
+    Constant *Zero = ConstantInt::get(Type::getInt32Ty(*Context), 0);
     Constant *Indices[] = {Zero, Zero};
     return ConstantExpr::getInBoundsGetElementPtr(G->getValueType(), G,
                                                   Indices);
@@ -119,7 +119,7 @@ Expected<std::unique_ptr<Module>> BCDB::Mux(std::vector<StringRef> Names) {
   auto *GV = new GlobalVariable(*M, Array->getType(), /* isConstant */ true,
                                 GlobalValue::PrivateLinkage, Array);
 
-  Constant *Zero = ConstantInt::get(Type::getInt32Ty(Context), 0);
+  Constant *Zero = ConstantInt::get(Type::getInt32Ty(*Context), 0);
   Constant *Indices[] = {Zero, Zero};
   Constant *GEP =
       ConstantExpr::getInBoundsGetElementPtr(GV->getValueType(), GV, Indices);

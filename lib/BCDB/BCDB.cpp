@@ -36,7 +36,8 @@ Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef uri) {
   return std::make_unique<BCDB>(std::move(*db));
 }
 
-BCDB::BCDB(std::unique_ptr<memodb_db> db) : db(std::move(db)) {}
+BCDB::BCDB(std::unique_ptr<memodb_db> db)
+    : Context(new LLVMContext()), db(std::move(db)) {}
 
 BCDB::~BCDB() {}
 
@@ -231,7 +232,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
     return make_error<StringError>("could not look up parts of module",
                                    inconvertibleErrorCode());
 
-  auto Remainder = LoadModuleFromValue(db.get(), remainder, Name, Context);
+  auto Remainder = LoadModuleFromValue(db.get(), remainder, Name, *Context);
   if (!Remainder)
     return Remainder.takeError();
 
@@ -256,7 +257,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
   auto value = db->get_value_by_id(Id);
-  return LoadModuleFromValue(db.get(), value.get(), Id, Context);
+  return LoadModuleFromValue(db.get(), value.get(), Id, *Context);
 }
 
 namespace {
@@ -302,6 +303,6 @@ Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
   if (!value)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
-  BCDBSplitLoader Loader(Context, db.get(), value);
+  BCDBSplitLoader Loader(*Context, db.get(), value);
   return JoinModule(Loader);
 }

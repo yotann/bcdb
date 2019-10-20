@@ -19,7 +19,7 @@ class StringRef;
 namespace bcdb {
 
 class BCDB {
-  llvm::LLVMContext Context;
+  std::unique_ptr<llvm::LLVMContext> Context;
   std::unique_ptr<memodb_db> db;
 
 public:
@@ -36,7 +36,12 @@ public:
   llvm::Expected<std::vector<std::string>>
   ListFunctionsInModule(llvm::StringRef Name);
   llvm::Expected<std::vector<std::string>> ListAllFunctions();
-  llvm::LLVMContext &GetContext() { return Context; }
+  llvm::LLVMContext &GetContext() { return *Context; }
+
+  /// Reset the LLVMContext. This can help reduce memory usage. The caller must
+  // guarantee that nothing is using the old context.
+  void ResetContext() { Context = std::make_unique<llvm::LLVMContext>(); }
+
   llvm::Error Delete(llvm::StringRef Name);
   llvm::Expected<std::unique_ptr<llvm::Module>>
   Merge(std::vector<llvm::StringRef> Names,
