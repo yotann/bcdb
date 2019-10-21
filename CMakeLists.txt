@@ -84,7 +84,7 @@ include_directories(${LLVM_INCLUDE_DIR})
 # LLVM started using PRIVATE in version 6. We must use it when LLVM does for
 # compatibility.
 function(tool_link_libraries binary)
-  if( ${LLVM_VERSION_MAJOR} GREATER_EQUAL 6 )
+  if( ${LLVM_VERSION_MAJOR} GREATER 5 )
     target_link_libraries(${binary}
       PRIVATE
       ${ARGN}

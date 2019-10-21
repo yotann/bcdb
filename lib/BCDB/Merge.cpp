@@ -72,7 +72,9 @@ public:
 
 // TODO: this is a horrible mess because we need to keep the GlobalGraph*
 // around as part of NodeRef.
-template <> struct llvm::GraphTraits<GlobalGraph *> {
+namespace llvm {
+
+template <> struct GraphTraits<GlobalGraph *> {
   static GlobalSet Empty;
   using NodeRef = std::pair<GlobalGraph *, GlobalValue *>;
   struct ChildIteratorType {
@@ -101,7 +103,9 @@ template <> struct llvm::GraphTraits<GlobalGraph *> {
       return {N.first, Empty.end()};
   }
 };
-GlobalSet llvm::GraphTraits<GlobalGraph *>::Empty;
+GlobalSet GraphTraits<GlobalGraph *>::Empty;
+
+} // end namespace llvm
 
 namespace {
 class Group;
