@@ -136,7 +136,7 @@ public:
   std::vector<std::pair<std::string, const Entry *>> Refs;
 
   void AddEntry(std::string Def, bool HasID) {
-    Entries.push_back({std::move(Def), HasID, {}});
+    Entries.push_back({std::move(Def), HasID, {}, {}});
   }
 
   void AddRef(StringRef Name, const Entry *Ref) {
@@ -496,7 +496,7 @@ Error Merger::Add(StringRef ModuleName) {
 #endif
                          /* IsPerformingImport */ false);
   if (Err)
-    return std::move(Err);
+    return Err;
 
   for (auto &N : NewNames) {
     if (LinkageMap[N.second] != GlobalValue::InternalLinkage &&
