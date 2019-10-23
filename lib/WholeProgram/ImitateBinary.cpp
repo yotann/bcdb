@@ -24,6 +24,7 @@ static bool ImitateELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
     return Err(ELF.getELFFile()->toMappedAddr(VAddr));
   };
 #else
+  // based on old versions of llvm/tools/llvm-readobj/ELFDumper.cpp
   using Elf_Dyn = typename ELFFile<ELFT>::Elf_Dyn;
   using Elf_Phdr = typename ELFFile<ELFT>::Elf_Phdr;
   ArrayRef<Elf_Dyn> DynamicEntries;
@@ -40,8 +41,11 @@ static bool ImitateELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
     }
   }
   auto toMappedAddr = [&](uint64_t VAddr) -> const uint8_t * {
-    const Elf_Phdr *const *I = std::upper_bound(
-        LoadSegments.begin(), LoadSegments.end(), VAddr, compareAddr<ELFT>);
+    const Elf_Phdr *const *I =
+        std::upper_bound(LoadSegments.begin(), LoadSegments.end(), VAddr,
+                         [](uint64_t VAddr, const Elf_Phdr_Impl<ELFT> *Phdr) {
+                           return VAddr < Phdr->p_vaddr;
+                         });
     if (I == LoadSegments.begin())
       report_fatal_error("Virtual address is not in any segment");
     --I;

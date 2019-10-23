@@ -9,6 +9,7 @@
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Object/Binary.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
