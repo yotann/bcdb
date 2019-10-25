@@ -28,4 +28,5 @@ blocks:
                 - bcdb-llvm6
                 - bcdb-llvm7
                 - bcdb-llvm8
+                - bcdb-llvm9
                 - bcdb-clang

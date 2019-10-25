@@ -25,6 +25,10 @@
 using namespace bcdb;
 using namespace llvm;
 
+#if LLVM_VERSION_MAJOR < 5
+using AttributeList = AttributeSet;
+#endif
+
 namespace {
 /// Remaps types and replaces unneeded named structs with opaque structs.
 ///
@@ -266,8 +270,28 @@ public:
   DeclMaterializer(Module &DM, NeededTypeMap &TypeMap)
       : DM(DM), TypeMap(TypeMap) {}
   Value *materialize(Value *V) override;
+  AttributeList mapAttributeTypes(AttributeList Attrs);
 };
 } // end anonymous namespace
+
+AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
+#if LLVM_VERSION_MAJOR >= 9
+  // See LLVM's IRLinker::mapAttributeTypes().
+  for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
+    if (Attrs.hasAttribute(i, Attribute::ByVal)) {
+      Type *Ty = Attrs.getAttribute(i, Attribute::ByVal).getValueAsType();
+      if (!Ty)
+        continue;
+
+      Attrs = Attrs.removeAttribute(DM.getContext(), i, Attribute::ByVal);
+      Attrs = Attrs.addAttribute(
+          DM.getContext(), i,
+          Attribute::getWithByValType(DM.getContext(), TypeMap.get(Ty)));
+    }
+  }
+#endif
+  return Attrs;
+}
 
 Value *DeclMaterializer::materialize(Value *V) {
   // See LLVM's IRLinker::copyGlobalValueProto().
@@ -293,6 +317,7 @@ Value *DeclMaterializer::materialize(Value *V) {
 #endif
                                 SF->getName(), &DM);
     DF->copyAttributesFrom(SF);
+    DF->setAttributes(mapAttributeTypes(DF->getAttributes()));
     NewGV = DF;
   } else if (SGV->getValueType()->isFunctionTy()) {
     NewGV =
@@ -355,6 +380,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
 
   NeededTypeMap TypeMap;
   TypeMap.VisitFunction(SF);
+  DeclMaterializer Materializer(*MPart, TypeMap);
 
   // We can't handle blockaddress values in splitted functions.
   if (TypeMap.didVisitAnyBlockAddress())
@@ -373,6 +399,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   // Copy attributes.
   // Calling convention, GC, and alignment are kept on both functions.
   CopyFunctionAttributesExceptSection(DF, &SF);
+  DF->setAttributes(Materializer.mapAttributeTypes(DF->getAttributes()));
   // Personality, prefix, and prologue are only kept on the full function.
   SF.setPersonalityFn(nullptr);
   SF.setPrefixData(nullptr);
@@ -394,7 +421,6 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   // Remap all values used within the function.
   ValueToValueMapTy VMap;
   VMap[&SF] = DF; // Map recursive calls to recursive calls.
-  DeclMaterializer Materializer(*MPart, TypeMap);
   RemapFunction(*DF, VMap, RemapFlags::RF_IgnoreMissingLocals, &TypeMap,
                 &Materializer);
 

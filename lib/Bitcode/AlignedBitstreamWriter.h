@@ -20,7 +20,11 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#if LLVM_VERSION_MAJOR >= 9
+#include "llvm/Bitstream/BitCodes.h"
+#else
 #include "llvm/Bitcode/BitCodes.h"
+#endif
 #include "llvm/Support/Endian.h"
 #include <vector>
 

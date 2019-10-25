@@ -473,8 +473,15 @@ Error Merger::Add(StringRef ModuleName) {
     if (auto GV = dyn_cast<GlobalValue>(A.getAliasee()->stripPointerCasts())) {
       Constant *GV2;
       if (GV->getValueType()->isFunctionTy()) {
+#if LLVM_VERSION_MAJOR >= 9
+        GV2 = cast<Constant>(
+            M->getOrInsertFunction(GV->getName(),
+                                   cast<FunctionType>(GV->getValueType()))
+                .getCallee());
+#else
         GV2 = M->getOrInsertFunction(GV->getName(),
                                      cast<FunctionType>(GV->getValueType()));
+#endif
       } else {
         GV2 = M->getOrInsertGlobal(GV->getName(), GV->getValueType());
       }

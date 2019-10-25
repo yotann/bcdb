@@ -17,7 +17,11 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
+#if LLVM_VERSION_MAJOR >= 9
+#include "llvm/Bitstream/BitCodes.h"
+#else
 #include "llvm/Bitcode/BitCodes.h"
+#endif
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
