@@ -1,0 +1,4 @@
+; REQUIRES: llvm9
+; RUN: llvm-dis < %p/Inputs/compatibility-9.0.ll.bc            > %t1
+; RUN: bc-align < %p/Inputs/compatibility-9.0.ll.bc | llvm-dis > %t2
+; RUN: diff %t1 %t2
