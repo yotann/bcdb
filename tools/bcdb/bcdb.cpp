@@ -1,4 +1,5 @@
 #include "bcdb/BCDB.h"
+#include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
 
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -19,10 +20,6 @@
 
 using namespace bcdb;
 using namespace llvm;
-
-#if LLVM_VERSION_MAJOR <= 5
-using ToolOutputFile = tool_output_file;
-#endif
 
 static cl::opt<std::string> Uri("uri", cl::Required,
                                 cl::desc("URI of the database"),
@@ -123,11 +120,7 @@ static int WriteModule(Module &M) {
     return 1;
   }
   if (GetForce || !CheckBitcodeOutputToConsole(Out.os(), true)) {
-#if LLVM_VERSION_MAJOR >= 7
     WriteBitcodeToFile(M, Out.os());
-#else
-    WriteBitcodeToFile(&M, Out.os());
-#endif
     Out.keep();
   }
   return 0;

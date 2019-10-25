@@ -14,13 +14,10 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "bcdb/AlignBitcode.h"
+#include "bcdb/LLVMCompat.h"
 
 using namespace bcdb;
 using namespace llvm;
-
-#if LLVM_VERSION_MAJOR <= 5
-using ToolOutputFile = tool_output_file;
-#endif
 
 static cl::opt<std::string>
     InputFilename(cl::Positional, cl::desc("<input bitcode>"), cl::init("-"));

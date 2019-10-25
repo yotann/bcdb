@@ -17,15 +17,12 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "bcdb/LLVMCompat.h"
 #include "bcdb/WholeProgram.h"
 
 using namespace bcdb;
 using namespace llvm;
 using namespace llvm::object;
-
-#if LLVM_VERSION_MAJOR <= 5
-using ToolOutputFile = tool_output_file;
-#endif
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
@@ -73,11 +70,7 @@ int main(int argc, const char **argv) {
     return 1;
   }
   if (Force || !CheckBitcodeOutputToConsole(Out.os(), true)) {
-#if LLVM_VERSION_MAJOR >= 7
     WriteBitcodeToFile(*M, Out.os());
-#else
-    WriteBitcodeToFile(M.get(), Out.os());
-#endif
     Out.keep();
   }
 

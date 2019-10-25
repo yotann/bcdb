@@ -15,14 +15,11 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
 
 using namespace bcdb;
 using namespace llvm;
-
-#if LLVM_VERSION_MAJOR <= 5
-using ToolOutputFile = tool_output_file;
-#endif
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
@@ -73,11 +70,7 @@ private:
     if (verifyModule(MPart, &errs()))
       return make_error<StringError>("could not verify module part",
                                      inconvertibleErrorCode());
-#if LLVM_VERSION_MAJOR >= 7
     WriteBitcodeToFile(MPart, Out.os());
-#else
-    WriteBitcodeToFile(&MPart, Out.os());
-#endif
     Out.keep();
     return Error::success();
   }
