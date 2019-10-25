@@ -38,12 +38,12 @@ Error bcdb::Melter::Merge(std::unique_ptr<Module> MPart) {
       Def = &F;
     }
   }
-  return Mover.move(std::move(MPart), {Def},
-                    [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+  return Mover.move(
+      std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
-                    /* LinkModuleInlineAsm */ false,
+      /* LinkModuleInlineAsm */ false,
 #endif
-                    /* IsPerformingImport */ false);
+      /* IsPerformingImport */ false);
 }
 
 Module &Melter::GetModule() { return *M; }
@@ -100,12 +100,13 @@ Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
     Def->setComdat(Stub->getComdat());
 
     // Move the definition into the main module.
-    if (Error Err = Mover.move(std::move(MPart), {Def},
-                               [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+    if (Error Err = Mover.move(
+            std::move(MPart), {Def},
+            [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
-                               /* LinkModuleInlineAsm */ false,
+            /* LinkModuleInlineAsm */ false,
 #endif
-                               /* IsPerformingImport */ false))
+            /* IsPerformingImport */ false))
       return std::move(Err);
     assert(M->getFunction(Name) != Stub && "stub was not replaced");
     OutFunctions.push_back(M->getFunction(Name));

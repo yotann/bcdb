@@ -325,12 +325,13 @@ Merger::LoadID(StringRef ID, StringRef Name,
   Def->setName(Name);
 
   // Move the definition into the main module.
-  if (Error Err = Mover.move(std::move(MPart), {Def},
-                             [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+  if (Error Err = Mover.move(
+          std::move(MPart), {Def},
+          [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
-                             /* LinkModuleInlineAsm */ false,
+          /* LinkModuleInlineAsm */ false,
 #endif
-                             /* IsPerformingImport */ false))
+          /* IsPerformingImport */ false))
     return std::move(Err);
 
   LinkageMap[Name] = GlobalValue::InternalLinkage;
@@ -496,12 +497,13 @@ Error Merger::Add(StringRef ModuleName) {
     }
   }
 
-  Error Err = Mover.move(std::move(Remainder), ValuesToLink,
-                         [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+  Error Err = Mover.move(
+      std::move(Remainder), ValuesToLink,
+      [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
-                         /* LinkModuleInlineAsm */ false,
+      /* LinkModuleInlineAsm */ false,
 #endif
-                         /* IsPerformingImport */ false);
+      /* IsPerformingImport */ false);
   if (Err)
     return Err;
 
