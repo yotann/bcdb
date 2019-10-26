@@ -81,6 +81,7 @@ static cl::SubCommand MeltCommand("melt",
                                   "Load all functions into a single module");
 static cl::SubCommand MergeCommand("merge", "Merge modules");
 static cl::SubCommand MuxCommand("mux", "Mux modules");
+static cl::SubCommand Mux2Command("mux2", "Mux modules (separate-ELF version)");
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
@@ -213,7 +214,8 @@ static int ListModules() {
 static cl::list<std::string> MergeNames(cl::Positional, cl::OneOrMore,
                                         cl::desc("<module names>"),
                                         cl::sub(MergeCommand),
-                                        cl::sub(MuxCommand));
+                                        cl::sub(MuxCommand),
+                                        cl::sub(Mux2Command));
 
 static int Merge() {
   ExitOnError Err("bcdb merge: ");
@@ -238,6 +240,18 @@ static int Mux() {
     Names.push_back(Name);
   std::unique_ptr<Module> M = Err(db->Mux(Names));
   return WriteModule(*M);
+}
+
+static int Mux2() {
+  ExitOnError Err("bcdb mux2: ");
+  if (!Err(ShouldWriteModule()))
+    return 0;
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
+  std::vector<StringRef> Names;
+  for (auto &Name : MergeNames)
+    Names.push_back(Name);
+  db->Mux2(Names);
+  return 0;
 }
 
 // main
@@ -268,6 +282,8 @@ int main(int argc, char **argv) {
     return Merge();
   } else if (MuxCommand) {
     return Mux();
+  } else if (Mux2Command) {
+    return Mux2();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;
