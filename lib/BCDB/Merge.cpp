@@ -165,7 +165,6 @@ void Merger::ReplaceGlobal(Module &M, StringRef Name, GlobalValue *New) {
   New->setName(Name);
   GlobalValue *Old = M.getNamedValue(Name);
   if (Old != New) {
-    assert(Old->isDeclaration());
     // We might need a cast if the old declaration had an opaque pointer where
     // the new definition has a struct pointer, or vice versa.
     Old->replaceAllUsesWith(
@@ -359,9 +358,8 @@ std::unique_ptr<Module> Merger::Finish(
 
     std::vector<GlobalItem *> GIs;
     std::map<std::string, ResolvedReference> Refs;
-    // FIXME: aliases
-    // FIXME: ifuncs
-    for (auto &GV : M->global_objects()) {
+    for (auto &GV :
+         concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
       if (!GV.isDeclaration()) {
         GlobalItem &GI = GlobalItems[&GV];
         if (GI.PartID.empty()) {

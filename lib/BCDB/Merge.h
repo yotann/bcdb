@@ -78,13 +78,11 @@ protected:
   BCDB &bcdb;
   StringMap<std::unique_ptr<Module>> ModRemainders;
   StringMap<StringSet<>> ModRefs;
-
-private:
-  friend class MergerGlobalGraph;
-
   DenseMap<GlobalValue *, GlobalItem> GlobalItems;
   DenseMap<GlobalValue *, GlobalValue::LinkageTypes> LinkageMap;
   StringSet<> ReservedNames;
+
+  friend class MergerGlobalGraph;
 };
 
 } // end namespace bcdb
