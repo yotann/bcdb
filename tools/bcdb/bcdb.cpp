@@ -103,27 +103,32 @@ static cl::opt<bool> GetForce("f",
                               cl::sub(MeltCommand), cl::sub(MergeCommand),
                               cl::sub(MuxCommand));
 
+static std::unique_ptr<ToolOutputFile> OutputFile;
+
 static Expected<bool> ShouldWriteModule() {
+  if (OutputFile)
+    return true;
   std::error_code EC;
-  ToolOutputFile Out(GetOutputFilename, EC, sys::fs::F_None);
+  OutputFile =
+      std::make_unique<ToolOutputFile>(GetOutputFilename, EC, sys::fs::F_None);
   if (EC)
     return errorCodeToError(EC);
-  return GetForce || !CheckBitcodeOutputToConsole(Out.os(), true);
+  if (GetForce || !CheckBitcodeOutputToConsole(OutputFile->os(), true))
+    return true;
+  OutputFile.reset();
+  return false;
 }
 
 static int WriteModule(Module &M) {
   ExitOnError Err("module write: ");
-  std::error_code EC;
-  ToolOutputFile Out(GetOutputFilename, EC, sys::fs::F_None);
-  Err(errorCodeToError(EC));
-
   if (verifyModule(M, &errs())) {
     return 1;
   }
-  if (GetForce || !CheckBitcodeOutputToConsole(Out.os(), true)) {
-    WriteBitcodeToFile(M, Out.os());
-    Out.keep();
+  if (Err(ShouldWriteModule())) {
+    WriteBitcodeToFile(M, OutputFile->os());
+    OutputFile->keep();
   }
+  OutputFile.reset();
   return 0;
 }
 
