@@ -2,6 +2,7 @@
 #define BCDB_LLVMCOMPAT_H
 
 #include <llvm/Config/llvm-config.h>
+#include <llvm/Support/Compiler.h>
 
 #if LLVM_VERSION_MAJOR < 6
 namespace llvm {
@@ -12,8 +13,15 @@ using ToolOutputFile = tool_output_file;
 
 #if LLVM_VERSION_MAJOR < 7
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/Transforms/Utils/Cloning.h>
 namespace llvm {
-void WriteBitcodeToFile(const Module &M, raw_ostream &Out) {
+static std::unique_ptr<Module>
+    LLVM_ATTRIBUTE_UNUSED CloneModule(const Module &M) {
+  ValueToValueMapTy VMap;
+  return CloneModule(&M, VMap);
+}
+static void LLVM_ATTRIBUTE_UNUSED WriteBitcodeToFile(const Module &M,
+                                                     raw_ostream &Out) {
   WriteBitcodeToFile(&M, Out);
 }
 } // end namespace llvm

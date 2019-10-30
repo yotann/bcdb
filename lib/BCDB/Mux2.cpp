@@ -18,6 +18,7 @@
 #include <set>
 
 #include "Merge.h"
+#include "bcdb/LLVMCompat.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -49,7 +50,7 @@ void Mux2Merger::PrepareToRename() {
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
     ValueToValueMapTy VMap;
-    std::unique_ptr<Module> M = CloneModule(*Item.second, VMap);
+    std::unique_ptr<Module> M = CloneModule(*Item.second);
     // Make all definitions internal by default, since the actual definition
     // will probably be in the merged module. That will be changed in
     // LoadRemainder if necessary.
