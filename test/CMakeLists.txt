@@ -20,6 +20,7 @@ endif()
 
 add_subdirectory(Align)
 add_subdirectory(BCDB)
+add_subdirectory(Merge)
 add_subdirectory(Split)
 
 # Now that we've added all test suites, define the combined "make check"
