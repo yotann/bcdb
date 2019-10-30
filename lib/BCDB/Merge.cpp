@@ -25,6 +25,9 @@
 using namespace bcdb;
 using namespace llvm;
 
+static cl::opt<bool> WriteGlobalGraph("write-global-graph",
+                                      cl::sub(*cl::AllSubCommands));
+
 static StringSet<> FindGlobalReferences(GlobalValue *Root) {
   StringSet<> Result;
   SmallVector<Value *, 8> Todo;
@@ -63,7 +66,6 @@ void Merger::AddModule(StringRef ModuleName) {
   Remainder = Err(bcdb.LoadParts(ModuleName, PartIDs));
 
   // Find all references to globals.
-  auto &ThisModRefs = ModRefs[ModuleName];
   for (const auto &item : PartIDs) {
     GlobalValue *GV = Remainder->getNamedValue(item.first);
     GlobalItems[GV].PartID = item.second;
@@ -80,13 +82,7 @@ void Merger::AddModule(StringRef ModuleName) {
         GlobalItems[&GV].Refs[ref.first()] = ResolvedReference();
     GlobalItems[&GV].ModuleName = ModuleName;
     GlobalItems[&GV].Name = GV.getName();
-    for (const auto &item : GlobalItems[&GV].Refs)
-      ThisModRefs.insert(item.first);
   }
-
-  errs() << "loading module " << ModuleName << ":\n";
-  for (const auto &ref : ThisModRefs)
-    errs() << "- refs " << ref.first() << "\n";
 }
 
 // Given the ID of a single function definition, find all global names
@@ -337,21 +333,13 @@ void Merger::RenameEverything() {
         Item->NewName = ReserveName(Item->Name);
     }
   }
-  WriteGraph(&Graph, "merger_global_graph");
+  if (WriteGlobalGraph)
+    WriteGraph(&Graph, "merger_global_graph");
 }
 
 std::unique_ptr<Module> Merger::Finish(
     std::map<std::pair<std::string, std::string>, Value *> &Mapping) {
   auto MergedModule = std::make_unique<Module>("merged", bcdb.GetContext());
-  for (auto &GII : GlobalItems) {
-    GlobalValue *GV = GII.first;
-    GlobalItem &GI = GII.second;
-    if (!GI.PartID.empty()) {
-      GlobalValue *Def = LoadPartDefinition(*MergedModule, GI);
-      AddPartStub(*MergedModule, GI, Def, GV);
-    }
-  }
-
   for (auto &MR : ModRemainders) {
     StringRef ModuleName = MR.first();
     std::unique_ptr<Module> &M = MR.second;
@@ -362,7 +350,10 @@ std::unique_ptr<Module> Merger::Finish(
          concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
       if (!GV.isDeclaration()) {
         GlobalItem &GI = GlobalItems[&GV];
-        if (GI.PartID.empty()) {
+        if (!GI.PartID.empty()) {
+          GlobalValue *Def = LoadPartDefinition(*MergedModule, GI);
+          AddPartStub(*MergedModule, GI, Def, &GV);
+        } else {
           // FIXME: what if refs to a definition in the remainder are resolved
           // to something else?
           Refs[GV.getName()] = ResolvedReference(ModuleName, GV.getName());
