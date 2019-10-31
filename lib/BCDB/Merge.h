@@ -63,7 +63,7 @@ protected:
 
   BCDB &bcdb;
   StringMap<std::unique_ptr<Module>> ModRemainders;
-  DenseMap<GlobalValue *, GlobalItem> GlobalItems;
+  std::map<GlobalValue *, GlobalItem> GlobalItems;
   DenseMap<GlobalValue *, GlobalValue::LinkageTypes> LinkageMap;
   StringSet<> ReservedNames;
 

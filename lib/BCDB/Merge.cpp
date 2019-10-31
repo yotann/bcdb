@@ -222,9 +222,12 @@ void Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
   for (GlobalItem *GI : GIs) {
     GlobalValue *GV = M->getNamedValue(GI->NewName);
     NameLinkageMap[GI->NewName] = GV->getLinkage();
-    GV->setLinkage(GlobalValue::ExternalLinkage);
     ValuesToLink.push_back(GV);
   }
+
+  // Prevent local symbols from being renamed.
+  for (GlobalValue &GV : M->global_objects())
+    GV.setLinkage(GlobalValue::ExternalLinkage);
 
   IRMover Mover(MergedModule); // TODO: don't recreate every time
   Err(Mover.move(
