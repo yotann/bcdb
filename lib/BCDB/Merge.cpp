@@ -218,15 +218,12 @@ void Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
                            std::vector<GlobalItem *> &GIs) {
   ExitOnError Err("Merger::LoadRemainder: ");
 
-  // Make all globals external so function modules can link to them.
-  for (GlobalObject &GO : M->global_objects()) {
-    LinkageMap[&GO] = GO.getLinkage();
-    GO.setLinkage(GlobalValue::ExternalLinkage);
-  }
-
+  StringMap<GlobalValue::LinkageTypes> NameLinkageMap;
   std::vector<GlobalValue *> ValuesToLink;
   for (GlobalItem *GI : GIs) {
     GlobalValue *GV = M->getNamedValue(GI->NewName);
+    NameLinkageMap[GI->NewName] = GV->getLinkage();
+    GV->setLinkage(GlobalValue::ExternalLinkage);
     ValuesToLink.push_back(GV);
   }
 
@@ -238,6 +235,9 @@ void Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
       /* LinkModuleInlineAsm */ false,
 #endif
       /* IsPerformingImport */ false));
+
+  for (auto &Item : NameLinkageMap)
+    LinkageMap[MergedModule.getNamedValue(Item.first())] = Item.second;
 }
 
 namespace bcdb {
