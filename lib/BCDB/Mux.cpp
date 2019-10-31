@@ -86,6 +86,7 @@ Constant *MuxMerger::HandleInitFini(Module &M, GlobalItem *GI) {
       F = ConstantExpr::getPointerCast(F, InitType);
     Fns.push_back(F);
   }
+  Fns.push_back(ConstantPointerNull::get(InitType));
   auto CA = ConstantArray::get(ArrayType::get(InitType, Fns.size()), Fns);
   auto *G = new GlobalVariable(M, CA->getType(), /* isConstant */ true,
                                GlobalValue::PrivateLinkage, CA);
