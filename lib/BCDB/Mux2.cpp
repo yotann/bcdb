@@ -115,8 +115,7 @@ void BCDB::Mux2(std::vector<StringRef> Names) {
   }
   Merger.PrepareToRename();
   Merger.RenameEverything();
-  std::map<std::pair<std::string, std::string>, Value *> Mapping;
-  errs() << *Merger.Finish(Mapping);
+  errs() << *Merger.Finish();
   for (auto &Item : Merger.StubModules) {
     errs() << *Item.second;
   }

@@ -345,8 +345,7 @@ void Merger::RenameEverything() {
     WriteGraph(&Graph, "merger_global_graph");
 }
 
-std::unique_ptr<Module> Merger::Finish(
-    std::map<std::pair<std::string, std::string>, Value *> &Mapping) {
+std::unique_ptr<Module> Merger::Finish() {
   auto MergedModule = std::make_unique<Module>("merged", bcdb.GetContext());
   for (auto &MR : ModRemainders) {
     StringRef ModuleName = MR.first();
@@ -379,8 +378,6 @@ std::unique_ptr<Module> Merger::Finish(
   for (auto Item : LinkageMap)
     Item.first->setLinkage(Item.second);
 
-  // FIXME: fill Mapping
-
   return MergedModule;
 }
 
@@ -403,12 +400,11 @@ ResolvedReference Merger::Resolve(StringRef ModuleName, StringRef Name) {
 }
 
 Expected<std::unique_ptr<Module>>
-BCDB::Merge(std::vector<StringRef> Names,
-            std::map<std::pair<std::string, std::string>, Value *> &Mapping) {
+BCDB::Merge(const std::vector<StringRef> &Names) {
   Merger Merger(*this);
   for (StringRef Name : Names) {
     Merger.AddModule(Name);
   }
   Merger.RenameEverything();
-  return Merger.Finish(Mapping);
+  return Merger.Finish();
 }

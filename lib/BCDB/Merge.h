@@ -47,8 +47,7 @@ public:
   virtual ~Merger() {}
   void AddModule(StringRef Name);
   void RenameEverything();
-  std::unique_ptr<Module>
-  Finish(std::map<std::pair<std::string, std::string>, Value *> &Mapping);
+  std::unique_ptr<Module> Finish();
 
   std::string ReserveName(StringRef Prefix);
   virtual ResolvedReference Resolve(StringRef ModuleName, StringRef Name);

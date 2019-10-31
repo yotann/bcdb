@@ -227,11 +227,10 @@ static int Merge() {
   if (!Err(ShouldWriteModule()))
     return 0;
   std::unique_ptr<BCDB> db = Err(BCDB::Open(Uri));
-  std::map<std::pair<std::string, std::string>, Value *> Mapping;
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
-  std::unique_ptr<Module> M = Err(db->Merge(Names, Mapping));
+  std::unique_ptr<Module> M = Err(db->Merge(Names));
   return WriteModule(*M);
 }
 

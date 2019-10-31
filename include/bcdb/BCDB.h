@@ -44,11 +44,9 @@ public:
 
   llvm::Error Delete(llvm::StringRef Name);
   llvm::Expected<std::unique_ptr<llvm::Module>>
-  Merge(std::vector<llvm::StringRef> Names,
-        std::map<std::pair<std::string, std::string>, llvm::Value *> &Mapping);
+  Merge(const std::vector<llvm::StringRef> &Names);
   llvm::Expected<std::unique_ptr<llvm::Module>>
   Mux(std::vector<llvm::StringRef> Names);
-
   void Mux2(std::vector<llvm::StringRef> Names);
 
   llvm::Expected<std::unique_ptr<llvm::Module>>
