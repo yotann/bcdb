@@ -142,6 +142,14 @@ GlobalValue *Merger::LoadPartDefinition(Module &MergedModule, GlobalItem &GI) {
   ApplyNewNames(*MPart, GI.Refs);
   Def->setName(GI.NewDefName);
   assert(Def->getName() == GI.NewDefName);
+  if (!Def->use_empty()) {
+    // If the function takes its own address, redirect it to the stub.
+    Function *Decl =
+        Function::Create(Def->getFunctionType(), GlobalValue::ExternalLinkage,
+                         GI.NewName, &MergedModule);
+    Decl->copyAttributesFrom(Def);
+    Def->replaceAllUsesWith(Decl);
+  }
 
   IRMover Mover(MergedModule); // TODO: don't recreate every time
   // Move the definition into the main module.
