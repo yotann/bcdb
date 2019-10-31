@@ -146,7 +146,7 @@ GlobalValue *Merger::LoadPartDefinition(Module &MergedModule, GlobalItem &GI) {
     // If the function takes its own address, redirect it to the stub.
     Function *Decl =
         Function::Create(Def->getFunctionType(), GlobalValue::ExternalLinkage,
-                         GI.NewName, &MergedModule);
+                         GI.NewName, MPart.get());
     Decl->copyAttributesFrom(Def);
     Def->replaceAllUsesWith(Decl);
   }
