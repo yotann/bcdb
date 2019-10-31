@@ -101,10 +101,9 @@ StringSet<> Merger::LoadPartRefs(StringRef ID) {
 }
 
 StringRef Merger::GetNewName(const ResolvedReference &Ref) {
-  if (Ref.Module.empty())
+  if (!Ref.Name.empty())
     return Ref.Name;
-  GlobalValue *GV = ModRemainders[Ref.Module]->getNamedValue(Ref.Name);
-  return GlobalItems[GV].NewName;
+  return Ref.GI->NewName;
 }
 
 void Merger::ApplyNewNames(
@@ -250,13 +249,11 @@ public:
       for (auto &Ref : item.second.Refs) {
         auto Res = Merger->Resolve(item.second.ModuleName, Ref.first);
         Ref.second = Res;
-        if (Res.Module.empty()) {
+        if (!Res.GI) {
           // reserve the name for dynamic linking
           Merger->ReservedNames.insert(Res.Name);
         } else {
-          auto *GV = Merger->ModRemainders[Res.Module]->getNamedValue(Res.Name);
-          assert(GV && Merger->GlobalItems.count(GV));
-          item.second.RefItems.push_back(&Merger->GlobalItems[GV]);
+          item.second.RefItems.push_back(Res.GI);
         }
       }
     }
@@ -348,7 +345,6 @@ void Merger::RenameEverything() {
 std::unique_ptr<Module> Merger::Finish() {
   auto MergedModule = std::make_unique<Module>("merged", bcdb.GetContext());
   for (auto &MR : ModRemainders) {
-    StringRef ModuleName = MR.first();
     std::unique_ptr<Module> &M = MR.second;
 
     std::vector<GlobalItem *> GIs;
@@ -363,7 +359,7 @@ std::unique_ptr<Module> Merger::Finish() {
         } else {
           // FIXME: what if refs to a definition in the remainder are resolved
           // to something else?
-          Refs[GV.getName()] = ResolvedReference(ModuleName, GV.getName());
+          Refs[GV.getName()] = ResolvedReference(&GI);
           GIs.push_back(&GI);
           for (auto &Item : GI.Refs)
             Refs[Item.first] = Item.second;
@@ -394,7 +390,7 @@ std::string Merger::ReserveName(StringRef Prefix) {
 ResolvedReference Merger::Resolve(StringRef ModuleName, StringRef Name) {
   GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
   if (GV && !GV->isDeclaration())
-    return ResolvedReference(ModuleName, Name);
+    return ResolvedReference(&GlobalItems[GV]);
   else
     return ResolvedReference(Name);
 }

@@ -24,20 +24,7 @@ namespace bcdb {
 
 using namespace llvm;
 
-struct ResolvedReference {
-  // static reference (fully resolved)
-  ResolvedReference(StringRef Module, StringRef Name)
-      : Module(Module), Name(Name) {}
-  // dynamic reference (will be resolved later)
-  ResolvedReference(StringRef Name) : Module(), Name(Name) {}
-  // unresolved
-  ResolvedReference() : Module(), Name() {}
-  std::string Module, Name;
-  bool operator<(const ResolvedReference &Other) const {
-    return Module < Other.Module ||
-           (Module == Other.Module && Name < Other.Name);
-  }
-};
+struct ResolvedReference;
 
 class MergerGlobalGraph;
 
@@ -81,6 +68,20 @@ protected:
   StringSet<> ReservedNames;
 
   friend class MergerGlobalGraph;
+};
+
+struct ResolvedReference {
+  // static reference (fully resolved)
+  ResolvedReference(Merger::GlobalItem *GI) : GI(GI), Name() {}
+  // dynamic reference (will be resolved later)
+  ResolvedReference(StringRef Name) : GI(), Name(Name) {}
+  // unresolved
+  ResolvedReference() : GI(), Name() {}
+  Merger::GlobalItem *GI;
+  std::string Name;
+  bool operator<(const ResolvedReference &Other) const {
+    return GI < Other.GI || (GI == Other.GI && Name < Other.Name);
+  }
 };
 
 } // end namespace bcdb

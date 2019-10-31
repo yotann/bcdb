@@ -41,7 +41,7 @@ protected:
 ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
   GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
   if (GV && GV->hasLocalLinkage())
-    return ResolvedReference(ModuleName, Name);
+    return ResolvedReference(&GlobalItems[GV]);
   else
     return ResolvedReference(Name);
 }

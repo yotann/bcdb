@@ -36,6 +36,7 @@ static std::unique_ptr<Module> LoadMainModule(LLVMContext &Context) {
 class MuxMerger : public Merger {
 public:
   MuxMerger(BCDB &bcdb) : Merger(bcdb) {}
+  ResolvedReference Resolve(StringRef ModuleName, StringRef Name) override;
   void PrepareToRename();
   std::unique_ptr<Module> Finish();
 
@@ -53,13 +54,39 @@ private:
   StructType *EntryType;
   PointerType *InitType;
   GlobalVariable *InitEmpty;
+
+  StringMap<SmallVector<StringRef, 1>> GlobalDefs;
 };
+
+ResolvedReference MuxMerger::Resolve(StringRef ModuleName, StringRef Name) {
+  GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
+  if (GV && !GV->isDeclaration())
+    return ResolvedReference(&GlobalItems[GV]);
+  auto &Defs = GlobalDefs[Name];
+  if (Defs.empty())
+    return ResolvedReference(Name); // dynamic linking
+  else if (Defs.size() == 1)
+    return ResolvedReference(&GlobalItems[ModRemainders[Defs[0]]->getNamedValue(
+        Name)]); // only one definition, link to it
+  else {
+    errs() << "multiple definitions of " << Name << " (used in " << ModuleName
+           << ")\n";
+    report_fatal_error("multiple definitions of " + Name);
+  }
+}
 
 void MuxMerger::PrepareToRename() {
   ReserveName("main");
   ReserveName("__bcdb_main");
   ReserveName("llvm.global_ctors");
   ReserveName("llvm.global_dtors");
+
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
+    if (GV->hasExternalLinkage())
+      GlobalDefs[GI.Name].push_back(GI.ModuleName);
+  }
 }
 
 Constant *MuxMerger::HandleInitFini(Module &M, GlobalItem *GI) {
