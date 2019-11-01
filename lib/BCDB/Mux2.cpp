@@ -34,7 +34,7 @@ public:
 protected:
   void AddPartStub(Module &MergedModule, GlobalItem &GI, GlobalValue *Def,
                    GlobalValue *Decl) override;
-  void LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
+  void LoadRemainder(std::unique_ptr<Module> M,
                      std::vector<GlobalItem *> &GIs) override;
 };
 
@@ -87,7 +87,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   Merger::AddPartStub(StubModule, GI, DeclInStubModule, Decl);
 }
 
-void Mux2Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
+void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
                                std::vector<GlobalItem *> &GIs) {
   Module &StubModule = *StubModules[M->getModuleIdentifier()];
   std::vector<GlobalItem *> MergedGIs;
@@ -105,7 +105,7 @@ void Mux2Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
   }
   // FIXME: add merged module to stub module's bcdb.elf.needed
   createGlobalDCEPass()->runOnModule(StubModule);
-  Merger::LoadRemainder(MergedModule, std::move(M), MergedGIs);
+  Merger::LoadRemainder(std::move(M), MergedGIs);
 }
 
 void BCDB::Mux2(std::vector<StringRef> Names) {

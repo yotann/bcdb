@@ -56,7 +56,10 @@ static StringSet<> FindGlobalReferences(GlobalValue *Root) {
   return Result;
 }
 
-Merger::Merger(BCDB &bcdb) : bcdb(bcdb) {}
+Merger::Merger(BCDB &bcdb)
+    : bcdb(bcdb),
+      MergedModule(std::make_unique<Module>("merged", bcdb.GetContext())),
+      MergedModuleMover(*MergedModule) {}
 
 void Merger::AddModule(StringRef ModuleName) {
   // Load remainder module.
@@ -119,9 +122,9 @@ void Merger::ApplyNewNames(
   }
 }
 
-GlobalValue *Merger::LoadPartDefinition(Module &MergedModule, GlobalItem &GI) {
+GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI) {
   ExitOnError Err("Merger::LoadPartDefinition: ");
-  GlobalValue *Result = MergedModule.getNamedValue(GI.NewDefName);
+  GlobalValue *Result = MergedModule->getNamedValue(GI.NewDefName);
   if (Result && !Result->isDeclaration())
     return Result;
   auto MPart = Err(bcdb.GetFunctionById(GI.PartID));
@@ -150,16 +153,15 @@ GlobalValue *Merger::LoadPartDefinition(Module &MergedModule, GlobalItem &GI) {
     Def->replaceAllUsesWith(Decl);
   }
 
-  IRMover Mover(MergedModule); // TODO: don't recreate every time
   // Move the definition into the main module.
-  Err(Mover.move(
+  Err(MergedModuleMover.move(
       std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
       /* LinkModuleInlineAsm */ false,
 #endif
       /* IsPerformingImport */ false));
 
-  Result = MergedModule.getNamedValue(GI.NewDefName);
+  Result = MergedModule->getNamedValue(GI.NewDefName);
   LinkageMap[Result] = GlobalValue::InternalLinkage;
   return Result;
 }
@@ -213,7 +215,7 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   }
 }
 
-void Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
+void Merger::LoadRemainder(std::unique_ptr<Module> M,
                            std::vector<GlobalItem *> &GIs) {
   ExitOnError Err("Merger::LoadRemainder: ");
 
@@ -229,8 +231,7 @@ void Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
   for (GlobalValue &GV : M->global_objects())
     GV.setLinkage(GlobalValue::ExternalLinkage);
 
-  IRMover Mover(MergedModule); // TODO: don't recreate every time
-  Err(Mover.move(
+  Err(MergedModuleMover.move(
       std::move(M), ValuesToLink,
       [](GlobalValue &GV, IRMover::ValueAdder Add) {},
 #if LLVM_VERSION_MAJOR <= 4
@@ -239,7 +240,7 @@ void Merger::LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
       /* IsPerformingImport */ false));
 
   for (auto &Item : NameLinkageMap)
-    LinkageMap[MergedModule.getNamedValue(Item.first())] = Item.second;
+    LinkageMap[MergedModule->getNamedValue(Item.first())] = Item.second;
 }
 
 namespace bcdb {
@@ -346,7 +347,6 @@ void Merger::RenameEverything() {
 }
 
 std::unique_ptr<Module> Merger::Finish() {
-  auto MergedModule = std::make_unique<Module>("merged", bcdb.GetContext());
   for (auto &MR : ModRemainders) {
     std::unique_ptr<Module> &M = MR.second;
 
@@ -357,7 +357,7 @@ std::unique_ptr<Module> Merger::Finish() {
       if (!GV.isDeclaration()) {
         GlobalItem &GI = GlobalItems[&GV];
         if (!GI.PartID.empty()) {
-          GlobalValue *Def = LoadPartDefinition(*MergedModule, GI);
+          GlobalValue *Def = LoadPartDefinition(GI);
           AddPartStub(*MergedModule, GI, Def, &GV);
         } else {
           // FIXME: what if refs to a definition in the remainder are resolved
@@ -371,13 +371,13 @@ std::unique_ptr<Module> Merger::Finish() {
     }
 
     ApplyNewNames(*M, Refs);
-    LoadRemainder(*MergedModule, std::move(M), GIs);
+    LoadRemainder(std::move(M), GIs);
   }
 
   for (auto Item : LinkageMap)
     Item.first->setLinkage(Item.second);
 
-  return MergedModule;
+  return std::move(MergedModule);
 }
 
 std::string Merger::ReserveName(StringRef Prefix) {

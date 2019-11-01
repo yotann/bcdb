@@ -9,6 +9,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/IR/GlobalValue.h>
+#include <llvm/Linker/IRMover.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -55,13 +56,15 @@ public:
 
 protected:
   StringSet<> LoadPartRefs(StringRef ID);
-  GlobalValue *LoadPartDefinition(Module &MergedModule, GlobalItem &GI);
+  GlobalValue *LoadPartDefinition(GlobalItem &GI);
   virtual void AddPartStub(Module &MergedModule, GlobalItem &GI,
                            GlobalValue *Def, GlobalValue *Decl);
-  virtual void LoadRemainder(Module &MergedModule, std::unique_ptr<Module> M,
+  virtual void LoadRemainder(std::unique_ptr<Module> M,
                              std::vector<GlobalItem *> &GIs);
 
   BCDB &bcdb;
+  std::unique_ptr<Module> MergedModule;
+  IRMover MergedModuleMover;
   StringMap<std::unique_ptr<Module>> ModRemainders;
   std::map<GlobalValue *, GlobalItem> GlobalItems;
   DenseMap<GlobalValue *, GlobalValue::LinkageTypes> LinkageMap;
