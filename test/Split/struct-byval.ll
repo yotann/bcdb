@@ -1,11 +1,11 @@
 ; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f.bc | FileCheck --check-prefix=DEFINE %s
 
-; DEFINE: %0 = type { i8 }
-; DEFINE: %1 = type { i16 }
-; DEFINE: %2 = type { i32 }
-; DEFINE: %3 = type { i64 }
-; DEFINE: %4 = type { i128 }
+; DEFINE-DAG: %{{[a-zA-Z0-9_.]+}} = type { i8 }
+; DEFINE-DAG: %{{[a-zA-Z0-9_.]+}} = type { i16 }
+; DEFINE-DAG: %{{[a-zA-Z0-9_.]+}} = type { i32 }
+; DEFINE-DAG: %{{[a-zA-Z0-9_.]+}} = type { i64 }
+; DEFINE-DAG: %{{[a-zA-Z0-9_.]+}} = type { i128 }
 %s = type { i8 }
 %t = type { i16 }
 %u = type { i32 }

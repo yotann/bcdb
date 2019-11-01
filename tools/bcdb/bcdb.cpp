@@ -83,6 +83,13 @@ static cl::SubCommand MergeCommand("merge", "Merge modules");
 static cl::SubCommand MuxCommand("mux", "Mux modules");
 static cl::SubCommand Mux2Command("mux2", "Mux modules (separate-ELF version)");
 
+static cl::opt<bool> DisableVerify("disable-verify",
+                                   cl::desc("Don't verify the output module"),
+                                   cl::sub(GetCommand),
+                                   cl::sub(GetFunctionCommand),
+                                   cl::sub(MeltCommand), cl::sub(MergeCommand),
+                                   cl::sub(MuxCommand));
+
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
                                     cl::sub(GetCommand));
@@ -121,7 +128,7 @@ static Expected<bool> ShouldWriteModule() {
 
 static int WriteModule(Module &M) {
   ExitOnError Err("module write: ");
-  if (verifyModule(M, &errs())) {
+  if (!DisableVerify && verifyModule(M, &errs())) {
     return 1;
   }
   if (Err(ShouldWriteModule())) {

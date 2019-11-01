@@ -207,7 +207,6 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 
   ReplaceGlobal(MergedModule, GI.NewName, Stub);
   LinkageMap[Stub] = Decl->getLinkage();
-  Stub->copyAttributesFrom(Decl);
   if (Decl->getComdat()) {
     Comdat *CD = MergedModule.getOrInsertComdat(Decl->getComdat()->getName());
     CD->setSelectionKind(Decl->getComdat()->getSelectionKind());
