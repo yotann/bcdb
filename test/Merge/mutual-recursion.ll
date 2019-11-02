@@ -10,7 +10,7 @@ define i32 @f0() {
 ; CHECK-NEXT: call i32 @f1()
 ; CHECK-NEXT: ret i32 %1
 ; CHECK: define i32 @f0() {
-; CHECK-NEXT: musttail call i32 @__bcdb_id_[[ID0]]()
+; CHECK-NEXT: tail call i32 @__bcdb_id_[[ID0]]()
 
 define i32 @f1() {
   call i32 @f0()
@@ -20,4 +20,4 @@ define i32 @f1() {
 ; CHECK-NEXT: call i32 @f0()
 ; CHECK-NEXT: ret i32 %1
 ; CHECK: define i32 @f1() {
-; CHECK-NEXT: musttail call i32 @__bcdb_id_[[ID1]]()
+; CHECK-NEXT: tail call i32 @__bcdb_id_[[ID1]]()

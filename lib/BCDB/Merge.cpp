@@ -186,6 +186,21 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   Function *Def = cast<Function>(DefGV);
   Function *Decl = cast<Function>(DeclGV);
 
+  if (Def->isVarArg()) {
+    // In theory, it should be fine to create stubs for these using musttail.
+    // But LLVM's optimizations are buggy and will break the musttail call. As
+    // a stopgap we just create an alias, even though this is incorrect in some
+    // cases.
+
+    // FIXME: Create an actual stub. Rewrite the definition to take a va_list*
+    // instead of ..., then put @llvm.va_start in the stub.
+
+    GlobalAlias *Stub = GlobalAlias::create(Def->getLinkage(), GI.NewName, Def);
+    ReplaceGlobal(MergedModule, GI.NewName, Stub);
+    LinkageMap[Stub] = Decl->getLinkage();
+    return;
+  }
+
   // see llvm::MergeFunctions::writeThunk
   Function *Stub = Function::Create(Def->getFunctionType(), Def->getLinkage(),
                                     GI.NewName, &MergedModule);
@@ -197,7 +212,7 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
     Args.push_back(
         Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
   CallInst *CI = Builder.CreateCall(Def, Args);
-  CI->setTailCallKind(CallInst::TCK_MustTail);
+  CI->setTailCall();
   CI->setCallingConv(Def->getCallingConv());
   CI->setAttributes(Def->getAttributes());
   if (Stub->getReturnType()->isVoidTy())

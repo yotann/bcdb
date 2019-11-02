@@ -12,4 +12,4 @@ define i32 @func(i32 %x) {
 ; CHECK-NEXT: ret i32 %y
 
 ; CHECK: define i32 @func(i32) {
-; CHECK-NEXT: musttail call i32 @__bcdb_id_[[ID0]](i32 %0)
+; CHECK-NEXT: tail call i32 @__bcdb_id_[[ID0]](i32 %0)
