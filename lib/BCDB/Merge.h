@@ -52,6 +52,7 @@ public:
     std::string NewDefName;
     std::map<std::string, ResolvedReference> Refs;
     SmallVector<GlobalItem *, 8> RefItems;
+    bool SkipStub = false;
   };
 
 protected:
@@ -83,7 +84,7 @@ struct ResolvedReference {
   Merger::GlobalItem *GI;
   std::string Name;
   bool operator<(const ResolvedReference &Other) const {
-    return GI < Other.GI || (GI == Other.GI && Name < Other.Name);
+    return GI && Other.GI ? GI->NewName < Other.GI->NewName : Name < Other.Name;
   }
 };
 

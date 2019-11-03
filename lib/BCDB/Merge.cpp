@@ -334,6 +334,7 @@ void Merger::RenameEverything() {
                                         ItemComp);
   };
   std::set<Group, decltype(GroupComp)> Groups(GroupComp);
+  std::set<std::pair<std::string, std::string>> ModuleReservedNames;
   for (auto &const_SCC : make_range(scc_begin(&Graph), scc_end(&Graph))) {
     if (const_SCC.size() == 1 && const_SCC[0] == &Graph.Root)
       continue;
@@ -345,15 +346,29 @@ void Merger::RenameEverything() {
     if (CanMerge) {
       std::sort(SCC.begin(), SCC.end(), ItemComp);
       auto Inserted = Groups.insert(SCC);
-      if (!Inserted.second)
-        for (const auto &Tuple : zip_first(SCC, *Inserted.first))
-          std::get<0>(Tuple)->NewDefName = std::get<1>(Tuple)->NewDefName;
+      if (!Inserted.second) {
+        for (const auto &Tuple : zip_first(SCC, *Inserted.first)) {
+          GlobalItem *New = std::get<0>(Tuple);
+          GlobalItem *Existing = std::get<1>(Tuple);
+          New->NewDefName = Existing->NewDefName;
+          // We can reuse NewName from a different module, but not from the
+          // same module.
+          if (New->NewName.empty() &&
+              !ModuleReservedNames.count(
+                  std::make_pair(New->ModuleName, Existing->NewName))) {
+            New->NewName = Existing->NewName;
+            New->SkipStub = true;
+          }
+        }
+      }
     }
     for (GlobalItem *Item : SCC) {
       if (!Item->PartID.empty() && Item->NewDefName.empty())
         Item->NewDefName = ReserveName("__bcdb_id_" + Item->PartID);
       if (Item->NewName.empty())
         Item->NewName = ReserveName(Item->Name);
+      ModuleReservedNames.insert(
+          std::make_pair(Item->ModuleName, Item->NewName));
     }
   }
   if (WriteGlobalGraph)
@@ -372,7 +387,8 @@ std::unique_ptr<Module> Merger::Finish() {
         GlobalItem &GI = GlobalItems[&GV];
         if (!GI.PartID.empty()) {
           GlobalValue *Def = LoadPartDefinition(GI);
-          AddPartStub(*MergedModule, GI, Def, &GV);
+          if (!GI.SkipStub)
+            AddPartStub(*MergedModule, GI, Def, &GV);
         } else {
           // FIXME: what if refs to a definition in the remainder are resolved
           // to something else?
