@@ -25,6 +25,8 @@
 using namespace bcdb;
 using namespace llvm;
 
+static cl::opt<bool> DisableStubs("disable-stubs",
+                                  cl::sub(*cl::AllSubCommands));
 static cl::opt<bool> WriteGlobalGraph("write-global-graph",
                                       cl::sub(*cl::AllSubCommands));
 
@@ -114,10 +116,19 @@ void Merger::ApplyNewNames(
   for (GlobalValue &GV :
        concat<GlobalValue>(M.global_objects(), M.aliases(), M.ifuncs())) {
     if (GV.hasName() && Refs.count(GV.getName())) {
-      // FIXME: what if something already has the name?
       auto NewName = GetNewName(Refs.at(GV.getName()));
       GV.setName(NewName);
-      assert(GV.getName() == NewName);
+      if (DisableStubs) {
+        if (GV.getName() != NewName) {
+          Constant *GV2 = M.getNamedValue(NewName);
+          if (GV2->getType() != GV.getType())
+            GV2 = ConstantExpr::getPointerCast(GV2, GV.getType());
+          GV.replaceAllUsesWith(GV2);
+        }
+      } else {
+        // FIXME: what if something already has the name?
+        assert(GV.getName() == NewName);
+      }
     }
   }
 }
@@ -144,7 +155,7 @@ GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI) {
   ApplyNewNames(*MPart, GI.Refs);
   Def->setName(GI.NewDefName);
   assert(Def->getName() == GI.NewDefName);
-  if (!Def->use_empty()) {
+  if (!DisableStubs && !Def->use_empty()) {
     // If the function takes its own address, redirect it to the stub.
     Function *Decl =
         Function::Create(Def->getFunctionType(), GlobalValue::ExternalLinkage,
@@ -236,6 +247,8 @@ void Merger::LoadRemainder(std::unique_ptr<Module> M,
   StringMap<GlobalValue::LinkageTypes> NameLinkageMap;
   std::vector<GlobalValue *> ValuesToLink;
   for (GlobalItem *GI : GIs) {
+    if (GI->SkipStub)
+      continue;
     GlobalValue *GV = M->getNamedValue(GI->NewName);
     NameLinkageMap[GI->NewName] = GV->getLinkage();
     ValuesToLink.push_back(GV);
@@ -325,9 +338,30 @@ struct DOTGraphTraits<MergerGlobalGraph *> : public DefaultDOTGraphTraits {
 void Merger::RenameEverything() {
   MergerGlobalGraph Graph(this);
   using Group = SmallVector<GlobalItem *, 1>;
-  auto ItemComp = [](GlobalItem *a, GlobalItem *b) {
-    return a->PartID < b->PartID ||
-           (a->PartID == b->PartID && a->Refs < b->Refs);
+  auto ItemComp = [&](GlobalItem *a, GlobalItem *b) {
+    if (a->PartID != b->PartID)
+      return a->PartID < b->PartID;
+    if (a->Refs < b->Refs)
+      return true;
+    if (b->Refs < a->Refs)
+      return false;
+    if (a->PartID.empty()) {
+      if (false) {
+        // attempt to merge global variables
+        // FIXME: actually check the initializer
+        if (a->Name != b->Name)
+          return a->Name < b->Name;
+        GlobalValue *GVa = ModRemainders[a->ModuleName]->getNamedValue(a->Name);
+        GlobalValue *GVb = ModRemainders[b->ModuleName]->getNamedValue(b->Name);
+        if (isa<Function>(GVa) || isa<Function>(GVb))
+          return true;
+        return GVa->getType() < GVb->getType();
+      } else {
+        // global variables are never merged
+        return true;
+      }
+    }
+    return false;
   };
   auto GroupComp = [&](const Group &a, const Group &b) {
     return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(),
@@ -340,9 +374,6 @@ void Merger::RenameEverything() {
       continue;
     Group SCC(const_SCC.begin(), const_SCC.end());
     bool CanMerge = true;
-    for (GlobalItem *Item : SCC)
-      if (Item->PartID.empty())
-        CanMerge = false;
     if (CanMerge) {
       std::sort(SCC.begin(), SCC.end(), ItemComp);
       auto Inserted = Groups.insert(SCC);
@@ -353,6 +384,8 @@ void Merger::RenameEverything() {
           New->NewDefName = Existing->NewDefName;
           // We can reuse NewName from a different module, but not from the
           // same module.
+          // TODO: We can't do this in some cases (if the program compares
+          // executable.&foo with library.&foo).
           if (New->NewName.empty() &&
               !ModuleReservedNames.count(
                   std::make_pair(New->ModuleName, Existing->NewName))) {
@@ -363,12 +396,26 @@ void Merger::RenameEverything() {
       }
     }
     for (GlobalItem *Item : SCC) {
-      if (!Item->PartID.empty() && Item->NewDefName.empty())
-        Item->NewDefName = ReserveName("__bcdb_id_" + Item->PartID);
-      if (Item->NewName.empty())
-        Item->NewName = ReserveName(Item->Name);
-      ModuleReservedNames.insert(
-          std::make_pair(Item->ModuleName, Item->NewName));
+      if (DisableStubs) {
+        if (!Item->PartID.empty()) {
+          if (Item->NewDefName.empty())
+            Item->NewDefName = ReserveName(Item->Name);
+          Item->NewName = Item->NewDefName;
+          Item->SkipStub = true;
+        } else {
+          if (Item->NewName.empty())
+            Item->NewName = ReserveName(Item->Name);
+        }
+        ModuleReservedNames.insert(
+            std::make_pair(Item->ModuleName, Item->NewName));
+      } else {
+        if (!Item->PartID.empty() && Item->NewDefName.empty())
+          Item->NewDefName = ReserveName("__bcdb_id_" + Item->PartID);
+        if (Item->NewName.empty())
+          Item->NewName = ReserveName(Item->Name);
+        ModuleReservedNames.insert(
+            std::make_pair(Item->ModuleName, Item->NewName));
+      }
     }
   }
   if (WriteGlobalGraph)
