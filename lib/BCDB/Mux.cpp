@@ -60,6 +60,7 @@ private:
   GlobalVariable *InitEmpty;
 
   StringMap<SmallVector<StringRef, 1>> GlobalDefs;
+  StringMap<SmallVector<StringRef, 1>> GlobalWeakDefs;
 };
 
 ResolvedReference MuxMerger::Resolve(StringRef ModuleName, StringRef Name) {
@@ -67,14 +68,22 @@ ResolvedReference MuxMerger::Resolve(StringRef ModuleName, StringRef Name) {
   if (GV && !GV->isDeclaration())
     return ResolvedReference(&GlobalItems[GV]);
   auto &Defs = GlobalDefs[Name];
-  if (Defs.empty())
-    return ResolvedReference(Name); // dynamic linking
-  else if (Defs.size() == 1)
+  if (Defs.empty()) {
+    auto &WeakDefs = GlobalWeakDefs[Name];
+    if (WeakDefs.empty())
+      return ResolvedReference(Name); // dynamic linking
+    else
+      return ResolvedReference(
+          &GlobalItems[ModRemainders[WeakDefs[0]]->getNamedValue(
+              Name)]); // choose an arbitrary weak definition
+  } else if (Defs.size() == 1) {
     return ResolvedReference(&GlobalItems[ModRemainders[Defs[0]]->getNamedValue(
         Name)]); // only one definition, link to it
-  else {
-    errs() << "multiple definitions of " << Name << " (used in " << ModuleName
-           << ")\n";
+  } else {
+    errs() << "multiple definitions of " << Name << ":\n";
+    for (auto &Def : Defs)
+      errs() << "- defined in " << Def << "\n";
+    errs() << "- used in " << ModuleName << "\n";
     report_fatal_error("multiple definitions of " + Name);
   }
 }
@@ -92,6 +101,9 @@ void MuxMerger::PrepareToRename() {
     GlobalItem &GI = Item.second;
     if (GV->hasExternalLinkage())
       GlobalDefs[GI.Name].push_back(GI.ModuleName);
+    if (GV->hasWeakLinkage())
+      GlobalWeakDefs[GI.Name].push_back(GI.ModuleName);
+    // TODO: other linkage types
   }
 }
 
