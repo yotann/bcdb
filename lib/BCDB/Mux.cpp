@@ -11,6 +11,7 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/ScopedPrinter.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/ModuleUtils.h>
 
 #include <map>
 #include <set>
@@ -46,8 +47,11 @@ private:
     GlobalItem *main;
     GlobalItem *global_ctors;
     GlobalItem *global_dtors;
+    GlobalItem *used;
+    GlobalItem *compiler_used;
   };
 
+  void HandleUsed(Module &M, bool compiler, GlobalItem *GI);
   Constant *HandleInitFini(Module &M, GlobalItem *GI);
   Constant *HandleEntry(Module &M, const MainEntry &Entry);
 
@@ -80,6 +84,8 @@ void MuxMerger::PrepareToRename() {
   ReserveName("__bcdb_main");
   ReserveName("llvm.global_ctors");
   ReserveName("llvm.global_dtors");
+  ReserveName("llvm.used");
+  ReserveName("llvm.compiler.used");
 
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
@@ -87,6 +93,21 @@ void MuxMerger::PrepareToRename() {
     if (GV->hasExternalLinkage())
       GlobalDefs[GI.Name].push_back(GI.ModuleName);
   }
+}
+
+void MuxMerger::HandleUsed(Module &M, bool compiler, GlobalItem *GI) {
+  if (!GI)
+    return;
+  GlobalVariable *GV = cast<GlobalVariable>(M.getNamedValue(GI->NewName));
+  if (!GV->hasInitializer())
+    return;
+  const ConstantArray *Init = cast<ConstantArray>(GV->getInitializer());
+  SmallVector<GlobalValue *, 8> Globals;
+  for (Value *Op : Init->operands())
+    Globals.push_back(cast<GlobalValue>(Op->stripPointerCasts()));
+  (compiler ? appendToCompilerUsed : appendToUsed)(M, Globals);
+  // TODO: is it possible for the GV to be used by something else?
+  GV->eraseFromParent();
 }
 
 Constant *MuxMerger::HandleInitFini(Module &M, GlobalItem *GI) {
@@ -146,6 +167,10 @@ std::unique_ptr<Module> MuxMerger::Finish() {
     Entry.global_ctors = GV ? &GlobalItems[GV] : nullptr;
     GV = Item.second->getNamedValue("llvm.global_dtors");
     Entry.global_dtors = GV ? &GlobalItems[GV] : nullptr;
+    GV = Item.second->getNamedValue("llvm.used");
+    Entry.used = GV ? &GlobalItems[GV] : nullptr;
+    GV = Item.second->getNamedValue("llvm.compiler.used");
+    Entry.compiler_used = GV ? &GlobalItems[GV] : nullptr;
     MainEntries.push_back(Entry);
   }
 
@@ -167,6 +192,8 @@ std::unique_ptr<Module> MuxMerger::Finish() {
 
   std::vector<Constant *> ConstantEntries;
   for (auto &Entry : MainEntries) {
+    HandleUsed(*M, false, Entry.used);
+    HandleUsed(*M, true, Entry.compiler_used);
     if (!Entry.main) {
       // FIXME actually call these
       HandleInitFini(*M, Entry.global_ctors);
