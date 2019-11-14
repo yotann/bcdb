@@ -113,21 +113,28 @@ StringRef Merger::GetNewName(const ResolvedReference &Ref) {
 
 void Merger::ApplyNewNames(
     Module &M, const std::map<std::string, ResolvedReference> &Refs) {
+  DenseMap<GlobalValue *, std::string> NewNames;
   for (GlobalValue &GV :
        concat<GlobalValue>(M.global_objects(), M.aliases(), M.ifuncs())) {
     if (GV.hasName() && Refs.count(GV.getName())) {
       auto NewName = GetNewName(Refs.at(GV.getName()));
-      GV.setName(NewName);
+      NewNames[&GV] = NewName;
+      GV.setName("");
+    }
+  }
+  for (const auto &Item : NewNames) {
+    GlobalValue &GV = *Item.first;
+    StringRef NewName = Item.second;
+    GV.setName(NewName);
+    if (GV.getName() != NewName) {
       if (DisableStubs) {
-        if (GV.getName() != NewName) {
-          Constant *GV2 = M.getNamedValue(NewName);
-          if (GV2->getType() != GV.getType())
-            GV2 = ConstantExpr::getPointerCast(GV2, GV.getType());
-          GV.replaceAllUsesWith(GV2);
-        }
+        Constant *GV2 = M.getNamedValue(NewName);
+        if (GV2->getType() != GV.getType())
+          GV2 = ConstantExpr::getPointerCast(GV2, GV.getType());
+        GV.replaceAllUsesWith(GV2);
       } else {
-        // FIXME: what if something already has the name?
-        assert(GV.getName() == NewName);
+        report_fatal_error("conflicting uses of name " + NewName + " in " +
+                           M.getModuleIdentifier() + "\n");
       }
     }
   }
@@ -423,20 +430,15 @@ void Merger::RenameEverything() {
             Item->NewDefName = ReserveName(Item->Name);
           Item->NewName = Item->NewDefName;
           Item->SkipStub = true;
-        } else {
-          if (Item->NewName.empty())
-            Item->NewName = ReserveName(Item->Name);
         }
-        ModuleReservedNames.insert(
-            std::make_pair(Item->ModuleName, Item->NewName));
       } else {
         if (!Item->PartID.empty() && Item->NewDefName.empty())
           Item->NewDefName = ReserveName("__bcdb_id_" + Item->PartID);
-        if (Item->NewName.empty())
-          Item->NewName = ReserveName(Item->Name);
-        ModuleReservedNames.insert(
-            std::make_pair(Item->ModuleName, Item->NewName));
       }
+      if (Item->NewName.empty())
+        Item->NewName = ReserveName(Item->Name);
+      ModuleReservedNames.insert(
+          std::make_pair(Item->ModuleName, Item->NewName));
     }
   }
   if (WriteGlobalGraph)
