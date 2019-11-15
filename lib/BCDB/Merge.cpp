@@ -114,28 +114,35 @@ StringRef Merger::GetNewName(const ResolvedReference &Ref) {
 void Merger::ApplyNewNames(
     Module &M, const std::map<std::string, ResolvedReference> &Refs) {
   DenseMap<GlobalValue *, std::string> NewNames;
+  StringMap<const ResolvedReference *> NewReferences;
   for (GlobalValue &GV :
        concat<GlobalValue>(M.global_objects(), M.aliases(), M.ifuncs())) {
     if (GV.hasName() && Refs.count(GV.getName())) {
-      auto NewName = GetNewName(Refs.at(GV.getName()));
+      auto &Ref = Refs.at(GV.getName());
+      auto NewName = GetNewName(Ref);
       NewNames[&GV] = NewName;
-      GV.setName("");
+      if (NewReferences.count(NewName)) {
+        if (*NewReferences[NewName] != Ref) {
+          errs() << "module " + M.getModuleIdentifier() << ":\n";
+          errs() << "conflicting references for symbol " + NewName << ":\n";
+          errs() << "- " << *NewReferences[NewName] << "\n";
+          errs() << "- " << Ref << "\n";
+          report_fatal_error("conflicting references");
+        }
+      }
+      NewReferences[NewName] = &Ref;
     }
+    GV.setName("");
   }
   for (const auto &Item : NewNames) {
     GlobalValue &GV = *Item.first;
     StringRef NewName = Item.second;
     GV.setName(NewName);
     if (GV.getName() != NewName) {
-      if (DisableStubs) {
-        Constant *GV2 = M.getNamedValue(NewName);
-        if (GV2->getType() != GV.getType())
-          GV2 = ConstantExpr::getPointerCast(GV2, GV.getType());
-        GV.replaceAllUsesWith(GV2);
-      } else {
-        report_fatal_error("conflicting uses of name " + NewName + " in " +
-                           M.getModuleIdentifier() + "\n");
-      }
+      Constant *GV2 = M.getNamedValue(NewName);
+      if (GV2->getType() != GV.getType())
+        GV2 = ConstantExpr::getPointerCast(GV2, GV.getType());
+      GV.replaceAllUsesWith(GV2);
     }
   }
 }

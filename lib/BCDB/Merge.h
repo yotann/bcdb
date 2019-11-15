@@ -83,10 +83,26 @@ struct ResolvedReference {
   ResolvedReference() : GI(), Name() {}
   Merger::GlobalItem *GI;
   std::string Name;
+  bool operator==(const ResolvedReference &Other) const {
+    if (GI)
+      return Other.GI && GI->NewName == Other.GI->NewName;
+    else
+      return !Other.GI && Name == Other.Name;
+  }
+  bool operator!=(const ResolvedReference &Other) const {
+    return !(*this == Other);
+  }
   bool operator<(const ResolvedReference &Other) const {
     return GI && Other.GI ? GI->NewName < Other.GI->NewName : Name < Other.Name;
   }
 };
+inline raw_ostream &operator<<(raw_ostream &OS, const ResolvedReference &Ref) {
+  if (Ref.GI)
+    return OS << "module(" << Ref.GI->ModuleName << ").symbol(" << Ref.GI->Name
+              << ").renamed(" << Ref.GI->NewName << ")";
+  else
+    return OS << "dynamic(" << Ref.Name << ")";
+}
 
 } // end namespace bcdb
 
