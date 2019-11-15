@@ -192,6 +192,13 @@ std::unique_ptr<Module> MuxMerger::Finish() {
     if (!GV.isDeclaration())
       GV.setLinkage(GlobalValue::InternalLinkage);
 
+  // Prevent LLVM from deleting functions that will be used by the code
+  // generator.
+  // TODO: apply this to *all* libcalls. See llvm::updateCompilerUsed().
+  GlobalValue *UnwindResume = M->getNamedValue("_Unwind_Resume");
+  if (UnwindResume)
+    appendToCompilerUsed(*M, {UnwindResume});
+
   Linker::linkModules(*M, LoadMainModule(M->getContext()));
 
   GlobalVariable *StubMain = M->getGlobalVariable("__bcdb_main");
