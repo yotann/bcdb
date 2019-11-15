@@ -260,22 +260,23 @@ void Merger::LoadRemainder(std::unique_ptr<Module> M,
 
   StringMap<GlobalValue::LinkageTypes> NameLinkageMap;
   std::vector<GlobalValue *> ValuesToLink;
-  std::vector<std::pair<std::string, std::string>> AliasesToLink;
   for (GlobalItem *GI : GIs) {
     if (GI->SkipStub)
       continue;
     GlobalValue *GV = M->getNamedValue(GI->NewName);
-    NameLinkageMap[GI->NewName] = GV->getLinkage();
 
-    if (isa<GlobalAlias>(GV) && GV->getValueType()->isFunctionTy()) {
+    if (GlobalAlias *A = dyn_cast<GlobalAlias>(GV)) {
       // The alias is currently pointing to a stub in the remainder module. We
       // can't get IRMover to change what the alias refers to, so we have to
-      // recreate the alias ourselves.
+      // recreate the alias ourselves. And we can't create the alias during
+      // LoadRemainder because the aliasee might be defined in a different
+      // module that hasn't been loaded yet.
       // TODO: ifuncs should be handled the same way.
-      AliasesToLink.emplace_back(
-          GV->getName(),
-          cast<GlobalAlias>(GV)->getAliasee()->stripPointerCasts()->getName());
+      assert(!AliasMap.count(GV->getName()));
+      AliasMap[GI->NewName] = std::make_pair(
+          A->getAliasee()->stripPointerCasts()->getName(), A->getLinkage());
     } else {
+      NameLinkageMap[GI->NewName] = GV->getLinkage();
       ValuesToLink.push_back(GV);
     }
   }
@@ -291,15 +292,6 @@ void Merger::LoadRemainder(std::unique_ptr<Module> M,
       /* LinkModuleInlineAsm */ false,
 #endif
       /* IsPerformingImport */ false));
-
-  for (const auto &I : AliasesToLink) {
-    // The type of the alias may change, which is fine.
-    GlobalValue *Def = MergedModule->getNamedValue(I.second);
-    GlobalAlias *NewAlias = GlobalAlias::create(
-        Def->getValueType(), 0, GlobalValue::ExternalLinkage, I.first, Def,
-        MergedModule.get());
-    ReplaceGlobal(*MergedModule, I.first, NewAlias);
-  }
 
   for (auto &Item : NameLinkageMap)
     LinkageMap[MergedModule->getNamedValue(Item.first())] = Item.second;
@@ -479,6 +471,18 @@ std::unique_ptr<Module> Merger::Finish() {
 
     ApplyNewNames(*M, Refs);
     LoadRemainder(std::move(M), GIs);
+  }
+
+  for (auto &I : AliasMap) {
+    // The type of the alias may change, which is fine.
+    GlobalValue *Def = MergedModule->getNamedValue(I.second.first);
+    if (!Def)
+      report_fatal_error("alias " + I.first() +
+                         " should point to missing symbol " + I.second.first);
+    GlobalAlias *NewAlias =
+        GlobalAlias::create(Def->getValueType(), 0, I.second.second, I.first(),
+                            Def, MergedModule.get());
+    ReplaceGlobal(*MergedModule, I.first(), NewAlias);
   }
 
   for (auto Item : LinkageMap)

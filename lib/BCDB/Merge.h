@@ -68,6 +68,7 @@ protected:
   IRMover MergedModuleMover;
   StringMap<std::unique_ptr<Module>> ModRemainders;
   std::map<GlobalValue *, GlobalItem> GlobalItems;
+  StringMap<std::pair<std::string, GlobalValue::LinkageTypes>> AliasMap;
   DenseMap<GlobalValue *, GlobalValue::LinkageTypes> LinkageMap;
   StringSet<> ReservedNames;
 
