@@ -25,6 +25,8 @@
 using namespace bcdb;
 using namespace llvm;
 
+static cl::opt<bool> DisableDeduplication("disable-deduplication",
+                                          cl::sub(*cl::AllSubCommands));
 static cl::opt<bool> DisableStubs("disable-stubs",
                                   cl::sub(*cl::AllSubCommands));
 static cl::opt<bool> WriteGlobalGraph("write-global-graph",
@@ -401,7 +403,7 @@ void Merger::RenameEverything() {
       continue;
     Group SCC(const_SCC.begin(), const_SCC.end());
     bool CanMerge = true;
-    if (CanMerge) {
+    if (CanMerge && !DisableDeduplication) {
       std::sort(SCC.begin(), SCC.end(), ItemComp);
       auto Inserted = Groups.insert(SCC);
       if (!Inserted.second) {
