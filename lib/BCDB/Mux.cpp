@@ -101,9 +101,10 @@ void MuxMerger::PrepareToRename() {
     GlobalItem &GI = Item.second;
     if (GV->hasExternalLinkage())
       GlobalDefs[GI.Name].push_back(GI.ModuleName);
-    if (GV->hasWeakLinkage())
+    if (GlobalValue::isWeakForLinker(GV->getLinkage()))
       GlobalWeakDefs[GI.Name].push_back(GI.ModuleName);
-    // TODO: other linkage types
+    // TODO: if we merge a weak global and a linkonce global, the result
+    // probably needs to be weak.
   }
 }
 
