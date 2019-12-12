@@ -1,0 +1,24 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        variant:
+        - bcdb-llvm4
+        - bcdb-llvm5
+        - bcdb-llvm6
+        - bcdb-llvm7
+        - bcdb-llvm8
+        - bcdb-llvm9
+        - bcdb-clang
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: cachix/install-nix-action@v6
+    - uses: cachix/cachix-action@v2
+      with:
+        name: bcdb
+        attributes: '${{ matrix.variant }}'
