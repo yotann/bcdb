@@ -231,6 +231,8 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   // see llvm::MergeFunctions::writeThunk
   Function *Stub = Function::Create(Def->getFunctionType(), Def->getLinkage(),
                                     GI.NewName, &MergedModule);
+  for (auto I : zip(Stub->args(), Def->args()))
+    std::get<0>(I).setName(std::get<1>(I).getName());
   Stub->copyAttributesFrom(Def);
   BasicBlock *BB = BasicBlock::Create(Stub->getContext(), "", Stub);
   IRBuilder<> Builder(BB);

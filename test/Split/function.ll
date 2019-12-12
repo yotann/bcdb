@@ -3,7 +3,7 @@
 ; RUN: llvm-dis < %t/remainder/module.bc | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis             | FileCheck --check-prefix=JOINED %s
 
-; MODULE: define i32 @f(i32) {
+; MODULE: define i32 @f(i32 %arg) {
 ; MODULE-NEXT: unreachable
 
 define i32 @f(i32 %arg) !srcloc !0 {

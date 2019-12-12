@@ -11,5 +11,5 @@ define i32 @func(i32 %x) {
 ; CHECK-NEXT: %y = add i32 %x, 1351
 ; CHECK-NEXT: ret i32 %y
 
-; CHECK: define i32 @func(i32) {
-; CHECK-NEXT: tail call i32 @__bcdb_id_[[ID0]](i32 %0)
+; CHECK: define i32 @func(i32 %x) {
+; CHECK-NEXT: tail call i32 @__bcdb_id_[[ID0]](i32 %x)

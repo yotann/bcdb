@@ -7,7 +7,7 @@
 %struct2 = type { i32 }
 %struct = type { %struct2* }
 
-; CHECK: define void @0(%s* byval(%s)) {
-define void @f(%struct* byval(%struct)) {
+; CHECK: define void @0(%s* byval(%s) %arg) {
+define void @f(%struct* byval(%struct) %arg) {
   ret void
 }

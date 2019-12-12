@@ -398,6 +398,8 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
 #endif
                                   "", MPart.get());
   DF->stealArgumentListFrom(SF);
+  for (auto I : zip(SF.args(), DF->args()))
+    std::get<0>(I).setName(std::get<1>(I).getName());
   DF->getBasicBlockList().splice(DF->end(), SF.getBasicBlockList());
 
   // Copy attributes.

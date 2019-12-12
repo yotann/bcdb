@@ -3,11 +3,11 @@
 ; RUN: llvm-dis < %t/remainder/module.bc | FileCheck --check-prefix=MODULE %s
 ; RUN: bc-join %t | llvm-dis             | FileCheck --check-prefix=JOINED %s
 
-; MODULE: define void @f(i8 inreg) #0
+; MODULE: define void @f(i8 inreg %arg) #0
 ; MODULE-NEXT: unreachable
-; DEFINE: define void @0(i8 inreg) #0
-; JOINED: define void @f(i8 inreg) #0
-define void @f(i8 inreg) #0 {
+; DEFINE: define void @0(i8 inreg %arg) #0
+; JOINED: define void @f(i8 inreg %arg) #0
+define void @f(i8 inreg %arg) #0 {
   ret void
 }
 
