@@ -5,8 +5,8 @@ let
   default_nixpkgs = (import <nixpkgs> {}).fetchFromGitHub {
     owner = "NixOS";
     repo = "nixpkgs-channels";
-    rev = "91d5b3f07d27622ff620ff31fa5edce15a5822fa";
-    sha256 = "09vlhjbkjivv9aiklhwq9wpzn954pcyp3fhrwslm28ip4iar9b55";
+    rev = "cc6cf0a96a627e678ffc996a8f9d1416200d6c81";
+    sha256 = "1srjikizp8ip4h42x7kr4qf00lxcp1l8zp6h0r1ddfdyw8gv9001";
   };
   debugLLVM = llvmPackages: (llvmPackages.llvm.override {
     debugVersion = true;
