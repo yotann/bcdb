@@ -3,6 +3,7 @@
 [![Github Workflows](https://github.com/yotann/bcdb/workflows/Test/badge.svg)](https://github.com/yotann/bcdb/actions?query=workflow%3ATest)
 [![Semaphore](https://bcdb.semaphoreci.com/badges/bcdb.svg?key=93e3989a-c2bb-49ac-96a0-3d92601b9fed)](https://bcdb.semaphoreci.com/projects/bcdb)
 [![ALLVM ALL THE THINGS!](https://img.shields.io/badge/ALLVM-ALL%20THE%20THINGS-brightgreen.svg)](https://github.com/allvm/allvm-tools)
+[![Cachix cache](https://img.shields.io/badge/cachix-allvm-blue.svg)](https://bcdb.cachix.org)
 
 ## Building
 
@@ -16,6 +17,24 @@ you can build. For example:
 nix-build -A bcdb-llvm9
 result/bin/bcdb -help
 ```
+
+If you want to modify the BCDB code, you can also have Nix build just the
+dependencies and enter a shell with them installed:
+
+```shell
+nix-shell -A bcdb-llvm9
+mkdir build
+cd build
+cmake ..
+make
+```
+
+You need to make sure you're in the `nix-shell` shell every time you want to
+build BCDB this way.
+
+In any case, you can speed up Nix by using our [Cachix](https://cachix.org)
+cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
+`cachix use bcdb`.
 
 ### Build manually with CMake
 
