@@ -1,8 +1,8 @@
 # BCDB
 
-![Github Workflows](https://github.com/yotann/bcdb/workflows/Test/badge.svg)
+[![Github Workflows](https://github.com/yotann/bcdb/workflows/Test/badge.svg)](https://github.com/yotann/bcdb/actions?query=workflow%3ATest)
 [![Semaphore](https://bcdb.semaphoreci.com/badges/bcdb.svg?key=93e3989a-c2bb-49ac-96a0-3d92601b9fed)](https://bcdb.semaphoreci.com/projects/bcdb)
-![ALLVM ALL THE THINGS!](https://img.shields.io/badge/ALLVM-ALL%20THE%20THINGS-brightgreen.svg)
+[![ALLVM ALL THE THINGS!](https://img.shields.io/badge/ALLVM-ALL%20THE%20THINGS-brightgreen.svg)](https://github.com/allvm/allvm-tools)
 
 ## Building
 
