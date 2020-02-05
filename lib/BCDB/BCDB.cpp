@@ -19,10 +19,12 @@
 using namespace bcdb;
 using namespace llvm;
 
+cl::OptionCategory bcdb::BCDBCategory("BCDB options");
+
 static cl::opt<bool> NoRenameConstants(
     "no-rename-constants",
     cl::desc("Don't improve deduplication by renaming anonymous constants"),
-    cl::sub(*cl::AllSubCommands));
+    cl::cat(BCDBCategory));
 
 Error BCDB::Init(StringRef uri) {
   Expected<std::unique_ptr<memodb_db>> db =

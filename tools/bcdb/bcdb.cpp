@@ -23,6 +23,7 @@ using namespace llvm;
 
 static cl::opt<std::string> Uri("uri", cl::Required,
                                 cl::desc("URI of the database"),
+                                cl::cat(BCDBCategory),
                                 cl::sub(*cl::AllSubCommands));
 
 // bcdb add
@@ -271,6 +272,21 @@ int main(int argc, char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
   sys::PrintStackTraceOnErrorSignal(argv[0]);
 
+  for (auto &I : cl::TopLevelSubCommand->OptionsMap) {
+    if (OptionHasCategory(*I.second, cl::GeneralCategory)) {
+      // Hide LLVM's options, since they're mostly irrelevant.
+      I.second->setHiddenFlag(cl::Hidden);
+      I.second->addSubCommand(*cl::AllSubCommands);
+    } else if (OptionHasCategory(*I.second, BCDBCategory)) {
+      I.second->addSubCommand(*cl::AllSubCommands);
+    } else if (OptionHasCategory(*I.second, MergeCategory)) {
+      I.second->addSubCommand(MergeCommand);
+      I.second->addSubCommand(MuxCommand);
+      I.second->addSubCommand(Mux2Command);
+    } else {
+      // no change (--help, --version, etc.)
+    }
+  }
   cl::ParseCommandLineOptions(argc, argv, "BCDB Tools");
 
   if (AddCommand) {

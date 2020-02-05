@@ -14,9 +14,15 @@
 namespace llvm {
 class Module;
 class StringRef;
+namespace cl {
+class OptionCategory;
+} // end namespace cl
 } // end namespace llvm
 
 namespace bcdb {
+
+extern llvm::cl::OptionCategory BCDBCategory;
+extern llvm::cl::OptionCategory MergeCategory;
 
 class BCDB {
   std::unique_ptr<llvm::LLVMContext> Context;

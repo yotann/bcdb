@@ -2,6 +2,7 @@
 #define BCDB_LLVMCOMPAT_H
 
 #include <llvm/Config/llvm-config.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Compiler.h>
 
 #if LLVM_VERSION_MAJOR < 6
@@ -26,5 +27,19 @@ static void LLVM_ATTRIBUTE_UNUSED WriteBitcodeToFile(const Module &M,
 }
 } // end namespace llvm
 #endif
+
+namespace bcdb {
+static inline bool OptionHasCategory(llvm::cl::Option &O,
+                                     llvm::cl::OptionCategory &C) {
+#if LLVM_VERSION_MAJOR < 9
+  return O.Category == &C;
+#else
+  for (llvm::cl::OptionCategory *C2 : O.Categories)
+    if (C2 == &C)
+      return true;
+  return false;
+#endif
+}
+} // end namespace bcdb
 
 #endif // BCDB_LLVMCOMPAT_H

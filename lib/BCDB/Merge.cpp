@@ -25,12 +25,13 @@
 using namespace bcdb;
 using namespace llvm;
 
+cl::OptionCategory bcdb::MergeCategory("Merging options");
+
 static cl::opt<bool> DisableDeduplication("disable-deduplication",
-                                          cl::sub(*cl::AllSubCommands));
-static cl::opt<bool> DisableStubs("disable-stubs",
-                                  cl::sub(*cl::AllSubCommands));
+                                          cl::cat(MergeCategory));
+static cl::opt<bool> DisableStubs("disable-stubs", cl::cat(MergeCategory));
 static cl::opt<bool> WriteGlobalGraph("write-global-graph",
-                                      cl::sub(*cl::AllSubCommands));
+                                      cl::cat(MergeCategory));
 
 static StringSet<> FindGlobalReferences(GlobalValue *Root) {
   StringSet<> Result;
