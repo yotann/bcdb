@@ -32,7 +32,20 @@ static const char SQLITE_INIT_STMTS[] =
     "  key TEXT NOT NULL,          -- Entry key\n"
     "  value INTEGER NOT NULL      -- Entry value\n"
     ");\n"
-    "CREATE UNIQUE INDEX IF NOT EXISTS map_index ON map(vid, key);\n";
+    "CREATE UNIQUE INDEX IF NOT EXISTS map_index ON map(vid, key);\n"
+    "CREATE TABLE IF NOT EXISTS func(\n"
+    "  fid INTEGER PRIMARY KEY,    -- Func ID\n"
+    "  name TEXT UNIQUE NOT NULL   -- Func name\n"
+    ");\n"
+    "CREATE TABLE IF NOT EXISTS call(\n"
+    "  cid INTEGER PRIMARY KEY,    -- Call ID\n"
+    "  fid INTEGER,                -- Func ID\n"
+    "  parent INTEGER,             -- Call ID of parent\n"
+    "                              --   (only if this is not the first arg)\n"
+    "  arg INTEGER NOT NULL,       -- Value ID of argument\n"
+    "  result INTEGER              -- Value ID of result\n"
+    "                              --   (only if this is the last arg)\n"
+    ");\n";
 
 namespace {
 class sqlite_db : public memodb_db {
@@ -40,24 +53,36 @@ class sqlite_db : public memodb_db {
 
   void fatal_error();
 
+  sqlite3_int64 get_fid(llvm::StringRef name, bool create_if_missing = false);
+
 public:
   void open(const char *path, bool create_if_missing);
+  ~sqlite_db() override { sqlite3_close(db); }
+
   std::string value_get_id(memodb_value *value) override;
   std::unique_ptr<memodb_value> get_value_by_id(llvm::StringRef id) override;
+
   std::unique_ptr<memodb_value>
   blob_create(llvm::ArrayRef<uint8_t> data) override;
   const void *blob_get_buffer(memodb_value *blob) override;
   int blob_get_size(memodb_value *blob, size_t *size) override;
+
   memodb_value *map_create(const char **keys, memodb_value **values,
                            size_t count) override;
   memodb_value *map_lookup(memodb_value *map, const char *key) override;
   std::map<std::string, std::shared_ptr<memodb_value>>
   map_list_items(memodb_value *map) override;
+
   std::vector<std::string> list_heads() override;
   memodb_value *head_get(const char *name) override;
   void head_set(llvm::StringRef name, memodb_value *value) override;
-  ~sqlite_db() override { sqlite3_close(db); }
   void head_delete(llvm::StringRef name) override;
+
+  memodb_value *call_get(llvm::StringRef name,
+                         llvm::ArrayRef<memodb_value *> args) override;
+  void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_value *> args,
+                memodb_value *result) override;
+  void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
 
@@ -329,12 +354,100 @@ std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
                                               bool create_if_missing) {
   auto db = std::make_unique<sqlite_db>();
   db->open(path.str().c_str(), create_if_missing);
-  return std::move(db);
+  return db;
 }
 
 void sqlite_db::head_delete(llvm::StringRef name) {
   Stmt delete_stmt(db, "DELETE FROM head WHERE name = ?1");
   delete_stmt.bind_text(1, name);
+  if (delete_stmt.step() != SQLITE_DONE)
+    fatal_error();
+}
+
+sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
+  Stmt stmt(db, "SELECT fid FROM func WHERE name = ?1");
+  stmt.bind_text(1, name);
+  if (stmt.step() == SQLITE_ROW)
+    return sqlite3_column_int64(stmt.stmt, 0);
+  if (!create_if_missing)
+    return -1;
+
+  Stmt insert_stmt(db, "INSERT INTO func(name) VALUES (?1)");
+  insert_stmt.bind_text(1, name);
+  if (insert_stmt.step() != SQLITE_DONE)
+    fatal_error();
+  return sqlite3_last_insert_rowid(db);
+}
+
+memodb_value *sqlite_db::call_get(llvm::StringRef name,
+                                  llvm::ArrayRef<memodb_value *> args) {
+  auto fid = get_fid(name);
+  if (fid == -1)
+    return nullptr;
+
+  Stmt stmt(db, "SELECT cid, result FROM call WHERE fid = ?1 AND parent IS ?2 "
+                "AND arg = ?3");
+  stmt.bind_int(1, fid);
+  sqlite3_int64 parent = -1;
+  for (memodb_value *arg : args) {
+    const sqlite_value *value = static_cast<const sqlite_value *>(arg);
+    stmt.reset();
+    if (parent != -1)
+      stmt.bind_int(2, parent);
+    stmt.bind_int(3, value->id);
+    if (stmt.step() != SQLITE_ROW)
+      return nullptr;
+    parent = sqlite3_column_int64(stmt.stmt, 0);
+  }
+
+  auto result = sqlite3_column_int64(stmt.stmt, 1);
+  return new sqlite_value(result);
+}
+
+void sqlite_db::call_set(llvm::StringRef name,
+                         llvm::ArrayRef<memodb_value *> args,
+                         memodb_value *result) {
+  auto fid = get_fid(name, /* create_if_missing */ true);
+
+  Stmt select_stmt(
+      db, "SELECT cid FROM call WHERE fid = ?1 AND parent IS ?2 AND arg = ?3");
+  Stmt insert_stmt(db, "INSERT INTO call(fid, parent, arg) VALUES(?1,?2,?3)");
+  select_stmt.bind_int(1, fid);
+  insert_stmt.bind_int(1, fid);
+  sqlite3_int64 parent = -1;
+  for (memodb_value *arg : args) {
+    const sqlite_value *value = static_cast<const sqlite_value *>(arg);
+    select_stmt.reset();
+    insert_stmt.reset();
+    if (parent != -1) {
+      select_stmt.bind_int(2, parent);
+      insert_stmt.bind_int(2, parent);
+    }
+    select_stmt.bind_int(3, value->id);
+    insert_stmt.bind_int(3, value->id);
+    if (select_stmt.step() == SQLITE_ROW) {
+      parent = sqlite3_column_int64(select_stmt.stmt, 0);
+    } else {
+      if (insert_stmt.step() != SQLITE_DONE)
+        fatal_error();
+      parent = sqlite3_last_insert_rowid(db);
+    }
+  }
+
+  Stmt update_stmt(db, "UPDATE call SET result = ?1 WHERE cid = ?2");
+  update_stmt.bind_int(1, static_cast<const sqlite_value *>(result)->id);
+  update_stmt.bind_int(2, parent);
+  if (update_stmt.step() != SQLITE_DONE)
+    fatal_error();
+}
+
+void sqlite_db::call_invalidate(llvm::StringRef name) {
+  auto fid = get_fid(name);
+  if (fid == -1)
+    return;
+
+  Stmt delete_stmt(db, "DELETE FROM call WHERE fid = ?1");
+  delete_stmt.bind_int(1, fid);
   if (delete_stmt.step() != SQLITE_DONE)
     fatal_error();
 }
