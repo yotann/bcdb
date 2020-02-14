@@ -30,10 +30,12 @@ class BCDB {
 
 public:
   BCDB(std::unique_ptr<memodb_db> db);
+  ~BCDB();
   static llvm::Error Init(llvm::StringRef uri);
   static llvm::Expected<std::unique_ptr<BCDB>> Open(llvm::StringRef uri);
 
-  ~BCDB();
+  memodb_db &get_db() { return *db; }
+
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
   llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
   llvm::Expected<std::unique_ptr<llvm::Module>>

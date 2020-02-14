@@ -1,6 +1,7 @@
 #include "bcdb/BCDB.h"
 #include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
+#include "memodb/memodb.h"
 
 #include <cstdlib>
 #include <llvm/ADT/StringRef.h>
@@ -277,6 +278,76 @@ static int Mux2() {
   return 0;
 }
 
+// Calls: bcdb invalidate
+
+static cl::SubCommand CacheCommand("cache", "Cache function call");
+static cl::SubCommand EvaluateCommand("evaluate", "Evaluate function call");
+static cl::SubCommand InvalidateCommand("invalidate",
+                                        "Invalidate cached function calls");
+
+static cl::opt<std::string> FuncResult("result", cl::Required,
+                                       cl::desc("function result ID"),
+                                       cl::sub(CacheCommand));
+static cl::opt<std::string>
+    FuncName(cl::Positional, cl::Required, cl::desc("<function name>"),
+             cl::value_desc("func"), cl::sub(CacheCommand),
+             cl::sub(EvaluateCommand), cl::sub(InvalidateCommand));
+static cl::list<std::string> FuncArgs(cl::Positional, cl::OneOrMore,
+                                      cl::desc("<arguments>"),
+                                      cl::sub(CacheCommand),
+                                      cl::sub(EvaluateCommand));
+
+static std::unique_ptr<memodb_value> get_value(BCDB &bcdb, llvm::StringRef id) {
+  auto result = bcdb.get_db().get_value_by_id(id);
+  if (!result)
+    report_fatal_error("Unrecognized ID " + id);
+  return result;
+}
+
+static int Cache() {
+  ExitOnError Err("bcdb cache: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+
+  auto result = get_value(*db, FuncResult);
+  std::vector<std::unique_ptr<memodb_value>> args;
+  std::vector<memodb_value *> args2;
+  for (const auto &arg_id : FuncArgs) {
+    args.push_back(get_value(*db, arg_id));
+    args2.push_back(args.back().get());
+  }
+
+  db->get_db().call_set(FuncName, args2, result.get());
+  return 0;
+}
+
+static int Evaluate() {
+  ExitOnError Err("bcdb evaluate: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+
+  std::vector<std::unique_ptr<memodb_value>> args;
+  std::vector<memodb_value *> args2;
+  for (const auto &arg_id : FuncArgs) {
+    args.push_back(get_value(*db, arg_id));
+    args2.push_back(args.back().get());
+  }
+
+  std::unique_ptr<memodb_value> result(db->get_db().call_get(FuncName, args2));
+  if (!result) {
+    report_fatal_error("Can't evaluate function " + FuncName);
+  }
+
+  outs() << db->get_db().value_get_id(result.get()) << "\n";
+  return 0;
+}
+
+static int Invalidate() {
+  ExitOnError Err("bcdb invalidate: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+
+  db->get_db().call_invalidate(FuncName);
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -302,14 +373,20 @@ int main(int argc, char **argv) {
 
   if (AddCommand) {
     return Add();
+  } else if (CacheCommand) {
+    return Cache();
   } else if (DeleteCommand) {
     return Delete();
+  } else if (EvaluateCommand) {
+    return Evaluate();
   } else if (GetCommand) {
     return Get();
   } else if (GetFunctionCommand) {
     return GetFunction();
   } else if (InitCommand) {
     return Init();
+  } else if (InvalidateCommand) {
+    return Invalidate();
   } else if (ListFunctionsCommand) {
     return ListFunctions();
   } else if (ListModulesCommand) {
