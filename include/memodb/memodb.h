@@ -68,9 +68,11 @@ private:
 
 public:
   memodb_value() : type_(UNDEFINED) {}
+  memodb_value(std::nullptr_t) : type_(NULL_TYPE) {}
 
   memodb_value(bool_t val) : type_(BOOL), bool_(val) {}
 
+  memodb_value(int val) : type_(INTEGER), integer_(val) {}
   memodb_value(integer_t val) : type_(INTEGER), integer_(val) {}
   memodb_value(std::uint64_t val) : type_(INTEGER), integer_(val) {}
 
@@ -88,7 +90,12 @@ public:
   memodb_value(const memodb_ref &val) : type_(REF), ref_(val) {}
 
   static memodb_value
-  array(std::initializer_list<array_t::value_type> init = {});
+  array(std::initializer_list<array_t::value_type> init = {}) {
+    memodb_value result;
+    result.type_ = ARRAY;
+    result.array_ = array_t(init);
+    return result;
+  }
   template <class InputIT>
   static memodb_value array(InputIT first, InputIT last);
 
