@@ -24,6 +24,8 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
     return os << (value.bool_ ? "true" : "false");
   case memodb_value::INTEGER:
     return os << value.integer_;
+  case memodb_value::FLOAT:
+    return os << value.float_;
   case memodb_value::BYTES:
     // TODO
     return os << "bytes";
@@ -53,6 +55,65 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
     return os << '}';
   }
   return os << "UNKNOWN";
+}
+
+static memodb_value::float_t decode_float(std::uint64_t value, int total_size,
+                                          int mantissa_size,
+                                          int exponent_bias) {
+  std::uint64_t exponent_mask = (1ull << (total_size - mantissa_size - 1)) - 1;
+  std::uint64_t exponent = (value >> mantissa_size) & exponent_mask;
+  std::uint64_t mantissa = value & ((1ull << mantissa_size) - 1);
+  memodb_value::float_t result;
+  if (exponent == 0)
+    result =
+        std::ldexp(mantissa, 1 - (mantissa_size + exponent_bias)); // denormal
+  else if (exponent == exponent_mask)
+    result = mantissa == 0 ? INFINITY : NAN;
+  else
+    result = std::ldexp(mantissa + (1ull << mantissa_size),
+                        exponent - (mantissa_size + exponent_bias));
+  return value & (1ull << (total_size - 1)) ? -result : result;
+}
+
+static bool encode_float(std::uint64_t &result, memodb_value::float_t value,
+                         int total_size, int mantissa_size, int exponent_bias) {
+  std::uint64_t exponent_mask = (1ull << (total_size - mantissa_size - 1)) - 1;
+  int exponent;
+  std::uint64_t mantissa;
+  bool exact = true;
+  bool sign = std::signbit(value);
+  if (std::isnan(value)) {
+    exponent = exponent_mask;
+    mantissa = 1ull << (mantissa_size - 1);
+    sign = false;
+  } else if (std::isinf(value)) {
+    exponent = exponent_mask;
+    mantissa = 0;
+  } else if (value == 0.0) {
+    exponent = 0;
+    mantissa = 0;
+  } else {
+    value = std::frexp(std::abs(value), &exponent);
+    exponent += exponent_bias - 1;
+    if (exponent >= (int)exponent_mask) { // too large, use infinity
+      exponent = exponent_mask;
+      mantissa = 0;
+      exact = false;
+    } else {
+      if (exponent <= 0) { // denormal
+        value = std::ldexp(value, exponent);
+        exponent = 0;
+      } else {
+        value = std::ldexp(value, 1) - 1.0;
+      }
+      value = std::ldexp(value, mantissa_size);
+      mantissa = (std::uint64_t)value;
+      exact = (memodb_value::float_t)mantissa == value;
+    }
+  }
+  result = (sign ? (1ull << (total_size - 1)) : 0) |
+           (std::uint64_t(exponent) << mantissa_size) | mantissa;
+  return exact;
 }
 
 memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
@@ -181,6 +242,12 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
       return result;
     case 23: // undefined
       return {};
+    case 25:
+      return decode_float(additional, 16, 10, 15);
+    case 26:
+      return decode_float(additional, 32, 23, 127);
+    case 27:
+      return decode_float(additional, 64, 52, 1023);
     }
     assert(false);
   default:
@@ -189,18 +256,19 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
 }
 
 void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
-  auto start = [&](int major_type, std::uint64_t additional) {
+  auto start = [&](int major_type, std::uint64_t additional,
+                   int force_minor = 0) {
     int num_bytes;
-    if (additional < 24) {
+    if (force_minor == 0 && additional < 24) {
       out.push_back(major_type << 5 | additional);
       num_bytes = 0;
-    } else if (additional < 0x100) {
+    } else if (force_minor ? force_minor == 24 : additional < 0x100) {
       out.push_back(major_type << 5 | 24);
       num_bytes = 1;
-    } else if (additional < 0x10000) {
+    } else if (force_minor ? force_minor == 25 : additional < 0x10000) {
       out.push_back(major_type << 5 | 25);
       num_bytes = 2;
-    } else if (additional < 0x100000000) {
+    } else if (force_minor ? force_minor == 26 : additional < 0x100000000) {
       out.push_back(major_type << 5 | 26);
       num_bytes = 4;
     } else {
@@ -226,6 +294,17 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
       start(1, -integer_ - 1);
     else
       start(0, integer_);
+    break;
+  case FLOAT:
+    std::uint64_t additional;
+    if (encode_float(additional, float_, 16, 10, 15))
+      start(7, additional, 25);
+    else if (encode_float(additional, float_, 32, 23, 127))
+      start(7, additional, 26);
+    else {
+      encode_float(additional, float_, 64, 52, 1023);
+      start(7, additional, 27);
+    }
     break;
   case BYTES:
     start(2, bytes_.size());

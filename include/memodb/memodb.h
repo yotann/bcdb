@@ -31,6 +31,7 @@ public:
     NULL_TYPE,
     BOOL,
     INTEGER,
+    FLOAT,
     BYTES,
     STRING,
     REF,
@@ -49,6 +50,7 @@ public:
 
   using bool_t = bool;
   using integer_t = std::int64_t;
+  using float_t = double;
   using bytes_t = std::vector<std::uint8_t>;
   using string_t = std::string;
   using ref_t = memodb_ref;
@@ -61,6 +63,7 @@ private:
   // TODO: use union
   bool_t bool_;
   integer_t integer_;
+  float_t float_;
   bytes_t bytes_;
   string_t string_;
   ref_t ref_;
@@ -76,6 +79,8 @@ public:
   memodb_value(int val) : type_(INTEGER), integer_(val) {}
   memodb_value(integer_t val) : type_(INTEGER), integer_(val) {}
   memodb_value(std::uint64_t val) : type_(INTEGER), integer_(val) {}
+
+  memodb_value(float_t val) : type_(FLOAT), float_(val) {}
 
   memodb_value(llvm::ArrayRef<std::uint8_t> val) : type_(BYTES), bytes_(val) {}
   static memodb_value bytes(llvm::StringRef val) {
@@ -108,6 +113,10 @@ public:
   }
   template <class InputIT> static memodb_value map(InputIT first, InputIT last);
 
+  float_t as_float() const {
+    require_type(FLOAT);
+    return float_;
+  }
   const ref_t &as_ref() const {
     require_type(REF);
     return ref_;
@@ -188,6 +197,8 @@ public:
       return bool_ < other.bool_;
     case INTEGER:
       return integer_ < other.integer_;
+    case FLOAT:
+      return float_ < other.float_;
     case BYTES:
       return bytes_ < other.bytes_;
     case STRING:
@@ -213,6 +224,8 @@ public:
       return bool_ == other.bool_;
     case INTEGER:
       return integer_ == other.integer_;
+    case FLOAT:
+      return float_ == other.float_;
     case BYTES:
       return bytes_ == other.bytes_;
     case STRING:
