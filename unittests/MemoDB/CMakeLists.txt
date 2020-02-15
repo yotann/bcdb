@@ -1,4 +1,5 @@
 add_llvm_unittest(MemoDBTests
+  CborLoadTest.cpp
   CborSaveTest.cpp
 )
 

@@ -21,6 +21,7 @@ public:
   operator llvm::StringRef() const { return id_; }
   operator bool() const { return !id_.empty(); }
   bool operator<(const memodb_ref &other) const { return id_ < other.id_; }
+  bool operator==(const memodb_ref &other) const { return id_ == other.id_; }
 };
 
 class memodb_value {
@@ -197,6 +198,31 @@ public:
       return array_ < other.array_;
     case MAP:
       return map_ < other.map_;
+    }
+    llvm_unreachable("missing switch case");
+  }
+
+  bool operator==(const memodb_value &other) const {
+    if (type_ != other.type_)
+      return false;
+    switch (type_) {
+    case UNDEFINED:
+    case NULL_TYPE:
+      return true;
+    case BOOL:
+      return bool_ == other.bool_;
+    case INTEGER:
+      return integer_ == other.integer_;
+    case BYTES:
+      return bytes_ == other.bytes_;
+    case STRING:
+      return string_ == other.string_;
+    case REF:
+      return ref_ == other.ref_;
+    case ARRAY:
+      return array_ == other.array_;
+    case MAP:
+      return map_ == other.map_;
     }
     llvm_unreachable("missing switch case");
   }
