@@ -1,0 +1,8 @@
+import os
+import lit.formats
+
+config.name = "bcdb-Unit"
+config.test_format = lit.formats.GoogleTest('', 'Tests')
+config.suffixes = []
+config.test_source_root = "@CMAKE_BINARY_DIR@/unittests"
+config.test_exec_root = "@CMAKE_BINARY_DIR@/unittests"

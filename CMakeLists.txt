@@ -105,6 +105,9 @@ endfunction()
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+add_subdirectory(third_party/googletest)
+
 add_subdirectory(lib)
 add_subdirectory(test)
 add_subdirectory(tools)
+add_subdirectory(unittests)

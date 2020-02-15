@@ -2,6 +2,10 @@ configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.cfg.py
 )
+configure_lit_site_cfg(
+  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.cfg.py.in
+  ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.cfg.py
+)
 
 set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/third_party/lit-0.7.0/lit.py)
 # LIT_COMMAND is needed until LLVM 6
@@ -23,6 +27,11 @@ add_subdirectory(BCDB)
 add_subdirectory(Merge)
 add_subdirectory(Mux)
 add_subdirectory(Split)
+
+add_lit_testsuite(check-unit "Running unit tests"
+  ${CMAKE_CURRENT_BINARY_DIR}/Unit
+  DEPENDS UnitTests
+)
 
 # Now that we've added all test suites, define the combined "make check"
 # command.
