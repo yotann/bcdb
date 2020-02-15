@@ -297,26 +297,16 @@ static cl::list<std::string> FuncArgs(cl::Positional, cl::OneOrMore,
                                       cl::sub(CacheCommand),
                                       cl::sub(EvaluateCommand));
 
-static std::unique_ptr<memodb_value> get_value(BCDB &bcdb, llvm::StringRef id) {
-  auto result = bcdb.get_db().get_value_by_id(id);
-  if (!result)
-    report_fatal_error("Unrecognized ID " + id);
-  return result;
-}
-
 static int Cache() {
   ExitOnError Err("bcdb cache: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
 
-  auto result = get_value(*db, FuncResult);
-  std::vector<std::unique_ptr<memodb_value>> args;
-  std::vector<memodb_value *> args2;
+  std::vector<memodb_ref> args;
   for (const auto &arg_id : FuncArgs) {
-    args.push_back(get_value(*db, arg_id));
-    args2.push_back(args.back().get());
+    args.push_back(memodb_ref(arg_id));
   }
 
-  db->get_db().call_set(FuncName, args2, result.get());
+  db->get_db().call_set(FuncName, args, memodb_ref(FuncResult));
   return 0;
 }
 
@@ -324,19 +314,17 @@ static int Evaluate() {
   ExitOnError Err("bcdb evaluate: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
 
-  std::vector<std::unique_ptr<memodb_value>> args;
-  std::vector<memodb_value *> args2;
+  std::vector<memodb_ref> args;
   for (const auto &arg_id : FuncArgs) {
-    args.push_back(get_value(*db, arg_id));
-    args2.push_back(args.back().get());
+    args.push_back(memodb_ref(arg_id));
   }
 
-  std::unique_ptr<memodb_value> result(db->get_db().call_get(FuncName, args2));
+  memodb_ref result = db->get_db().call_get(FuncName, args);
   if (!result) {
     report_fatal_error("Can't evaluate function " + FuncName);
   }
 
-  outs() << db->get_db().value_get_id(result.get()) << "\n";
+  outs() << llvm::StringRef(result) << "\n";
   return 0;
 }
 

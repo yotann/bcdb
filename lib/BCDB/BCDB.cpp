@@ -49,21 +49,14 @@ Expected<std::vector<std::string>> BCDB::ListModules() {
 }
 
 Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
-  memodb_value *head = db->head_get(Name.str().c_str());
-  if (!head)
+  memodb_ref ref = db->head_get(Name);
+  if (!ref)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
-  memodb_value *parent = db->map_lookup(head, "functions");
-  delete head;
-  if (!parent)
-    return make_error<StringError>("could not look up function",
-                                   inconvertibleErrorCode());
-  auto items = db->map_list_items(parent);
-  delete parent;
+  memodb_value head = db->get(ref);
   std::vector<std::string> result;
-  result.reserve(items.size());
-  for (auto &item : items) {
-    result.push_back(db->value_get_id(item.second.get()));
+  for (auto &item : head["functions"].map_items()) {
+    result.push_back(llvm::StringRef(item.second.as_ref()));
   }
   return result;
 }
@@ -92,55 +85,41 @@ Error BCDB::Delete(llvm::StringRef Name) {
 namespace {
 class BCDBSplitSaver : public SplitSaver {
   memodb_db *db;
-  std::vector<std::string> function_keys;
-  std::vector<std::unique_ptr<memodb_value>> function_values;
-  std::unique_ptr<memodb_value> remainder_value;
+  std::map<std::string, memodb_ref> functions;
+  memodb_ref remainder_value;
 
-  Expected<std::unique_ptr<memodb_value>> SaveModule(Module &M) {
+  Expected<memodb_ref> SaveModule(Module &M) {
     SmallVector<char, 0> Buffer;
     WriteUnalignedModule(M, Buffer);
-    return db->blob_create(ArrayRef<uint8_t>(
+    auto value = memodb_value(ArrayRef<uint8_t>(
         reinterpret_cast<uint8_t *>(Buffer.data()), Buffer.size()));
+    return db->put(value);
   }
 
 public:
   BCDBSplitSaver(memodb_db *db) : db(db) {}
   Error saveFunction(std::unique_ptr<Module> M, StringRef Name) override {
-    Expected<std::unique_ptr<memodb_value>> value = SaveModule(*M);
+    Expected<memodb_ref> value = SaveModule(*M);
     if (!value)
       return value.takeError();
-    function_keys.push_back(Name);
-    function_values.emplace_back(std::move(*value));
+    functions[Name] = *value;
     return Error::success();
   }
   Error saveRemainder(std::unique_ptr<Module> M) override {
-    Expected<std::unique_ptr<memodb_value>> value = SaveModule(*M);
+    Expected<memodb_ref> value = SaveModule(*M);
     if (!value)
       return value.takeError();
-    remainder_value = std::move(*value);
+    remainder_value = *value;
     return Error::success();
   }
-  Expected<memodb_value *> finish() {
-    std::vector<const char *> function_keys_c;
-    for (const std::string &x : function_keys)
-      function_keys_c.push_back(x.c_str());
-    std::vector<memodb_value *> function_values_c;
-    for (auto &x : function_values)
-      function_values_c.push_back(x.get());
-    memodb_value *function_map = db->map_create(
-        function_keys_c.data(), function_values_c.data(), function_keys.size());
-    if (!function_map)
-      return make_error<StringError>("could not create function map",
-                                     inconvertibleErrorCode());
+  Expected<memodb_ref> finish() {
+    auto function_map = memodb_value::map();
+    for (auto &item : functions)
+      function_map[memodb_value::bytes(item.first)] = item.second;
 
-    const char *keys[] = {"functions", "remainder"};
-    memodb_value *values[] = {function_map, remainder_value.get()};
-    memodb_value *result = db->map_create(keys, values, 2);
-    delete function_map;
-    if (!result)
-      return make_error<StringError>("could not create module map",
-                                     inconvertibleErrorCode());
-    return result;
+    auto result = memodb_value::map(
+        {{"functions", function_map}, {"remainder", remainder_value}});
+    return db->put(result);
   }
 };
 } // end anonymous namespace
@@ -189,25 +168,19 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   BCDBSplitSaver Saver(db.get());
   if (Error Err = SplitModule(std::move(M), Saver))
     return Err;
-  Expected<memodb_value *> ValueOrErr = Saver.finish();
+  Expected<memodb_ref> ValueOrErr = Saver.finish();
   if (!ValueOrErr)
     return ValueOrErr.takeError();
   db->head_set(Name, *ValueOrErr);
-  delete *ValueOrErr;
   return Error::success();
 }
 
 static Expected<std::unique_ptr<Module>>
-LoadModuleFromValue(memodb_db *db, memodb_value *value, StringRef Name,
+LoadModuleFromValue(memodb_db *db, const memodb_ref &ref, StringRef Name,
                     LLVMContext &Context) {
-  size_t buffer_size;
-  int rc = db->blob_get_size(value, &buffer_size);
-  const char *buffer =
-      reinterpret_cast<const char *>(db->blob_get_buffer(value));
-  if (rc || !buffer)
-    return make_error<StringError>("could not read module blob",
-                                   inconvertibleErrorCode());
-  StringRef buffer_ref(buffer, buffer_size);
+  memodb_value value = db->get(ref);
+  StringRef buffer_ref(reinterpret_cast<const char *>(value.as_bytes().data()),
+                       value.as_bytes().size());
   auto result = parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context);
   return result;
 }
@@ -224,88 +197,63 @@ static bool isStub(const Function &F) {
 
 Expected<std::unique_ptr<Module>>
 BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
-  memodb_value *head = db->head_get(Name.str().c_str());
-  if (!head)
+  memodb_ref head_ref = db->head_get(Name);
+  if (!head_ref)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
-
-  memodb_value *remainder = db->map_lookup(head, "remainder");
-  memodb_value *functions = db->map_lookup(head, "functions");
-  if (!remainder || !functions)
-    return make_error<StringError>("could not look up parts of module",
-                                   inconvertibleErrorCode());
-
-  auto Remainder = LoadModuleFromValue(db.get(), remainder, Name, *Context);
+  memodb_value head = db->get(head_ref);
+  auto Remainder =
+      LoadModuleFromValue(db.get(), head["remainder"].as_ref(), Name, *Context);
   if (!Remainder)
     return Remainder.takeError();
 
   for (Function &F : **Remainder) {
     if (isStub(F)) {
       StringRef Name = F.getName();
-      memodb_value *value = db->map_lookup(functions, Name.str().c_str());
-      if (!value)
+      memodb_ref ref = head["functions"][memodb_value::bytes(Name)].as_ref();
+      if (!ref)
         return make_error<StringError>("could not look up function",
                                        inconvertibleErrorCode());
-      PartIDs[Name] = db->value_get_id(value);
-      delete value;
+      PartIDs[Name] = llvm::StringRef(ref);
     }
   }
-
-  delete head;
-  delete remainder;
-  delete functions;
 
   return Remainder;
 }
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
-  auto value = db->get_value_by_id(Id);
-  return LoadModuleFromValue(db.get(), value.get(), Id, *Context);
+  return LoadModuleFromValue(db.get(), memodb_ref(Id), Id, *Context);
 }
 
 namespace {
 class BCDBSplitLoader : public SplitLoader {
   LLVMContext &Context;
   memodb_db *db;
-  memodb_value *root;
-
-  Expected<std::unique_ptr<Module>> LoadModule(memodb_value *parent,
-                                               StringRef Name) {
-    memodb_value *value = db->map_lookup(parent, Name.str().c_str());
-    if (!value)
-      return make_error<StringError>("could not look up module",
-                                     inconvertibleErrorCode());
-    auto result = LoadModuleFromValue(db, value, Name, Context);
-    delete value;
-    return result;
-  }
+  memodb_value root;
 
 public:
-  BCDBSplitLoader(LLVMContext &Context, memodb_db *db, memodb_value *root)
-      : Context(Context), db(db), root(root) {}
-  ~BCDBSplitLoader() { delete root; }
+  BCDBSplitLoader(LLVMContext &Context, memodb_db *db,
+                  const memodb_ref &root_ref)
+      : Context(Context), db(db), root(db->get(root_ref)) {}
 
   Expected<std::unique_ptr<Module>> loadFunction(StringRef Name) override {
-    memodb_value *parent = db->map_lookup(root, "functions");
-    if (!parent)
-      return make_error<StringError>("could not look up function",
-                                     inconvertibleErrorCode());
-    auto result = LoadModule(parent, Name);
-    delete parent;
-    return result;
+    return LoadModuleFromValue(
+        db, root["functions"][memodb_value::bytes(Name)].as_ref(), Name,
+        Context);
   }
 
   Expected<std::unique_ptr<Module>> loadRemainder() override {
-    return LoadModule(root, "remainder");
+    return LoadModuleFromValue(db, root["remainder"].as_ref(), "remainder",
+                               Context);
   }
 };
 } // end anonymous namespace
 
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
-  memodb_value *value = db->head_get(Name.str().c_str());
-  if (!value)
+  memodb_ref head = db->head_get(Name);
+  if (!head)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
-  BCDBSplitLoader Loader(*Context, db.get(), value);
+  BCDBSplitLoader Loader(*Context, db.get(), head);
   return JoinModule(Loader);
 }
