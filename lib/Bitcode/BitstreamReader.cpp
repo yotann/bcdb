@@ -345,7 +345,7 @@ BitstreamCursor::ReadBlockInfoBlock(bool ReadBlockInfoNames) {
     case BitstreamEntry::Error:
       return None;
     case BitstreamEntry::EndBlock:
-      return std::move(NewBlockInfo);
+      return NewBlockInfo;
     case BitstreamEntry::Record:
       // The interesting case.
       break;

@@ -124,5 +124,5 @@ Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
   M->getFunctionList().insert(M->getFunctionList().end(), OutFunctions.begin(),
                               OutFunctions.end());
 
-  return std::move(M);
+  return M;
 }

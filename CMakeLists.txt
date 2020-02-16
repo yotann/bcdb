@@ -5,7 +5,15 @@ project(BCDB C CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-add_definitions(-Wall)
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  add_definitions(-Wall
+    -Wno-covered-switch-default)
+elseif (CMAKE_COMPILER_IS_GNUCXX)
+  add_definitions(-Wall
+    -Wno-redundant-move # sometimes Clang requires a move that GCC warns about
+    -Wno-init-list-lifetime)
+endif()
 
 SET(CMAKE_CXX_FLAGS_COVERAGE
   "${CMAKE_CXX_FLAGS_DEBUG_INIT} --coverage"
@@ -105,6 +113,7 @@ endfunction()
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+set(GOOGLETEST_VERSION 1.10.0)
 add_subdirectory(third_party/googletest)
 
 add_subdirectory(lib)

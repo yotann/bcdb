@@ -62,7 +62,7 @@ public:
       Err.print("bc-join", errs());
       exit(1);
     }
-    return std::move(M);
+    return M;
   }
 };
 } // end anonymous namespace
