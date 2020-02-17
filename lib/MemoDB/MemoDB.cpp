@@ -14,6 +14,21 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
+  // Print the value in CBOR diagnostic notation.
+
+  auto print_escaped = [&](llvm::StringRef str) {
+    for (char c : str) {
+      if (c == '\\' || c == '"')
+        os << '\\' << c;
+      else if ((unsigned char)c < 0x20 || c == 0x7f) {
+        char buf[5];
+        std::snprintf(buf, sizeof(buf), "%04x", (unsigned int)(unsigned char)c);
+        os << "\\u" << buf;
+      } else
+        os << c;
+    }
+  };
+
   bool first = true;
   switch (value.type_) {
   case memodb_value::UNDEFINED:
@@ -25,21 +40,32 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
   case memodb_value::INTEGER:
     return os << value.integer_;
   case memodb_value::FLOAT:
+    if (std::isnan(value.float_))
+      return os << "NaN";
+    if (std::isinf(value.float_))
+      return os << (value.float_ < 0 ? "-Infinity" : "Infinity");
     return os << value.float_;
   case memodb_value::BYTES:
-    // TODO
-    return os << "bytes";
+    os << "h'";
+    for (std::uint8_t b : value.bytes_) {
+      char buf[3];
+      std::snprintf(buf, sizeof(buf), "%02x", b);
+      os << buf;
+    }
+    return os << "'";
   case memodb_value::STRING:
-    // TODO: escape
-    return os << '"' << value.string_ << '"';
+    os << '"';
+    print_escaped(value.string_);
+    return os << '"';
   case memodb_value::REF:
-    // TODO: escape
-    return os << "39(\"" << llvm::StringRef(value.ref_).str() << "\")";
+    os << "39(\"";
+    print_escaped(value.ref_);
+    return os << "\")";
   case memodb_value::ARRAY:
     os << '[';
     for (const auto &item : value.array_) {
       if (!first)
-        os << ',';
+        os << ", ";
       first = false;
       os << item;
     }
@@ -48,9 +74,9 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
     os << '{';
     for (const auto &item : value.map_) {
       if (!first)
-        os << ',';
+        os << ", ";
       first = false;
-      os << item.first << ':' << item.second;
+      os << item.first << ": " << item.second;
     }
     return os << '}';
   }

@@ -91,7 +91,12 @@ public:
   // TODO: verify that value is valid UTF-8.
   memodb_value(const char *val) : type_(STRING), string_(val) {}
   // Explicit because strings are often not valid UTF-8.
-  static memodb_value string(llvm::StringRef val);
+  static memodb_value string(llvm::StringRef val) {
+    memodb_value result;
+    result.type_ = STRING;
+    result.string_ = val;
+    return result;
+  }
 
   memodb_value(const memodb_ref &val) : type_(REF), ref_(val) {}
 
