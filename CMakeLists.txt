@@ -88,6 +88,11 @@ set(LLVM_RUNTIME_OUTPUT_INTDIR
     ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
 set(LLVM_LIBRARY_OUTPUT_INTDIR
     ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
+if(WIN32 OR CYGWIN)
+  set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
+else()
+  set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+endif()
 
 link_directories(${LLVM_LIBRARY_DIR})
 include_directories(${LLVM_INCLUDE_DIR})
@@ -108,6 +113,13 @@ function(tool_link_libraries binary)
     )
   endif()
 endfunction()
+
+# LLVM stopped using add_llvm_loadable_module in version 8.
+if( ${LLVM_VERSION_MAJOR} GREATER 7 )
+  function(add_llvm_loadable_module name)
+    add_llvm_library(${name} MODULE ${ARGN})
+  endfunction()
+endif()
 
 
 

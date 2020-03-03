@@ -11,6 +11,9 @@ config.excludes = [ "Inputs" ]
 for i in range(3, 1 + @LLVM_VERSION_MAJOR@):
     config.available_features.add('llvm' + str(i))
 
+config.substitutions.append(("%shlibdir", "@LLVM_SHLIB_OUTPUT_INTDIR@"))
+config.substitutions.append(("%shlibext", "@SHLIBEXT@"))
+
 # Add our newly-built tools to the path
 newpath = "@LLVM_RUNTIME_OUTPUT_INTDIR@"
 curpath = os.environ.get("PATH", "")
