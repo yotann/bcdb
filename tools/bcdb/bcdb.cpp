@@ -1,8 +1,3 @@
-#include "bcdb/BCDB.h"
-#include "bcdb/LLVMCompat.h"
-#include "bcdb/Split.h"
-#include "memodb/memodb.h"
-
 #include <cstdlib>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -20,6 +15,11 @@
 #include <llvm/Support/raw_ostream.h>
 #include <memory>
 #include <string>
+
+#include "bcdb/BCDB.h"
+#include "bcdb/LLVMCompat.h"
+#include "bcdb/Split.h"
+#include "memodb/memodb.h"
 
 using namespace bcdb;
 using namespace llvm;
