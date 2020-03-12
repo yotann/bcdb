@@ -61,4 +61,5 @@ licenses, and/or restrictions:
 
 Program             Directory
 -------             ---------
+googletest          third_party/googletest
 lit                 third_party/lit-0.7.0
