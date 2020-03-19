@@ -1,12 +1,12 @@
 #ifndef BCDB_SPLIT_H
 #define BCDB_SPLIT_H
 
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/Linker/IRMover.h>
 #include <llvm/Support/Error.h>
 #include <memory>
 
 namespace llvm {
+class LLVMContext;
 class Module;
 class StringRef;
 } // end namespace llvm

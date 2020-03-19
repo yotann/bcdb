@@ -4,17 +4,12 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Linker/IRMover.h>
 #include <llvm/Linker/Linker.h>
-#include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/Path.h>
-#include <llvm/Support/ScopedPrinter.h>
-#include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 
 #include <map>
-#include <set>
 
 #include "Merge.h"
 

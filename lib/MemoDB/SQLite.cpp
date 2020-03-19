@@ -1,8 +1,6 @@
 #include "memodb_internal.h"
 
 #include <llvm/ADT/StringRef.h>
-#include <llvm/Support/Errc.h>
-#include <llvm/Support/Error.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/ScopedPrinter.h>
 

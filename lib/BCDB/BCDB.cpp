@@ -1,20 +1,19 @@
 #include "bcdb/BCDB.h"
 
-#include "bcdb/AlignBitcode.h"
-#include "bcdb/Split.h"
-
 #include <llvm/Bitcode/BitcodeReader.h>
-#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Pass.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Transforms/IPO.h>
 #include <string>
 #include <vector>
+
+#include "bcdb/AlignBitcode.h"
+#include "bcdb/Split.h"
+#include "memodb/memodb.h"
 
 using namespace bcdb;
 using namespace llvm;

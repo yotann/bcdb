@@ -1,15 +1,14 @@
 #ifndef BCDB_BCDB_H
 #define BCDB_BCDB_H
 
-#include "memodb/memodb.h"
-
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Value.h>
 #include <llvm/Support/Error.h>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+class memodb_db;
 
 namespace llvm {
 class Module;

@@ -1,8 +1,6 @@
 #ifndef BCDB_MERGE_H
 #define BCDB_MERGE_H
 
-#include "bcdb/BCDB.h"
-
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
@@ -25,9 +23,9 @@ namespace bcdb {
 
 using namespace llvm;
 
-struct ResolvedReference;
-
+class BCDB;
 class MergerGlobalGraph;
+struct ResolvedReference;
 
 class Merger {
 public:
