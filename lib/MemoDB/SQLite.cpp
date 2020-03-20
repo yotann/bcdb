@@ -17,41 +17,58 @@ enum ValueType {
 };
 
 static const char SQLITE_INIT_STMTS[] =
-    "PRAGMA user_version = 1;\n"
-    "CREATE TABLE IF NOT EXISTS head(\n"
-    "  hid INTEGER PRIMARY KEY,    -- Head ID\n"
-    "  name TEXT UNIQUE NOT NULL,  -- Head name\n"
-    "  vid INTEGER                 -- Value ID\n"
-    ");\n"
+    "PRAGMA user_version = 2;\n"
+    "PRAGMA foreign_keys = ON;\n"
     "CREATE TABLE IF NOT EXISTS value(\n"
-    "  vid INTEGER PRIMARY KEY,    -- Value ID\n"
-    "  type INTEGER NOT NULL       -- Value type\n"
+    "  vid     INTEGER PRIMARY KEY,\n"
+    "  type    INTEGER NOT NULL\n"
+    ");\n"
+    "CREATE TABLE IF NOT EXISTS head(\n"
+    "  hid     INTEGER PRIMARY KEY,\n"
+    "  name    TEXT    NOT NULL UNIQUE,\n"
+    "  vid     INTEGER NOT NULL REFERENCES value(vid)\n"
+    ");\n"
+    "CREATE INDEX IF NOT EXISTS head_by_vid ON head(vid);\n"
+    "CREATE TABLE IF NOT EXISTS refs(\n"
+    "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
+    "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
+    "  UNIQUE(dest, src)\n"
     ");\n"
     "CREATE TABLE IF NOT EXISTS blob(\n"
-    "  vid INTEGER PRIMARY KEY,    -- Value ID\n"
-    "  type INTEGER NOT NULL,      -- Value type\n"
-    "  hash BLOB NOT NULL,         -- Hash of the content\n"
-    "  content BLOB NOT NULL,\n"
+    "  vid     INTEGER PRIMARY KEY REFERENCES value(vid),\n"
+    "  type    INTEGER NOT NULL,\n"
+    "  hash    BLOB    NOT NULL,\n"
+    "          -- Hash of the content\n"
+    "  content BLOB    NOT NULL,\n"
     "  UNIQUE(hash, type)\n"
     ");\n"
     "CREATE TABLE IF NOT EXISTS func(\n"
-    "  fid INTEGER PRIMARY KEY,    -- Func ID\n"
-    "  name TEXT UNIQUE NOT NULL   -- Func name\n"
+    "  fid     INTEGER PRIMARY KEY,\n"
+    "  name    TEXT    NOT NULL UNIQUE\n"
     ");\n"
     "CREATE TABLE IF NOT EXISTS call(\n"
-    "  cid INTEGER PRIMARY KEY,    -- Call ID\n"
-    "  fid INTEGER,                -- Func ID\n"
-    "  parent INTEGER,             -- Call ID of parent\n"
-    "                              --   (only if this is not the first arg)\n"
-    "  arg INTEGER NOT NULL,       -- Value ID of argument\n"
-    "  result INTEGER              -- Value ID of result\n"
-    "                              --   (only if this is the last arg)\n"
-    ");\n";
+    "  cid     INTEGER PRIMARY KEY,\n"
+    "  fid     INTEGER NOT NULL REFERENCES func(fid),\n"
+    "  parent  INTEGER          REFERENCES call(cid),\n"
+    "          -- (only if this is not the first arg)\n"
+    "  arg     INTEGER NOT NULL REFERENCES value(vid),\n"
+    "  result  INTEGER          REFERENCES value(vid)\n"
+    "          -- (only if this is the last arg)\n"
+    ");\n"
+    "CREATE INDEX IF NOT EXISTS call_by_arg ON call(arg, fid);\n"
+    "CREATE INDEX IF NOT EXISTS call_by_result ON call(result, fid);\n";
 
 static const char SQLITE_UPGRADE_STMTS_V0[] =
     "ALTER TABLE blob ADD COLUMN type INTEGER;\n"
     "UPDATE blob SET type = 0;\n"
     "CREATE UNIQUE INDEX blob_unique_hash ON blob(hash, type);\n";
+
+static const char SQLITE_UPGRADE_STMTS_V1[] =
+    "CREATE TABLE IF NOT EXISTS refs(\n"
+    "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
+    "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
+    "  UNIQUE(dest, src)\n"
+    ");\n";
 
 namespace {
 class sqlite_db : public memodb_db {
@@ -64,6 +81,10 @@ class sqlite_db : public memodb_db {
   sqlite3_int64 get_fid(llvm::StringRef name, bool create_if_missing = false);
 
   memodb_value get_obsolete(const memodb_ref &ref, bool binary_keys = false);
+
+  void add_refs_from(sqlite3_int64 id, const memodb_value &value);
+
+  void upgrade_schema();
 
 public:
   void open(const char *path, bool create_if_missing);
@@ -169,22 +190,50 @@ void sqlite_db::open(const char *path, bool create_if_missing) {
                     nullptr, nullptr, nullptr);
   // ignore return code
 
-  {
-    Transaction transaction(db);
-    Stmt stmt(db, "PRAGMA user_version");
-    if (stmt.step() != SQLITE_ROW)
-      fatal_error();
-    sqlite3_int64 user_version = sqlite3_column_int64(stmt.stmt, 0);
-    if (user_version <= 0) {
-      rc = sqlite3_exec(db, SQLITE_UPGRADE_STMTS_V0, nullptr, nullptr, nullptr);
-      // ignore return code
-    }
-    if (transaction.commit() != SQLITE_OK)
-      fatal_error();
-  }
+  upgrade_schema();
 
   rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
   if (rc != SQLITE_OK)
+    fatal_error();
+}
+
+void sqlite_db::upgrade_schema() {
+  Transaction transaction(db);
+
+  // If the database is empty, don't do anything.
+  Stmt exists_stmt(
+      db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='value'");
+  if (exists_stmt.step() == SQLITE_DONE)
+    return;
+
+  Stmt stmt(db, "PRAGMA user_version");
+  if (stmt.step() != SQLITE_ROW)
+    fatal_error();
+  sqlite3_int64 user_version = sqlite3_column_int64(stmt.stmt, 0);
+
+  if (user_version <= 0) {
+    sqlite3_exec(db, SQLITE_UPGRADE_STMTS_V0, nullptr, nullptr, nullptr);
+    // ignore return code
+  }
+
+  if (user_version <= 1) {
+    sqlite3_exec(db, SQLITE_UPGRADE_STMTS_V1, nullptr, nullptr, nullptr);
+    // ignore return code
+    Stmt stmt(db, "SELECT vid FROM value WHERE type != ?1");
+    stmt.bind_int(1, BYTES_BLOB);
+    while (true) {
+      int rc = stmt.step();
+      if (rc == SQLITE_DONE)
+        break;
+      else if (rc != SQLITE_ROW)
+        fatal_error();
+      sqlite3_int64 id = sqlite3_column_int64(stmt.stmt, 0);
+      memodb_value value = get(id_to_ref(id));
+      add_refs_from(id, value);
+    }
+  }
+
+  if (transaction.commit() != SQLITE_OK)
     fatal_error();
 }
 
@@ -249,9 +298,31 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
       fatal_error();
   }
 
+  // Update the refs table.
+  add_refs_from(new_id, value);
+
   if (transaction.commit() != SQLITE_OK)
     fatal_error();
   return id_to_ref(new_id);
+}
+
+void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
+  if (value.type() == memodb_value::REF) {
+    auto dest = ref_to_id(value.as_ref());
+    Stmt stmt(db, "INSERT OR IGNORE INTO refs(src, dest) VALUES (?1,?2)");
+    stmt.bind_int(1, id);
+    stmt.bind_int(2, dest);
+    if (stmt.step() != SQLITE_DONE)
+      fatal_error();
+  } else if (value.type() == memodb_value::ARRAY) {
+    for (const memodb_value &item : value.array_items())
+      add_refs_from(id, item);
+  } else if (value.type() == memodb_value::MAP) {
+    for (const auto &item : value.map_items()) {
+      add_refs_from(id, item.first);
+      add_refs_from(id, item.second);
+    }
+  }
 }
 
 memodb_value sqlite_db::get(const memodb_ref &ref) {

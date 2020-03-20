@@ -128,6 +128,16 @@ public:
   }
   const llvm::ArrayRef<std::uint8_t> as_bytes() const { return bytes_; }
 
+  const array_t &array_items() const {
+    require_type(ARRAY);
+    return array_;
+  }
+
+  const map_t &map_items() const {
+    require_type(MAP);
+    return map_;
+  }
+
   map_t &map_items() {
     require_type(MAP);
     return map_;
