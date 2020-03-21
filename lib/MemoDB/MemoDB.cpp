@@ -3,6 +3,7 @@
 #include "memodb_internal.h"
 
 #include <llvm/Support/ErrorHandling.h>
+#include <sstream>
 
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
                                           bool create_if_missing) {
@@ -14,7 +15,8 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
-  // Print the value in CBOR diagnostic notation.
+  // Print the value in CBOR extended diagnostic notation.
+  // https://tools.ietf.org/html/rfc8610#appendix-G
 
   auto print_escaped = [&](llvm::StringRef str) {
     for (char c : str) {
@@ -46,13 +48,23 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
       return os << (value.float_ < 0 ? "-Infinity" : "Infinity");
     return os << value.float_;
   case memodb_value::BYTES:
-    os << "h'";
-    for (std::uint8_t b : value.bytes_) {
-      char buf[3];
-      std::snprintf(buf, sizeof(buf), "%02x", b);
-      os << buf;
+    if (std::all_of(
+            value.bytes_.begin(), value.bytes_.end(), [](std::uint8_t b) {
+              return b >= 33 && b <= 126 && b != '\'' && b != '"' && b != '\\';
+            })) {
+      os << "'";
+      for (std::uint8_t b : value.bytes_)
+        os << static_cast<char>(b);
+      return os << "'";
+    } else {
+      os << "h'";
+      for (std::uint8_t b : value.bytes_) {
+        char buf[3];
+        std::snprintf(buf, sizeof(buf), "%02x", b);
+        os << buf;
+      }
+      return os << "'";
     }
-    return os << "'";
   case memodb_value::STRING:
     os << '"';
     print_escaped(value.string_);
@@ -81,6 +93,14 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
     return os << '}';
   }
   return os << "UNKNOWN";
+}
+
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                              const memodb_value &value) {
+  std::stringstream sstr;
+  sstr << value;
+  os << sstr.str();
+  return os;
 }
 
 static memodb_value::float_t decode_float(std::uint64_t value, int total_size,
@@ -374,4 +394,56 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
   default:
     llvm_unreachable("missing switch case");
   }
+}
+
+std::vector<memodb_path> memodb_db::list_paths_to(const memodb_ref &ref) {
+  auto list_paths_within =
+      [](const memodb_value &value,
+         const memodb_ref &ref) -> std::vector<memodb_path> {
+    std::vector<memodb_path> result;
+    memodb_path cur_path;
+    std::function<void(const memodb_value &)> recurse =
+        [&](const memodb_value &value) {
+          if (value.type() == memodb_value::REF) {
+            if (value.as_ref() == ref)
+              result.push_back(cur_path);
+          } else if (value.type() == memodb_value::ARRAY) {
+            for (size_t i = 0; i < value.array_items().size(); i++) {
+              cur_path.push_back(i);
+              recurse(value[i]);
+              cur_path.pop_back();
+            }
+          } else if (value.type() == memodb_value::MAP) {
+            for (const auto &item : value.map_items()) {
+              cur_path.push_back(item.first);
+              recurse(item.second);
+              cur_path.pop_back();
+            }
+          }
+        };
+    recurse(value);
+    return result;
+  };
+
+  std::vector<memodb_path> result;
+  memodb_path backwards_path;
+  std::function<void(const memodb_ref &)> recurse = [&](const memodb_ref &ref) {
+    for (const auto &head : list_heads_using(ref)) {
+      backwards_path.push_back(memodb_value::string(head));
+      result.emplace_back(backwards_path.rbegin(), backwards_path.rend());
+      backwards_path.pop_back();
+    }
+    for (const auto &parent : list_refs_using(ref)) {
+      const memodb_value value = get(parent);
+      for (const memodb_path &subpath : list_paths_within(value, ref)) {
+        backwards_path.insert(backwards_path.end(), subpath.rbegin(),
+                              subpath.rend());
+        recurse(parent);
+        backwards_path.erase(backwards_path.end() - subpath.size(),
+                             backwards_path.end());
+      }
+    }
+  };
+  recurse(ref);
+  return result;
 }

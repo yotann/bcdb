@@ -115,6 +115,8 @@ bcdb list-function-ids -uri sqlite:example.bcdb
 bcdb list-function-ids -uri sqlite:example.bcdb -name /tmp/x.bc
 # Retrieve a single function as an LLVM bitcode module.
 bcdb get-function -uri sqlite:example.bcdb -id 0 -o /tmp/function0.bc
+# Find out where a particular function came from.
+bcdb refs -uri sqlite:example.bcdb 0
 ```
 
 ### Other subcommands

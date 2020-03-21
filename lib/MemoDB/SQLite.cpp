@@ -92,8 +92,10 @@ public:
 
   memodb_value get(const memodb_ref &ref) override;
   memodb_ref put(const memodb_value &value) override;
+  std::vector<memodb_ref> list_refs_using(const memodb_ref &ref) override;
 
   std::vector<std::string> list_heads() override;
+  std::vector<std::string> list_heads_using(const memodb_ref &ref) override;
   memodb_ref head_get(llvm::StringRef name) override;
   void head_set(llvm::StringRef name, const memodb_ref &ref) override;
   void head_delete(llvm::StringRef name) override;
@@ -400,9 +402,40 @@ memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
   return result;
 }
 
+std::vector<memodb_ref> sqlite_db::list_refs_using(const memodb_ref &ref) {
+  std::vector<memodb_ref> result;
+  Stmt stmt(db, "SELECT src FROM refs WHERE dest = ?1");
+  stmt.bind_int(1, ref_to_id(ref));
+  while (true) {
+    auto rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    result.push_back(id_to_ref(sqlite3_column_int64(stmt.stmt, 0)));
+  }
+  return result;
+}
+
 std::vector<std::string> sqlite_db::list_heads() {
   std::vector<std::string> result;
   Stmt stmt(db, "SELECT name FROM head");
+  while (true) {
+    auto rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    result.emplace_back(
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
+  }
+  return result;
+}
+
+std::vector<std::string> sqlite_db::list_heads_using(const memodb_ref &ref) {
+  std::vector<std::string> result;
+  Stmt stmt(db, "SELECT name FROM head WHERE vid = ?1");
+  stmt.bind_int(1, ref_to_id(ref));
   while (true) {
     auto rc = stmt.step();
     if (rc == SQLITE_DONE)

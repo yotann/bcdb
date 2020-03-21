@@ -11,6 +11,10 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 
+namespace llvm {
+class raw_ostream;
+} // end namespace llvm
+
 class memodb_ref {
 private:
   std::string id_;
@@ -259,6 +263,9 @@ public:
 };
 
 std::ostream &operator<<(std::ostream &os, const memodb_value &value);
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_value &value);
+
+using memodb_path = std::vector<memodb_value>;
 
 class memodb_db {
 public:
@@ -266,8 +273,10 @@ public:
 
   virtual memodb_value get(const memodb_ref &ref) = 0;
   virtual memodb_ref put(const memodb_value &value) = 0;
+  virtual std::vector<memodb_ref> list_refs_using(const memodb_ref &ref) = 0;
 
   virtual std::vector<std::string> list_heads() = 0;
+  virtual std::vector<std::string> list_heads_using(const memodb_ref &ref) = 0;
   virtual memodb_ref head_get(llvm::StringRef name) = 0;
   virtual void head_set(llvm::StringRef name, const memodb_ref &ref) = 0;
   virtual void head_delete(llvm::StringRef name) = 0;
@@ -277,6 +286,8 @@ public:
   virtual void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
                         const memodb_ref &result) = 0;
   virtual void call_invalidate(llvm::StringRef name) = 0;
+
+  virtual std::vector<memodb_path> list_paths_to(const memodb_ref &ref);
 };
 
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,

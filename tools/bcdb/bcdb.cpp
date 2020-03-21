@@ -278,7 +278,7 @@ static int Mux2() {
   return 0;
 }
 
-// Calls: bcdb invalidate
+// Calls: bcdb cache, evaluate, invalidate
 
 static cl::SubCommand CacheCommand("cache", "Cache function call");
 static cl::SubCommand EvaluateCommand("evaluate", "Evaluate function call");
@@ -336,6 +336,29 @@ static int Invalidate() {
   return 0;
 }
 
+// bcdb refs
+
+static cl::SubCommand RefsCommand("refs", "List references to a value");
+
+static cl::opt<std::string> RefsValue(cl::Positional, cl::Required,
+                                      cl::desc("<value ID>"),
+                                      cl::sub(RefsCommand));
+
+static int Refs() {
+  ExitOnError Err("bcdb refs: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+
+  memodb_ref ref(RefsValue);
+  for (const auto &path : db->get_db().list_paths_to(ref)) {
+    outs() << "heads";
+    for (const auto &item : path) {
+      outs() << "[" << item << "]";
+    }
+    outs() << "\n";
+  }
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -387,6 +410,8 @@ int main(int argc, char **argv) {
     return Mux();
   } else if (Mux2Command) {
     return Mux2();
+  } else if (RefsCommand) {
+    return Refs();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

@@ -38,7 +38,10 @@ TEST(ValuePrintTest, Undefined) { test_print("undefined", memodb_value{}); }
 
 TEST(ValuePrintTest, Bytes) {
   using bytes = std::vector<uint8_t>;
-  test_print("h''", memodb_value(bytes{}));
+  test_print("''", memodb_value(bytes{}));
+  test_print("'ascii'", memodb_value(bytes{0x61, 0x73, 0x63, 0x69, 0x69}));
+  test_print("h'27'", memodb_value(bytes{0x27}));
+  test_print("h'5c'", memodb_value(bytes{0x5c}));
   test_print("h'00ff30'", memodb_value(bytes{0x00, 0xff, 0x30}));
 }
 
