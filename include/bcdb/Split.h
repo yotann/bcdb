@@ -6,6 +6,7 @@
 #include <memory>
 
 namespace llvm {
+class GlobalObject;
 class LLVMContext;
 class Module;
 class StringRef;
@@ -39,8 +40,17 @@ public:
   llvm::Module &GetModule();
 };
 
+class Splitter {
+public:
+  Splitter(llvm::Module &M);
+  std::unique_ptr<llvm::Module> SplitGlobal(llvm::GlobalObject *GO);
+  void Finish() {}
+
+private:
+  llvm::Module &M;
+};
+
 llvm::Expected<std::unique_ptr<llvm::Module>> JoinModule(SplitLoader &Loader);
-llvm::Error SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver);
 
 } // end namespace bcdb
 

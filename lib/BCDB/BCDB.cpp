@@ -81,48 +81,6 @@ Error BCDB::Delete(llvm::StringRef Name) {
   return Error::success();
 }
 
-namespace {
-class BCDBSplitSaver : public SplitSaver {
-  memodb_db *db;
-  std::map<std::string, memodb_ref> functions;
-  memodb_ref remainder_value;
-
-  Expected<memodb_ref> SaveModule(Module &M) {
-    SmallVector<char, 0> Buffer;
-    WriteUnalignedModule(M, Buffer);
-    auto value = memodb_value(ArrayRef<uint8_t>(
-        reinterpret_cast<uint8_t *>(Buffer.data()), Buffer.size()));
-    return db->put(value);
-  }
-
-public:
-  BCDBSplitSaver(memodb_db *db) : db(db) {}
-  Error saveFunction(std::unique_ptr<Module> M, StringRef Name) override {
-    Expected<memodb_ref> value = SaveModule(*M);
-    if (!value)
-      return value.takeError();
-    functions[Name] = *value;
-    return Error::success();
-  }
-  Error saveRemainder(std::unique_ptr<Module> M) override {
-    Expected<memodb_ref> value = SaveModule(*M);
-    if (!value)
-      return value.takeError();
-    remainder_value = *value;
-    return Error::success();
-  }
-  Expected<memodb_ref> finish() {
-    auto function_map = memodb_value::map();
-    for (auto &item : functions)
-      function_map[memodb_value::bytes(item.first)] = item.second;
-
-    auto result = memodb_value::map(
-        {{"functions", function_map}, {"remainder", remainder_value}});
-    return db->put(result);
-  }
-};
-} // end anonymous namespace
-
 static hash_code HashConstant(Constant *C) {
   if (auto *CAZ = dyn_cast<ConstantAggregateZero>(C))
     return hash_value(CAZ->getNumElements());
@@ -164,13 +122,28 @@ static void PreprocessModule(Module &M) {
 
 Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   PreprocessModule(*M);
-  BCDBSplitSaver Saver(db.get());
-  if (Error Err = SplitModule(std::move(M), Saver))
-    return Err;
-  Expected<memodb_ref> ValueOrErr = Saver.finish();
-  if (!ValueOrErr)
-    return ValueOrErr.takeError();
-  db->head_set(Name, *ValueOrErr);
+
+  auto SaveModule = [&](Module &M) {
+    SmallVector<char, 0> Buffer;
+    WriteUnalignedModule(M, Buffer);
+    auto value = memodb_value(ArrayRef<uint8_t>(
+        reinterpret_cast<uint8_t *>(Buffer.data()), Buffer.size()));
+    return db->put(value);
+  };
+
+  memodb_value function_map = memodb_value::map();
+  Splitter Splitter(*M);
+  for (Function &F : M->functions()) {
+    auto MPart = Splitter.SplitGlobal(&F);
+    if (MPart)
+      function_map[memodb_value::bytes(F.getName())] = SaveModule(*MPart);
+  }
+  Splitter.Finish();
+  memodb_ref remainder_value = SaveModule(*M);
+
+  auto result = memodb_value::map(
+      {{"functions", function_map}, {"remainder", remainder_value}});
+  db->head_set(Name, db->put(result));
   return Error::success();
 }
 

@@ -30,52 +30,26 @@ static cl::opt<std::string> OutputDirectory("o", cl::Required,
                                             cl::desc("<output directory>"),
                                             cl::value_desc("directory"));
 
-namespace {
-class DirSplitSaver : public SplitSaver {
-  std::string Path;
+static Error saveModule(StringRef Dir, StringRef File, Module &MPart) {
+  std::error_code EC;
 
-public:
-  DirSplitSaver(StringRef Path) : Path(Path) {
-    std::error_code EC;
-    std::string Filename;
+  EC = sys::fs::create_directories(OutputDirectory + "/" + Dir);
+  if (EC)
+    return errorCodeToError(EC);
 
-    EC = sys::fs::create_directory(Path);
-    if (EC) {
-      errs() << EC.message() << '\n';
-      exit(1);
-    }
-  }
+  std::string Filename =
+      (OutputDirectory + "/" + Dir + "/" + File + ".bc").str();
+  ToolOutputFile Out(Filename, EC, sys::fs::F_None);
+  if (EC)
+    return errorCodeToError(EC);
 
-  Error saveFunction(std::unique_ptr<Module> Module, StringRef Name) override {
-    return saveModule("functions", Name, *Module);
-  }
-
-  Error saveRemainder(std::unique_ptr<Module> Module) override {
-    return saveModule("remainder", "module", *Module);
-  }
-
-private:
-  Error saveModule(StringRef Dir, StringRef File, Module &MPart) {
-    std::error_code EC;
-
-    EC = sys::fs::create_directories(Path + "/" + Dir);
-    if (EC)
-      return errorCodeToError(EC);
-
-    std::string Filename = (Path + "/" + Dir + "/" + File + ".bc").str();
-    ToolOutputFile Out(Filename, EC, sys::fs::F_None);
-    if (EC)
-      return errorCodeToError(EC);
-
-    if (verifyModule(MPart, &errs()))
-      return make_error<StringError>("could not verify module part",
-                                     inconvertibleErrorCode());
-    WriteBitcodeToFile(MPart, Out.os());
-    Out.keep();
-    return Error::success();
-  }
-};
-} // end anonymous namespace
+  if (verifyModule(MPart, &errs()))
+    return make_error<StringError>("could not verify module part",
+                                   inconvertibleErrorCode());
+  WriteBitcodeToFile(MPart, Out.os());
+  Out.keep();
+  return Error::success();
+}
 
 int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
@@ -91,9 +65,22 @@ int main(int argc, const char **argv) {
     return 1;
   }
 
-  DirSplitSaver Saver(OutputDirectory);
   ExitOnError Err("bc-split: ");
-  Err(SplitModule(std::move(M), Saver));
+  std::error_code EC;
+  EC = sys::fs::create_directory(OutputDirectory);
+  if (EC) {
+    errs() << EC.message() << '\n';
+    return 1;
+  }
+
+  Splitter Splitter(*M);
+  for (Function &F : M->functions()) {
+    auto MPart = Splitter.SplitGlobal(&F);
+    if (MPart)
+      Err(saveModule("functions", F.getName(), *MPart));
+  }
+  Splitter.Finish();
+  Err(saveModule("remainder", "module", *M));
 
   return 0;
 }

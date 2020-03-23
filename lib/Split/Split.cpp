@@ -455,25 +455,21 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   return MPart;
 }
 
-Error bcdb::SplitModule(std::unique_ptr<llvm::Module> M, SplitSaver &Saver) {
+Splitter::Splitter(Module &M) : M(M) {
   // Make sure all globals are named so we can link everything back together
   // later.
-  nameUnamedGlobals(*M);
+  nameUnamedGlobals(M);
+}
 
-  for (Function &F : *M) {
-    if (!F.isDeclaration()) {
-      // We can't handle blockaddress yet.
-      if (any_of(F.users(), [](const User *U) { return isa<BlockAddress>(U); }))
-        continue;
+std::unique_ptr<Module> Splitter::SplitGlobal(GlobalObject *GO) {
+  Function *F = dyn_cast<Function>(GO);
+  if (!F || F->isDeclaration())
+    return nullptr;
 
-      // Create a new module containing only this function.
-      auto MPart = ExtractFunction(*M, F);
-      if (MPart) {
-        if (Error Err = Saver.saveFunction(std::move(MPart), F.getName()))
-          return Err;
-      }
-    }
-  }
+  // We can't handle blockaddress yet.
+  if (any_of(F->users(), [](const User *U) { return isa<BlockAddress>(U); }))
+    return nullptr;
 
-  return Saver.saveRemainder(std::move(M));
+  // Create a new module containing only this function.
+  return ExtractFunction(M, *F);
 }
