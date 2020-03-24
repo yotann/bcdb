@@ -170,7 +170,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
       LoadModuleFromValue(db.get(), head["remainder"].as_ref(), Name, *Context);
 
   for (auto &Item : head["functions"].map_items()) {
-    auto Name = llvm::toStringRef(Item.first.as_bytes());
+    auto Name = Item.first.as_bytestring();
     memodb_ref ref = Item.second.as_ref();
     PartIDs[Name] = llvm::StringRef(ref);
   }
@@ -193,7 +193,7 @@ Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
                                "remainder", *Context);
   Joiner Joiner(*M);
   for (auto &Item : head["functions"].map_items()) {
-    auto Name = llvm::toStringRef(Item.first.as_bytes());
+    auto Name = Item.first.as_bytestring();
     auto MPart =
         LoadModuleFromValue(db.get(), Item.second.as_ref(), Name, *Context);
     Joiner.JoinGlobal(Name, std::move(MPart));

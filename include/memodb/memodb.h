@@ -138,6 +138,11 @@ public:
     require_type(BYTES);
     return bytes_;
   }
+  const llvm::StringRef as_bytestring() const {
+    require_type(BYTES);
+    return llvm::StringRef(reinterpret_cast<const char *>(bytes_.data()),
+                           bytes_.size());
+  }
 
   const array_t &array_items() const {
     require_type(ARRAY);
