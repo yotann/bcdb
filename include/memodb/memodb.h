@@ -130,7 +130,14 @@ public:
     require_type(REF);
     return ref_;
   }
-  const llvm::ArrayRef<std::uint8_t> as_bytes() const { return bytes_; }
+  const string_t &as_string() const {
+    require_type(STRING);
+    return string_;
+  }
+  const llvm::ArrayRef<std::uint8_t> as_bytes() const {
+    require_type(BYTES);
+    return bytes_;
+  }
 
   const array_t &array_items() const {
     require_type(ARRAY);

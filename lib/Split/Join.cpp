@@ -48,70 +48,51 @@ Error bcdb::Melter::Merge(std::unique_ptr<Module> MPart) {
 
 Module &Melter::GetModule() { return *M; }
 
-Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
-  Expected<std::unique_ptr<Module>> ModuleOrErr = Loader.loadRemainder();
-  if (!ModuleOrErr)
-    return ModuleOrErr.takeError();
-  std::unique_ptr<Module> M = std::move(*ModuleOrErr);
-
+Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
   // Make all globals external so function modules can link to them.
-  StringMap<GlobalValue::LinkageTypes> LinkageMap;
   for (GlobalObject &GO : M->global_objects()) {
     LinkageMap[GO.getName()] = GO.getLinkage();
     GO.setLinkage(GlobalValue::ExternalLinkage);
   }
 
   // List all the function stubs and declarations.
-  SmallVector<Function *, 0> InFunctions;
   for (Function &F : *M)
-    InFunctions.push_back(&F);
+    GlobalNames.push_back(F.getName());
+}
 
-  // Link all function definitions.
-  IRMover Mover(*M);
-  SmallVector<Function *, 0> OutFunctions;
-  for (Function *Stub : InFunctions) {
-    if (!isStub(*Stub)) {
-      OutFunctions.push_back(Stub);
-      continue;
+void Joiner::JoinGlobal(llvm::StringRef Name,
+                        std::unique_ptr<llvm::Module> MPart) {
+  Function *Stub = M->getFunction(Name);
+  assert(isStub(*Stub));
+
+  // Find the function definition.
+  Function *Def = nullptr;
+  for (Function &F : *MPart) {
+    if (!F.isDeclaration()) {
+      if (Def)
+        report_fatal_error("multiple functions in function module " + Name);
+      Def = &F;
     }
-
-    // Find the function definition.
-    StringRef Name = Stub->getName();
-    Expected<std::unique_ptr<Module>> MPartOrErr = Loader.loadFunction(Name);
-    if (!MPartOrErr)
-      return MPartOrErr.takeError();
-    std::unique_ptr<Module> MPart = std::move(*MPartOrErr);
-    Function *Def = nullptr;
-    for (Function &F : *MPart) {
-      if (!F.isDeclaration()) {
-        if (Def) {
-          return make_error<StringError>(
-              "multiple functions in function module " + Name,
-              errc::invalid_argument);
-        }
-        Def = &F;
-      }
-    }
-
-    // Copy linker information from the stub.
-    Def->setName(Name);
-    assert(Def->getName() == Name && "name conflict");
-    Def->copyAttributesFrom(Stub);
-    Def->setComdat(Stub->getComdat());
-
-    // Move the definition into the main module.
-    if (Error Err = Mover.move(
-            std::move(MPart), {Def},
-            [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-#if LLVM_VERSION_MAJOR <= 4
-            /* LinkModuleInlineAsm */ false,
-#endif
-            /* IsPerformingImport */ false))
-      return std::move(Err);
-    assert(M->getFunction(Name) != Stub && "stub was not replaced");
-    OutFunctions.push_back(M->getFunction(Name));
   }
 
+  // Copy linker information from the stub.
+  Def->setName(Name);
+  assert(Def->getName() == Name && "name conflict");
+  Def->copyAttributesFrom(Stub);
+  Def->setComdat(Stub->getComdat());
+
+  // Move the definition into the main module.
+  ExitOnError Err("JoinGlobal");
+  Err(Mover.move(
+      std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+#if LLVM_VERSION_MAJOR <= 4
+      /* LinkModuleInlineAsm */ false,
+#endif
+      /* IsPerformingImport */ false));
+  assert(M->getFunction(Name) != Stub && "stub was not replaced");
+}
+
+void Joiner::Finish() {
   // Restore linkage types for globals.
   for (GlobalObject &GO : M->global_objects())
     GO.setLinkage(LinkageMap[GO.getName()]);
@@ -119,10 +100,12 @@ Expected<std::unique_ptr<Module>> bcdb::JoinModule(SplitLoader &Loader) {
   // Reorder the functions to match their original order. This has no effect on
   // correctness, but makes it easier to compare the joined module with the
   // original one.
-  for (Function *F : OutFunctions)
+  SmallVector<Function *, 0> OrderedFunctions;
+  for (auto &Name : GlobalNames) {
+    Function *F = M->getFunction(Name);
+    OrderedFunctions.push_back(F);
     F->removeFromParent();
-  M->getFunctionList().insert(M->getFunctionList().end(), OutFunctions.begin(),
-                              OutFunctions.end());
-
-  return M;
+  }
+  M->getFunctionList().insert(M->getFunctionList().end(),
+                              OrderedFunctions.begin(), OrderedFunctions.end());
 }

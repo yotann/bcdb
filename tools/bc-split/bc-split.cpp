@@ -68,10 +68,9 @@ int main(int argc, const char **argv) {
   ExitOnError Err("bc-split: ");
   std::error_code EC;
   EC = sys::fs::create_directory(OutputDirectory);
-  if (EC) {
-    errs() << EC.message() << '\n';
-    return 1;
-  }
+  Err(errorCodeToError(EC));
+  EC = sys::fs::create_directory(OutputDirectory + "/functions");
+  Err(errorCodeToError(EC));
 
   Splitter Splitter(*M);
   for (Function &F : M->functions()) {

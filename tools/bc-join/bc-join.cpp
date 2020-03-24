@@ -11,6 +11,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
@@ -35,37 +36,16 @@ static cl::opt<std::string> OutputFilename("o",
 
 static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"));
 
-namespace {
-class DirSplitLoader : public SplitLoader {
-  LLVMContext &Context;
-  std::string Path;
-
-public:
-  DirSplitLoader(LLVMContext &Context, StringRef Path)
-      : Context(Context), Path(Path) {}
-
-  Expected<std::unique_ptr<llvm::Module>>
-  loadFunction(llvm::StringRef Name) override {
-    return loadModule("functions", Name);
+static std::unique_ptr<llvm::Module> loadModule(LLVMContext &Context,
+                                                StringRef Filename) {
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M = parseIRFile(Filename, Err, Context);
+  if (!M) {
+    Err.print("bc-join", errs());
+    exit(1);
   }
-
-  Expected<std::unique_ptr<llvm::Module>> loadRemainder() override {
-    return loadModule("remainder", "module");
-  }
-
-  Expected<std::unique_ptr<llvm::Module>> loadModule(StringRef Dir,
-                                                     StringRef File) {
-    std::string Filename = (Path + "/" + Dir + "/" + File + ".bc").str();
-    SMDiagnostic Err;
-    std::unique_ptr<Module> M = parseIRFile(Filename, Err, Context);
-    if (!M) {
-      Err.print("bc-join", errs());
-      exit(1);
-    }
-    return M;
-  }
-};
-} // end anonymous namespace
+  return M;
+}
 
 int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
@@ -75,10 +55,20 @@ int main(int argc, const char **argv) {
 
   LLVMContext Context;
   ExitOnError Err("bc-join: ");
-  DirSplitLoader Loader(Context, InputDirectory);
-  std::unique_ptr<Module> M = Err(JoinModule(Loader));
-
   std::error_code EC;
+
+  auto M = loadModule(Context, InputDirectory + "/remainder/module.bc");
+  Joiner Joiner(*M);
+  for (sys::fs::directory_iterator I(InputDirectory + "/functions", EC), IE;
+       I != IE && !EC; I.increment(EC)) {
+    if (StringRef(I->path()).endswith(".bc")) {
+      auto MPart = loadModule(Context, I->path());
+      Joiner.JoinGlobal(sys::path::stem(I->path()), std::move(MPart));
+    }
+  }
+  Err(errorCodeToError(EC));
+  Joiner.Finish();
+
   ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
   Err(errorCodeToError(EC));
 

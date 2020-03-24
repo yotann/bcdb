@@ -1,5 +1,6 @@
 #include "bcdb/BCDB.h"
 
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
@@ -147,24 +148,15 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   return Error::success();
 }
 
-static Expected<std::unique_ptr<Module>>
-LoadModuleFromValue(memodb_db *db, const memodb_ref &ref, StringRef Name,
-                    LLVMContext &Context) {
+static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
+                                                   const memodb_ref &ref,
+                                                   StringRef Name,
+                                                   LLVMContext &Context) {
   memodb_value value = db->get(ref);
   StringRef buffer_ref(reinterpret_cast<const char *>(value.as_bytes().data()),
                        value.as_bytes().size());
-  auto result = parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context);
-  return result;
-}
-
-// FIXME: duplicated from lib/Split/Join.cpp
-static bool isStub(const Function &F) {
-  if (F.isDeclaration() || F.size() != 1)
-    return false;
-  const BasicBlock &BB = F.getEntryBlock();
-  if (BB.size() != 1 || !isa<UnreachableInst>(BB.front()))
-    return false;
-  return true;
+  ExitOnError Err("LoadModuleFromValue");
+  return Err(parseBitcodeFile(MemoryBufferRef(buffer_ref, Name), Context));
 }
 
 Expected<std::unique_ptr<Module>>
@@ -176,18 +168,11 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
   memodb_value head = db->get(head_ref);
   auto Remainder =
       LoadModuleFromValue(db.get(), head["remainder"].as_ref(), Name, *Context);
-  if (!Remainder)
-    return Remainder.takeError();
 
-  for (Function &F : **Remainder) {
-    if (isStub(F)) {
-      StringRef Name = F.getName();
-      memodb_ref ref = head["functions"][memodb_value::bytes(Name)].as_ref();
-      if (!ref)
-        return make_error<StringError>("could not look up function",
-                                       inconvertibleErrorCode());
-      PartIDs[Name] = llvm::StringRef(ref);
-    }
+  for (auto &Item : head["functions"].map_items()) {
+    auto Name = llvm::toStringRef(Item.first.as_bytes());
+    memodb_ref ref = Item.second.as_ref();
+    PartIDs[Name] = llvm::StringRef(ref);
   }
 
   return Remainder;
@@ -197,35 +182,23 @@ Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
   return LoadModuleFromValue(db.get(), memodb_ref(Id), Id, *Context);
 }
 
-namespace {
-class BCDBSplitLoader : public SplitLoader {
-  LLVMContext &Context;
-  memodb_db *db;
-  memodb_value root;
-
-public:
-  BCDBSplitLoader(LLVMContext &Context, memodb_db *db,
-                  const memodb_ref &root_ref)
-      : Context(Context), db(db), root(db->get(root_ref)) {}
-
-  Expected<std::unique_ptr<Module>> loadFunction(StringRef Name) override {
-    return LoadModuleFromValue(
-        db, root["functions"][memodb_value::bytes(Name)].as_ref(), Name,
-        Context);
-  }
-
-  Expected<std::unique_ptr<Module>> loadRemainder() override {
-    return LoadModuleFromValue(db, root["remainder"].as_ref(), "remainder",
-                               Context);
-  }
-};
-} // end anonymous namespace
-
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
-  memodb_ref head = db->head_get(Name);
-  if (!head)
+  memodb_ref head_ref = db->head_get(Name);
+  if (!head_ref)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
-  BCDBSplitLoader Loader(*Context, db.get(), head);
-  return JoinModule(Loader);
+  memodb_value head = db->get(head_ref);
+
+  auto M = LoadModuleFromValue(db.get(), head["remainder"].as_ref(),
+                               "remainder", *Context);
+  Joiner Joiner(*M);
+  for (auto &Item : head["functions"].map_items()) {
+    auto Name = llvm::toStringRef(Item.first.as_bytes());
+    auto MPart =
+        LoadModuleFromValue(db.get(), Item.second.as_ref(), Name, *Context);
+    Joiner.JoinGlobal(Name, std::move(MPart));
+  }
+
+  Joiner.Finish();
+  return M;
 }

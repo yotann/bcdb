@@ -1,9 +1,13 @@
 #ifndef BCDB_SPLIT_H
 #define BCDB_SPLIT_H
 
+#include <llvm/ADT/StringMap.h>
+#include <llvm/IR/GlobalValue.h>
 #include <llvm/Linker/IRMover.h>
 #include <llvm/Support/Error.h>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace llvm {
 class GlobalObject;
@@ -14,20 +18,17 @@ class StringRef;
 
 namespace bcdb {
 
-class SplitLoader {
+class Joiner {
 public:
-  virtual llvm::Expected<std::unique_ptr<llvm::Module>>
-  loadFunction(llvm::StringRef Name) = 0;
-  virtual llvm::Expected<std::unique_ptr<llvm::Module>> loadRemainder() = 0;
-  virtual ~SplitLoader() {}
-};
+  Joiner(llvm::Module &Remainder);
+  void JoinGlobal(llvm::StringRef Name, std::unique_ptr<llvm::Module> MPart);
+  void Finish();
 
-class SplitSaver {
-public:
-  virtual llvm::Error saveFunction(std::unique_ptr<llvm::Module> Module,
-                                   llvm::StringRef Name) = 0;
-  virtual llvm::Error saveRemainder(std::unique_ptr<llvm::Module> Module) = 0;
-  virtual ~SplitSaver() {}
+private:
+  llvm::Module *M;
+  llvm::StringMap<llvm::GlobalValue::LinkageTypes> LinkageMap;
+  llvm::IRMover Mover;
+  std::vector<std::string> GlobalNames;
 };
 
 class Melter {
@@ -49,8 +50,6 @@ public:
 private:
   llvm::Module &M;
 };
-
-llvm::Expected<std::unique_ptr<llvm::Module>> JoinModule(SplitLoader &Loader);
 
 } // end namespace bcdb
 
