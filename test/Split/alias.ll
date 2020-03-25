@@ -26,3 +26,18 @@ define void @f() {
 ; MODULE: @h = weak hidden alias void (), void ()* @f
 ; JOINED: @h = weak hidden alias void (), void ()* @f
 @h = weak hidden alias void (), void ()* @f
+
+; MODULE: @h2 = internal alias void (), void ()* @f
+; JOINED: @h2 = internal alias void (), void ()* @f
+@h2 = internal alias void (), void ()* @f
+
+; JOINED-LABEL: define void @main()
+define void @main() {
+  ; JOINED-NEXT: call void (...) @g()
+  call void (...) @g()
+  ; JOINED-NEXT: call void @h()
+  call void @h()
+  ; JOINED-NEXT: call void @h2()
+  call void @h2()
+  ret void
+}

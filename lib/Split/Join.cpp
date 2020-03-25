@@ -50,9 +50,10 @@ Module &Melter::GetModule() { return *M; }
 
 Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
   // Make all globals external so function modules can link to them.
-  for (GlobalObject &GO : M->global_objects()) {
-    LinkageMap[GO.getName()] = GO.getLinkage();
-    GO.setLinkage(GlobalValue::ExternalLinkage);
+  for (GlobalValue &GV :
+       concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
+    LinkageMap[GV.getName()] = GV.getLinkage();
+    GV.setLinkage(GlobalValue::ExternalLinkage);
   }
 
   // List all the function stubs and declarations.
@@ -94,8 +95,9 @@ void Joiner::JoinGlobal(llvm::StringRef Name,
 
 void Joiner::Finish() {
   // Restore linkage types for globals.
-  for (GlobalObject &GO : M->global_objects())
-    GO.setLinkage(LinkageMap[GO.getName()]);
+  for (GlobalValue &GV :
+       concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs()))
+    GV.setLinkage(LinkageMap[GV.getName()]);
 
   // Reorder the functions to match their original order. This has no effect on
   // correctness, but makes it easier to compare the joined module with the
