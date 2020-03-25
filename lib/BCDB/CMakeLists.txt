@@ -3,6 +3,7 @@ add_llvm_library(BCDB
   Merge.cpp
   Mux.cpp
   Mux2.cpp
+  Util.cpp
 )
 target_link_libraries(BCDB PRIVATE
   BCDBBitcode

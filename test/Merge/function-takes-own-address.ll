@@ -2,6 +2,10 @@
 ; RUN: llvm-as < %s | bcdb add -uri sqlite:%t -
 ; RUN: bcdb merge -uri sqlite:%t - | lli
 
+; RUN: bcdb init -uri sqlite:%t.rg
+; RUN: llvm-as < %s | bcdb add -rename-globals -uri sqlite:%t.rg -
+; RUN: bcdb merge -uri sqlite:%t.rg - | lli
+
 ; The value of @main in @pointer_to_main must equal the value of @main in @main
 ; itself, regardless of stubs. Something similar happens in OpenSSL's
 ; CRYPTO_malloc.

@@ -1,6 +1,8 @@
 #include "bcdb/BCDB.h"
 
+#include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/StringExtras.h>
+#include <llvm/ADT/iterator_range.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
@@ -12,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "Util.h"
 #include "bcdb/AlignBitcode.h"
 #include "bcdb/Split.h"
 #include "memodb/memodb.h"
@@ -24,7 +27,12 @@ cl::OptionCategory bcdb::BCDBCategory("BCDB options");
 static cl::opt<bool> NoRenameConstants(
     "no-rename-constants",
     cl::desc("Don't improve deduplication by renaming anonymous constants"),
-    cl::cat(BCDBCategory));
+    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+
+static cl::opt<bool> RenameGlobals(
+    "rename-globals",
+    cl::desc("When adding a module, rename referenced globals based on IDs"),
+    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
 
 Error BCDB::Init(StringRef uri) {
   Expected<std::unique_ptr<memodb_db>> db =
@@ -134,11 +142,30 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
 
   memodb_value function_map = memodb_value::map();
   Splitter Splitter(*M);
-  for (Function &F : M->functions()) {
-    auto MPart = Splitter.SplitGlobal(&F);
-    if (MPart)
-      function_map[memodb_value::bytes(F.getName())] = SaveModule(*MPart);
+
+  GlobalReferenceGraph Graph(*M);
+  for (auto &SCC : make_range(scc_begin(&Graph), scc_end(&Graph))) {
+    DenseMap<GlobalObject *, memodb_ref> Map;
+    for (auto &Node : SCC) {
+      if (GlobalObject *GO = dyn_cast_or_null<GlobalObject>(Node.second)) {
+        auto MPart = Splitter.SplitGlobal(GO);
+        if (MPart)
+          Map[GO] = SaveModule(*MPart);
+      }
+    }
+    for (auto &Item : Map) {
+      GlobalObject *GO = Item.first;
+      memodb_ref &Ref = Item.second;
+      function_map[memodb_value::bytes(GO->getName())] = Ref;
+      if (RenameGlobals) {
+        GlobalAlias *GA = GlobalAlias::create(
+            GlobalValue::InternalLinkage, "__bcdb_alias_" + StringRef(Ref), GO);
+        GO->replaceAllUsesWith(GA);
+        GA->setAliasee(GO); // Aliasee was changed by replaceAllUsesWith.
+      }
+    }
   }
+
   Splitter.Finish();
   memodb_ref remainder_value = SaveModule(*M);
 

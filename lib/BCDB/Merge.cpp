@@ -18,6 +18,7 @@
 #include <map>
 #include <set>
 
+#include "Util.h"
 #include "bcdb/BCDB.h"
 
 using namespace bcdb;
@@ -30,34 +31,6 @@ static cl::opt<bool> DisableDeduplication("disable-deduplication",
 static cl::opt<bool> DisableStubs("disable-stubs", cl::cat(MergeCategory));
 static cl::opt<bool> WriteGlobalGraph("write-global-graph",
                                       cl::cat(MergeCategory));
-
-static StringSet<> FindGlobalReferences(GlobalValue *Root) {
-  StringSet<> Result;
-  SmallVector<Value *, 8> Todo;
-
-  // TODO: visit function/instruction metadata?
-  for (auto &Op : Root->operands())
-    Todo.push_back(Op);
-  if (Function *F = dyn_cast<Function>(Root))
-    for (BasicBlock &BB : *F)
-      for (Instruction &I : BB)
-        for (const Use &Op : I.operands())
-          Todo.push_back(Op);
-
-  while (!Todo.empty()) {
-    Value *V = Todo.pop_back_val();
-    // TODO: check for MetadataAsValue?
-    if (V == Root)
-      continue;
-    if (GlobalValue *GV = dyn_cast<GlobalValue>(V)) {
-      Result.insert(GV->getName());
-    } else if (Constant *C = dyn_cast<Constant>(V)) {
-      for (auto &Op : C->operands())
-        Todo.push_back(Op);
-    }
-  }
-  return Result;
-}
 
 Merger::Merger(BCDB &bcdb)
     : bcdb(bcdb),
@@ -84,8 +57,8 @@ void Merger::AddModule(StringRef ModuleName) {
     if (GV.isDeclaration())
       continue;
     if (!GlobalItems.count(&GV))
-      for (const auto &ref : FindGlobalReferences(&GV))
-        GlobalItems[&GV].Refs[ref.first()] = ResolvedReference();
+      for (const auto &Ref : FindGlobalReferences(&GV))
+        GlobalItems[&GV].Refs[Ref->getName()] = ResolvedReference();
     GlobalItems[&GV].ModuleName = ModuleName;
     GlobalItems[&GV].Name = GV.getName();
   }

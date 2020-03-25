@@ -3,6 +3,11 @@
 ; RUN: llvm-as < %p/Inputs/lib.ll | bcdb add -uri sqlite:%t - -name lib
 ; RUN: bcdb mux -uri sqlite:%t bin lib | lli - bin
 
+; RUN: bcdb init -uri sqlite:%t.rg
+; RUN: llvm-as < %s | bcdb add -uri sqlite:%t.rg - -name bin -rename-globals
+; RUN: llvm-as < %p/Inputs/lib.ll | bcdb add -uri sqlite:%t.rg - -name lib -rename-globals
+; RUN: bcdb mux -uri sqlite:%t.rg bin lib | lli - bin
+
 @global = external global i32
 
 declare void @set_global_to_0()
