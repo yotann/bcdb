@@ -83,6 +83,7 @@ public:
   memodb_value(int val) : type_(INTEGER), integer_(val) {}
   memodb_value(integer_t val) : type_(INTEGER), integer_(val) {}
   memodb_value(std::uint64_t val) : type_(INTEGER), integer_(val) {}
+  memodb_value(long long int val) : type_(INTEGER), integer_(val) {}
 
   memodb_value(float_t val) : type_(FLOAT), float_(val) {}
 

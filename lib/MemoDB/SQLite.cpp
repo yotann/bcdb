@@ -16,8 +16,10 @@ enum ValueType {
   CBOR_BLOB = 2,    // arbitrary value stored as CBOR in "blob" table
 };
 
+const unsigned int CURRENT_VERSION = 3;
+
 static const char SQLITE_INIT_STMTS[] =
-    "PRAGMA user_version = 2;\n"
+    "PRAGMA user_version = 3;\n"
     "PRAGMA foreign_keys = ON;\n"
     "CREATE TABLE IF NOT EXISTS value(\n"
     "  vid     INTEGER PRIMARY KEY,\n"
@@ -57,18 +59,6 @@ static const char SQLITE_INIT_STMTS[] =
     ");\n"
     "CREATE INDEX IF NOT EXISTS call_by_arg ON call(arg, fid);\n"
     "CREATE INDEX IF NOT EXISTS call_by_result ON call(result, fid);\n";
-
-static const char SQLITE_UPGRADE_STMTS_V0[] =
-    "ALTER TABLE blob ADD COLUMN type INTEGER;\n"
-    "UPDATE blob SET type = 0;\n"
-    "CREATE UNIQUE INDEX blob_unique_hash ON blob(hash, type);\n";
-
-static const char SQLITE_UPGRADE_STMTS_V1[] =
-    "CREATE TABLE IF NOT EXISTS refs(\n"
-    "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
-    "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
-    "  UNIQUE(dest, src)\n"
-    ");\n";
 
 namespace {
 class sqlite_db : public memodb_db {
@@ -213,14 +203,83 @@ void sqlite_db::upgrade_schema() {
     fatal_error();
   sqlite3_int64 user_version = sqlite3_column_int64(stmt.stmt, 0);
 
-  if (user_version <= 0) {
-    sqlite3_exec(db, SQLITE_UPGRADE_STMTS_V0, nullptr, nullptr, nullptr);
+  if (user_version > CURRENT_VERSION) {
+    llvm::errs() << "The BCDB format is too new (this BCDB file uses format "
+                 << user_version << ", but we only support format "
+                 << CURRENT_VERSION << ")\n";
+    llvm::errs() << "Please upgrade your BCDB software!\n";
+    fatal_error();
+  }
+
+  if (user_version < CURRENT_VERSION)
+    llvm::errs() << "Upgrading BCDB format from " << user_version << " to "
+                 << CURRENT_VERSION << "...\n";
+
+  // Version 1 stores values as CBOR instead of using the map table.
+  if (user_version < 1) {
+    static const char UPGRADE_STMTS[] =
+        "ALTER TABLE blob ADD COLUMN type INTEGER;\n"
+        "UPDATE blob SET type = 0;\n"
+        "CREATE UNIQUE INDEX blob_unique_hash ON blob(hash, type);\n";
+    sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
     // ignore return code
   }
 
-  if (user_version <= 1) {
-    sqlite3_exec(db, SQLITE_UPGRADE_STMTS_V1, nullptr, nullptr, nullptr);
+  // Version 3 is the same as version 2, but forces old-format maps to be
+  // converted to CBOR. Note that we do this upgrade *before* the version 2
+  // upgrade, which needs to load values in CBOR format.
+  if (user_version < 3) {
+    Stmt stmt(db, "SELECT vid FROM value WHERE type = ?1");
+    stmt.bind_int(1, OBSOLETE_MAP);
+    while (true) {
+      int rc = stmt.step();
+      if (rc == SQLITE_DONE)
+        break;
+      else if (rc != SQLITE_ROW)
+        fatal_error();
+
+      sqlite3_int64 id = sqlite3_column_int64(stmt.stmt, 0);
+      memodb_value value = get_obsolete(id_to_ref(id));
+
+      // Ensure each value is unique. Otherwise, we would need to deduplicate
+      // the new values and change their ID numbers, which is too much work.
+      value["obsolete_vid"] = id;
+
+      std::vector<std::uint8_t> buffer;
+      value.save_cbor(buffer);
+      unsigned char hash[crypto_generichash_BYTES];
+      crypto_generichash(hash, sizeof hash, buffer.data(), buffer.size(),
+                         nullptr, 0);
+
+      Stmt stmt(db,
+                "INSERT OR IGNORE INTO blob(vid, type, hash, content) VALUES "
+                "(?1,?2,?3,?4)");
+      stmt.bind_int(1, id);
+      stmt.bind_int(2, CBOR_BLOB);
+      stmt.bind_blob(3, hash, sizeof hash);
+      stmt.bind_blob(4, buffer.data(), buffer.size());
+      if (stmt.step() != SQLITE_DONE)
+        fatal_error();
+    }
+
+    static const char UPGRADE_STMTS[] =
+        "UPDATE value SET type = 2 WHERE type = 1;\n"
+        "DELETE FROM map;\n";
+    sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
     // ignore return code
+  }
+
+  // Version 2 adds the refs table.
+  if (user_version < 2) {
+    static const char UPGRADE_STMTS[] =
+        "CREATE TABLE IF NOT EXISTS refs(\n"
+        "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
+        "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
+        "  UNIQUE(dest, src)\n"
+        ");\n";
+    sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    // ignore return code
+
     Stmt stmt(db, "SELECT vid FROM value WHERE type != ?1");
     stmt.bind_int(1, BYTES_BLOB);
     while (true) {
@@ -331,8 +390,6 @@ memodb_value sqlite_db::get(const memodb_ref &ref) {
   Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
   stmt.bind_int(1, ref_to_id(ref));
   int rc = stmt.step();
-  if (rc == SQLITE_DONE)
-    return get_obsolete(ref);
   if (rc != SQLITE_ROW)
     fatal_error();
 
