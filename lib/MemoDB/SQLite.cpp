@@ -86,7 +86,7 @@ class sqlite_db : public memodb_db {
   void upgrade_schema();
 
 public:
-  void open(const char *path, bool create_if_missing);
+  void open(const char *uri, bool create_if_missing);
   ~sqlite_db() override;
 
   memodb_value get(const memodb_ref &ref) override;
@@ -179,11 +179,11 @@ public:
 
 void sqlite_db::fatal_error() { llvm::report_fatal_error(sqlite3_errmsg(db)); }
 
-void sqlite_db::open(const char *path, bool create_if_missing) {
+void sqlite_db::open(const char *uri, bool create_if_missing) {
   assert(!db);
   int flags =
-      SQLITE_OPEN_READWRITE | (create_if_missing ? SQLITE_OPEN_CREATE : 0);
-  int rc = sqlite3_open_v2(path, &db, flags, /*zVfs*/ nullptr);
+      SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE | (create_if_missing ? SQLITE_OPEN_CREATE : 0);
+  int rc = sqlite3_open_v2(uri, &db, flags, /*zVfs*/ nullptr);
   if (rc != SQLITE_OK)
     fatal_error();
 
@@ -595,13 +595,6 @@ void sqlite_db::head_set(llvm::StringRef name, const memodb_ref &value) {
     fatal_error();
 }
 
-std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
-                                              bool create_if_missing) {
-  auto db = std::make_unique<sqlite_db>();
-  db->open(path.str().c_str(), create_if_missing);
-  return db;
-}
-
 void sqlite_db::head_delete(llvm::StringRef name) {
   Stmt delete_stmt(db, "DELETE FROM head WHERE name = ?1");
   delete_stmt.bind_text(1, name);
@@ -691,4 +684,12 @@ void sqlite_db::call_invalidate(llvm::StringRef name) {
   delete_stmt.bind_int(1, fid);
   if (delete_stmt.step() != SQLITE_DONE)
     fatal_error();
+}
+
+std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
+                                              bool create_if_missing) {
+  auto uri = "file:" + path;
+  auto db = std::make_unique<sqlite_db>();
+  db->open(uri.str().c_str(), create_if_missing);
+  return db;
 }
