@@ -16,27 +16,36 @@ enum ValueType {
   CBOR_BLOB = 2,    // arbitrary value stored as CBOR in "blob" table
 };
 
-const unsigned int CURRENT_VERSION = 3;
+// Errors when running these statements are ignored.
+static const std::vector<const char *> SQLITE_PRAGMAS = {
+  "PRAGMA busy_timeout = 10000;\n",
+  "PRAGMA foreign_keys = ON;\n",
+  "PRAGMA journal_mode = WAL;\n",
+  "PRAGMA synchronous = 1;\n",
+};
+
+const unsigned int CURRENT_VERSION = 4;
+const unsigned long APPLICATION_ID = 1111704642;
 
 static const char SQLITE_INIT_STMTS[] =
-    "PRAGMA user_version = 3;\n"
-    "PRAGMA foreign_keys = ON;\n"
-    "CREATE TABLE IF NOT EXISTS value(\n"
+    "PRAGMA user_version = 4;\n"
+    "PRAGMA application_id = 1111704642;\n"
+    "CREATE TABLE value(\n"
     "  vid     INTEGER PRIMARY KEY,\n"
     "  type    INTEGER NOT NULL\n"
     ");\n"
-    "CREATE TABLE IF NOT EXISTS head(\n"
+    "CREATE TABLE head(\n"
     "  hid     INTEGER PRIMARY KEY,\n"
     "  name    TEXT    NOT NULL UNIQUE,\n"
     "  vid     INTEGER NOT NULL REFERENCES value(vid)\n"
     ");\n"
-    "CREATE INDEX IF NOT EXISTS head_by_vid ON head(vid);\n"
-    "CREATE TABLE IF NOT EXISTS refs(\n"
+    "CREATE INDEX head_by_vid ON head(vid);\n"
+    "CREATE TABLE refs(\n"
     "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
     "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
     "  UNIQUE(dest, src)\n"
     ");\n"
-    "CREATE TABLE IF NOT EXISTS blob(\n"
+    "CREATE TABLE blob(\n"
     "  vid     INTEGER PRIMARY KEY REFERENCES value(vid),\n"
     "  type    INTEGER NOT NULL,\n"
     "  hash    BLOB    NOT NULL,\n"
@@ -44,11 +53,11 @@ static const char SQLITE_INIT_STMTS[] =
     "  content BLOB    NOT NULL,\n"
     "  UNIQUE(hash, type)\n"
     ");\n"
-    "CREATE TABLE IF NOT EXISTS func(\n"
+    "CREATE TABLE func(\n"
     "  fid     INTEGER PRIMARY KEY,\n"
     "  name    TEXT    NOT NULL UNIQUE\n"
     ");\n"
-    "CREATE TABLE IF NOT EXISTS call(\n"
+    "CREATE TABLE call(\n"
     "  cid     INTEGER PRIMARY KEY,\n"
     "  fid     INTEGER NOT NULL REFERENCES func(fid),\n"
     "  parent  INTEGER          REFERENCES call(cid),\n"
@@ -57,8 +66,8 @@ static const char SQLITE_INIT_STMTS[] =
     "  result  INTEGER          REFERENCES value(vid)\n"
     "          -- (only if this is the last arg)\n"
     ");\n"
-    "CREATE INDEX IF NOT EXISTS call_by_arg ON call(arg, fid);\n"
-    "CREATE INDEX IF NOT EXISTS call_by_result ON call(result, fid);\n";
+    "CREATE INDEX call_by_arg ON call(arg, fid, parent);\n"
+    "CREATE INDEX call_by_result ON call(result, fid);\n";
 
 namespace {
 class sqlite_db : public memodb_db {
@@ -78,7 +87,7 @@ class sqlite_db : public memodb_db {
 
 public:
   void open(const char *path, bool create_if_missing);
-  ~sqlite_db() override { sqlite3_close(db); }
+  ~sqlite_db() override;
 
   memodb_value get(const memodb_ref &ref) override;
   memodb_ref put(const memodb_value &value) override;
@@ -150,8 +159,8 @@ class Transaction {
   bool committed = false;
 
 public:
-  Transaction(sqlite3 *db) : db(db) {
-    rc = sqlite3_exec(db, "BEGIN", nullptr, nullptr, nullptr);
+  Transaction(sqlite3 *db, bool exclusive = false) : db(db) {
+    rc = sqlite3_exec(db, exclusive ? "BEGIN EXCLUSIVE" : "BEGIN", nullptr, nullptr, nullptr);
   }
   int commit() {
     assert(!committed);
@@ -178,30 +187,56 @@ void sqlite_db::open(const char *path, bool create_if_missing) {
   if (rc != SQLITE_OK)
     fatal_error();
 
-  rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL; PRAGMA synchronous = 1",
-                    nullptr, nullptr, nullptr);
-  // ignore return code
+  for (const char *stmt : SQLITE_PRAGMAS) {
+    rc = sqlite3_exec(db, stmt, nullptr, nullptr, nullptr);
+    // ignore return code
+  }
 
   upgrade_schema();
+}
 
-  rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
-  if (rc != SQLITE_OK)
-    fatal_error();
+sqlite_db::~sqlite_db() {
+  sqlite3_exec(db, "PRAGMA optimize;", nullptr, nullptr, nullptr);
+  // ignore return code
+
+  sqlite3_close(db);
 }
 
 void sqlite_db::upgrade_schema() {
-  Transaction transaction(db);
+  int rc;
 
-  // If the database is empty, don't do anything.
-  Stmt exists_stmt(
-      db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='value'");
-  if (exists_stmt.step() == SQLITE_DONE)
+  // Exit early if the schema is already current.
+  sqlite3_int64 user_version;
+  {
+    Stmt stmt(db, "PRAGMA user_version");
+    if (stmt.step() != SQLITE_ROW)
+      fatal_error();
+    user_version = sqlite3_column_int64(stmt.stmt, 0);
+  }
+  if (user_version == CURRENT_VERSION)
     return;
 
-  Stmt stmt(db, "PRAGMA user_version");
-  if (stmt.step() != SQLITE_ROW)
-    fatal_error();
-  sqlite3_int64 user_version = sqlite3_column_int64(stmt.stmt, 0);
+  // Start an exclusive transaction so the upgrade process doesn't conflict
+  // with other processes.
+  Transaction transaction(db, true);
+
+  // If the database is empty, initialize it.
+  {
+    Stmt exists_stmt(
+        db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='value'");
+    if (exists_stmt.step() == SQLITE_DONE) {
+      rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
+      if (rc != SQLITE_OK)
+        fatal_error();
+    }
+  }
+
+  {
+    Stmt stmt(db, "PRAGMA user_version");
+    if (stmt.step() != SQLITE_ROW)
+      fatal_error();
+    user_version = sqlite3_column_int64(stmt.stmt, 0);
+  }
 
   if (user_version > CURRENT_VERSION) {
     llvm::errs() << "The BCDB format is too new (this BCDB file uses format "
@@ -220,9 +255,23 @@ void sqlite_db::upgrade_schema() {
     static const char UPGRADE_STMTS[] =
         "ALTER TABLE blob ADD COLUMN type INTEGER;\n"
         "UPDATE blob SET type = 0;\n"
-        "CREATE UNIQUE INDEX blob_unique_hash ON blob(hash, type);\n";
-    sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    // ignore return code
+        "CREATE UNIQUE INDEX blob_unique_hash ON blob(hash, type);\n"
+        "CREATE TABLE IF NOT EXISTS func(\n"
+        "  fid     INTEGER PRIMARY KEY,\n"
+        "  name    TEXT    NOT NULL UNIQUE\n"
+        ");\n"
+        "CREATE TABLE IF NOT EXISTS call(\n"
+        "  cid     INTEGER PRIMARY KEY,\n"
+        "  fid     INTEGER NOT NULL REFERENCES func(fid),\n"
+        "  parent  INTEGER          REFERENCES call(cid),\n"
+        "          -- (only if this is not the first arg)\n"
+        "  arg     INTEGER NOT NULL REFERENCES value(vid),\n"
+        "  result  INTEGER          REFERENCES value(vid)\n"
+        "          -- (only if this is the last arg)\n"
+        ");\n";
+    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
   }
 
   // Version 3 is the same as version 2, but forces old-format maps to be
@@ -232,7 +281,7 @@ void sqlite_db::upgrade_schema() {
     Stmt stmt(db, "SELECT vid FROM value WHERE type = ?1");
     stmt.bind_int(1, OBSOLETE_MAP);
     while (true) {
-      int rc = stmt.step();
+      rc = stmt.step();
       if (rc == SQLITE_DONE)
         break;
       else if (rc != SQLITE_ROW)
@@ -264,9 +313,10 @@ void sqlite_db::upgrade_schema() {
 
     static const char UPGRADE_STMTS[] =
         "UPDATE value SET type = 2 WHERE type = 1;\n"
-        "DELETE FROM map;\n";
-    sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    // ignore return code
+        "DROP TABLE IF EXISTS map;\n";
+    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
   }
 
   // Version 2 adds the refs table.
@@ -277,13 +327,14 @@ void sqlite_db::upgrade_schema() {
         "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
         "  UNIQUE(dest, src)\n"
         ");\n";
-    sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    // ignore return code
+    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
 
     Stmt stmt(db, "SELECT vid FROM value WHERE type != ?1");
     stmt.bind_int(1, BYTES_BLOB);
     while (true) {
-      int rc = stmt.step();
+      rc = stmt.step();
       if (rc == SQLITE_DONE)
         break;
       else if (rc != SQLITE_ROW)
@@ -294,8 +345,31 @@ void sqlite_db::upgrade_schema() {
     }
   }
 
+  // Version 4 adds some indexes and the application_id.
+  if (user_version < 4) {
+    static const char UPGRADE_STMTS[] =
+        "CREATE INDEX IF NOT EXISTS head_by_vid ON head(vid);\n"
+        "DROP INDEX IF EXISTS call_by_arg;\n"
+        "CREATE INDEX call_by_arg ON call(arg, fid, parent);\n"
+        "CREATE INDEX IF NOT EXISTS call_by_result ON call(result, fid);\n"
+        "PRAGMA application_id = 1111704642;\n"
+        "PRAGMA user_version = 4;\n";
+    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
+  }
+
+  // NOTE: it might be nice to run VACUUM here. However, it can be extremely
+  // slow and it requires either gigabytes of RAM or gigabytes of /tmp space
+  // (depending on the value of PRAGMA temp_store).
+
   if (transaction.commit() != SQLITE_OK)
     fatal_error();
+
+  // Ensure the new user_version/application_id are written to the actual
+  // database file.
+  rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr, nullptr);
+  // ignore return value
 }
 
 memodb_ref sqlite_db::id_to_ref(sqlite3_int64 id) {

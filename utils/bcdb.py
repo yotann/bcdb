@@ -24,7 +24,7 @@ class BCDB:
 
         self.cursor.execute('PRAGMA user_version')
         user_version, = self.cursor.fetchone()
-        if user_version != 3:
+        if user_version not in (3, 4):
             assert False, f'Unsupported BCDB version (open it with bin/bcdb to upgrade)'
 
     def get_heads(self):
