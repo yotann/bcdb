@@ -18,10 +18,10 @@ enum ValueType {
 
 // Errors when running these statements are ignored.
 static const std::vector<const char *> SQLITE_PRAGMAS = {
-  "PRAGMA busy_timeout = 10000;\n",
-  "PRAGMA foreign_keys = ON;\n",
-  "PRAGMA journal_mode = WAL;\n",
-  "PRAGMA synchronous = 1;\n",
+    "PRAGMA busy_timeout = 10000;\n",
+    "PRAGMA foreign_keys = ON;\n",
+    "PRAGMA journal_mode = WAL;\n",
+    "PRAGMA synchronous = 1;\n",
 };
 
 const unsigned int CURRENT_VERSION = 4;
@@ -160,7 +160,8 @@ class Transaction {
 
 public:
   Transaction(sqlite3 *db, bool exclusive = false) : db(db) {
-    rc = sqlite3_exec(db, exclusive ? "BEGIN EXCLUSIVE" : "BEGIN", nullptr, nullptr, nullptr);
+    rc = sqlite3_exec(db, exclusive ? "BEGIN EXCLUSIVE" : "BEGIN", nullptr,
+                      nullptr, nullptr);
   }
   int commit() {
     assert(!committed);
@@ -181,8 +182,8 @@ void sqlite_db::fatal_error() { llvm::report_fatal_error(sqlite3_errmsg(db)); }
 
 void sqlite_db::open(const char *uri, bool create_if_missing) {
   assert(!db);
-  int flags =
-      SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE | (create_if_missing ? SQLITE_OPEN_CREATE : 0);
+  int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE |
+              (create_if_missing ? SQLITE_OPEN_CREATE : 0);
   int rc = sqlite3_open_v2(uri, &db, flags, /*zVfs*/ nullptr);
   if (rc != SQLITE_OK)
     fatal_error();
@@ -368,7 +369,8 @@ void sqlite_db::upgrade_schema() {
 
   // Ensure the new user_version/application_id are written to the actual
   // database file.
-  rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr, nullptr);
+  rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr,
+                    nullptr);
   // ignore return value
 }
 
