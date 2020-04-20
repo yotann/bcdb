@@ -1,5 +1,7 @@
 add_subdirectory(bc-align)
+if( ${LLVM_VERSION_MAJOR} GREATER 6 )
 add_subdirectory(bc-imitate)
+endif()
 add_subdirectory(bc-join)
 add_subdirectory(bc-split)
 add_subdirectory(bcdb)
