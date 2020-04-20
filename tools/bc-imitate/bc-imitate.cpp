@@ -10,6 +10,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/PrettyStackTrace.h>
+#include <llvm/Support/Program.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/SystemUtils.h>
@@ -23,41 +24,51 @@ using namespace bcdb;
 using namespace llvm;
 using namespace llvm::object;
 
-static cl::opt<std::string> InputFilename(cl::Positional,
-                                          cl::desc("<input bitcode file>"),
-                                          cl::init("-"),
-                                          cl::value_desc("filename"));
+static cl::SubCommand
+    AnnotateCommand("annotate",
+                    "Annotate a bitcode module with linking information");
+static cl::SubCommand ClangCommand("clang", "Run Clang to link a module");
+static cl::SubCommand
+    ClangArgsCommand("clang-args",
+                     "Determine Clang options for linking a module");
+
+static cl::opt<std::string>
+    InputFilenameBitcode(cl::Positional, cl::desc("<input bitcode file>"),
+                         cl::init("-"), cl::value_desc("filename"),
+                         cl::sub(AnnotateCommand), cl::sub(ClangCommand),
+                         cl::sub(ClangArgsCommand));
 
 static cl::opt<std::string> BinaryFilename("binary",
                                            cl::desc("<input binary file>"),
-                                           cl::value_desc("filename"));
+                                           cl::value_desc("filename"),
+                                           cl::sub(AnnotateCommand));
 
-static cl::opt<std::string> OutputFilename("o",
-                                           cl::desc("Override output filename"),
-                                           cl::init("-"),
-                                           cl::value_desc("filename"));
+static cl::opt<std::string>
+    OutputFilename("o", cl::desc("Override output filename"), cl::init("-"),
+                   cl::value_desc("filename"), cl::sub(AnnotateCommand),
+                   cl::sub(ClangCommand));
 
-static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"));
+static cl::opt<std::string> OptLevel("O", cl::desc("Optimization level"),
+                                     cl::init("0"), cl::value_desc("level"),
+                                     cl::sub(ClangCommand));
 
-int main(int argc, const char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"),
+                           cl::sub(AnnotateCommand));
 
-  cl::ParseCommandLineOptions(argc, argv, "Make module imitate binary");
-
+static int Annotate() {
   LLVMContext Context;
   SMDiagnostic Diag;
-  std::unique_ptr<Module> M = parseIRFile(InputFilename, Diag, Context);
+  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, Context);
   if (!M) {
-    Diag.print(argv[0], errs());
+    Diag.print("bc-imitate", errs());
     return 1;
   }
 
-  ExitOnError Err("bc-imitate: ");
+  ExitOnError Err("bc-imitate annotate: ");
   OwningBinary<Binary> OBinary = Err(createBinary(BinaryFilename));
   Binary &Binary = *OBinary.getBinary();
 
-  if (!ImitateBinary(*M, Binary)) {
+  if (!AnnotateModuleWithBinary(*M, Binary)) {
     errs() << "unsupported binary file\n";
     return 1;
   }
@@ -74,4 +85,66 @@ int main(int argc, const char **argv) {
   }
 
   return 0;
+}
+
+static int Clang() {
+  LLVMContext Context;
+  SMDiagnostic Diag;
+  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, Context);
+  if (!M) {
+    Diag.print("bc-imitate", errs());
+    return 1;
+  }
+
+  // TODO: what if input is stdin?
+  ExitOnError Err("bc-imitate clang: ");
+  std::string OptArg = "-O" + OptLevel;
+  std::vector<StringRef> Args = {
+      "clang", OptArg, "-x", "ir", InputFilenameBitcode, "-o", OutputFilename};
+  auto Program = Err(errorOrToExpected(sys::findProgramByName(Args[0])));
+  auto ClangArgs = ImitateClangArgs(*M);
+  for (auto &Arg : ClangArgs)
+    Args.push_back(Arg);
+  return sys::ExecuteAndWait(Program, Args);
+}
+
+static int ClangArgs() {
+  LLVMContext Context;
+  SMDiagnostic Diag;
+  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, Context);
+  if (!M) {
+    Diag.print("bc-imitate", errs());
+    return 1;
+  }
+
+  for (auto Arg : ImitateClangArgs(*M))
+    outs() << Arg << "\n";
+  return 0;
+}
+
+int main(int argc, const char **argv) {
+  PrettyStackTraceProgram StackPrinter(argc, argv);
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
+
+  for (auto &I : cl::TopLevelSubCommand->OptionsMap) {
+    if (OptionHasCategory(*I.second, cl::GeneralCategory)) {
+      // Hide LLVM's options, since they're mostly irrelevant.
+      I.second->setHiddenFlag(cl::Hidden);
+      I.second->addSubCommand(*cl::AllSubCommands);
+    } else {
+      // no change (--help, --version, etc.)
+    }
+  }
+  cl::ParseCommandLineOptions(argc, argv, "Imitate the native linker");
+
+  if (AnnotateCommand) {
+    return Annotate();
+  } else if (ClangCommand) {
+    return Clang();
+  } else if (ClangArgsCommand) {
+    return ClangArgs();
+  } else {
+    cl::PrintHelpMessage(false, true);
+    return 0;
+  }
 }

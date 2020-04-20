@@ -1,6 +1,9 @@
 #ifndef BCDB_WHOLEPROGRAM_H
 #define BCDB_WHOLEPROGRAM_H
 
+#include <string>
+#include <vector>
+
 namespace llvm {
 class Module;
 namespace object {
@@ -10,7 +13,8 @@ class Binary;
 
 namespace bcdb {
 
-bool ImitateBinary(llvm::Module &M, llvm::object::Binary &B);
+bool AnnotateModuleWithBinary(llvm::Module &M, llvm::object::Binary &B);
+std::vector<std::string> ImitateClangArgs(llvm::Module &M);
 
 } // end namespace bcdb
 

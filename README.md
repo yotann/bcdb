@@ -156,9 +156,16 @@ Usage: `bc-split -o output.bc input_directory`.
 ### bc-imitate
 
 `bc-imitate` copies certain linking information from an ELF binary into an LLVM
-module. It isn't ready to be used yet.
+module, so that the LLVM module can be properly linked into a new ELF binary.
+In particular, it keeps track of which shared libraries the module should link
+against. There are two steps: `bc-imitate annotate` adds the necessary linking
+information to a bitcode module, and `bc-imitate clang` performs the actual
+linking (using `clang`).
 
-Usage: `bc-imitate input.bc -binary input.elf -o output.bc`.
+Usage:
+
+1. `bc-imitate annotate input.bc -binary input.elf -o annotated.bc`
+2. `bc-imitate clang -O 2 annotated.bc -o output.elf`
 
 ## Contact
 
