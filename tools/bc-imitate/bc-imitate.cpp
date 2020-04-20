@@ -48,7 +48,8 @@ static cl::opt<std::string>
                    cl::value_desc("filename"), cl::sub(AnnotateCommand),
                    cl::sub(ClangCommand));
 
-static cl::opt<std::string> OptLevel("O", cl::desc("Optimization level"),
+static cl::opt<std::string> OptLevel("O", cl::AlwaysPrefix,
+                                     cl::desc("Optimization level"),
                                      cl::init("0"), cl::value_desc("level"),
                                      cl::sub(ClangCommand));
 

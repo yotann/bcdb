@@ -165,7 +165,7 @@ linking (using `clang`).
 Usage:
 
 1. `bc-imitate annotate input.bc -binary input.elf -o annotated.bc`
-2. `bc-imitate clang -O 2 annotated.bc -o output.elf`
+2. `bc-imitate clang -O2 annotated.bc -o output.elf`
 
 ## Contact
 
