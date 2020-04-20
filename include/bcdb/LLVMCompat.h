@@ -31,6 +31,14 @@ static void LLVM_ATTRIBUTE_UNUSED WriteBitcodeToFile(const Module &M,
 } // end namespace llvm
 #endif
 
+#if LLVM_VERSION_MAJOR < 8 && defined(LLVM_SUPPORT_COMMANDLINE_H)
+namespace llvm {
+namespace cl {
+static const FormattingFlags AlwaysPrefix = Prefix;
+} // end namespace cl
+} // end namespace llvm
+#endif
+
 #if defined(LLVM_SUPPORT_COMMANDLINE_H)
 namespace bcdb {
 static inline bool OptionHasCategory(llvm::cl::Option &O,
