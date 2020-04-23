@@ -109,7 +109,8 @@ static int Clang() {
   ExitOnError Err("bc-imitate clang: ");
   std::string OptArg = "-O" + OptLevel;
   std::vector<StringRef> Args = {
-      "clang", OptArg, "-x", "ir", InputFilenameBitcode, "-o", OutputFilename};
+      "clang++", OptArg,        "-x", "ir", InputFilenameBitcode,
+      "-o",      OutputFilename};
   auto Program = Err(errorOrToExpected(sys::findProgramByName(Args[0])));
   auto ClangArgs = ImitateClangArgs(*M);
   for (auto &Arg : ClangArgs)
