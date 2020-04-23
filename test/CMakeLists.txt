@@ -27,7 +27,9 @@ add_subdirectory(BCDB)
 add_subdirectory(Merge)
 add_subdirectory(Mux)
 add_subdirectory(Split)
+if( ${LLVM_VERSION_MAJOR} GREATER 6 )
 add_subdirectory(WholeProgram)
+endif()
 
 add_lit_testsuite(check-unit "Running unit tests"
   ${CMAKE_CURRENT_BINARY_DIR}/Unit

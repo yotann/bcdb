@@ -1,6 +1,6 @@
-; RUN: bc-imitate annotate --binary %p/Inputs/library.so | llvm-dis | FileCheck %s
+; RUN: bc-imitate annotate --binary %p/Inputs/library.elf | llvm-dis | FileCheck %s
 
-; CHECK: source_filename = "{{.*}}/Inputs/library.so"
+; CHECK: source_filename = "{{.*}}/Inputs/library.elf"
 
 ; CHECK: define i32 @x1()
 ; CHECK-NEXT: tail call i32 (...) bitcast (i32 ()* @x2 to i32 (...)*)()
