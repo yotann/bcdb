@@ -61,6 +61,20 @@ Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
     GlobalNames.push_back(F.getName());
 }
 
+static AttributeList copyByValAttributes(LLVMContext &C, AttributeList Source,
+                                         AttributeList Attrs) {
+  assert(Attrs.getNumAttrSets() == Source.getNumAttrSets());
+#if LLVM_VERSION_MAJOR >= 9
+  for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
+    Attrs = Attrs.removeAttribute(C, i, Attribute::ByVal);
+    Type *Ty = Source.getAttribute(i, Attribute::ByVal).getValueAsType();
+    if (Ty)
+      Attrs = Attrs.addAttribute(C, i, Attribute::getWithByValType(C, Ty));
+  }
+#endif
+  return Attrs;
+}
+
 void Joiner::JoinGlobal(llvm::StringRef Name,
                         std::unique_ptr<llvm::Module> MPart) {
   Function *Stub = M->getFunction(Name);
@@ -79,7 +93,10 @@ void Joiner::JoinGlobal(llvm::StringRef Name,
   // Copy linker information from the stub.
   Def->setName(Name);
   assert(Def->getName() == Name && "name conflict");
+  AttributeList OldAttrs = Def->getAttributes();
   Def->copyAttributesFrom(Stub);
+  Def->setAttributes(
+      copyByValAttributes(Def->getContext(), OldAttrs, Def->getAttributes()));
   Def->setComdat(Stub->getComdat());
 
   // Move the definition into the main module.
