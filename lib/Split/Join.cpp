@@ -3,6 +3,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm/IR/Attributes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
@@ -11,6 +12,8 @@
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <memory>
+
+#include "bcdb/LLVMCompat.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -63,8 +66,8 @@ Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
 
 static AttributeList copyByValAttributes(LLVMContext &C, AttributeList Source,
                                          AttributeList Attrs) {
-  assert(Attrs.getNumAttrSets() == Source.getNumAttrSets());
 #if LLVM_VERSION_MAJOR >= 9
+  assert(Attrs.getNumAttrSets() == Source.getNumAttrSets());
   for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
     Attrs = Attrs.removeAttribute(C, i, Attribute::ByVal);
     Type *Ty = Source.getAttribute(i, Attribute::ByVal).getValueAsType();

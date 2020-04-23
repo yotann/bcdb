@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm/IR/Attributes.h>
 #include <llvm/IR/CallSite.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DebugInfoMetadata.h>
@@ -22,12 +23,10 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
+#include "bcdb/LLVMCompat.h"
+
 using namespace bcdb;
 using namespace llvm;
-
-#if LLVM_VERSION_MAJOR < 5
-using AttributeList = AttributeSet;
-#endif
 
 namespace {
 /// Remaps types and replaces unneeded named structs with opaque structs.
