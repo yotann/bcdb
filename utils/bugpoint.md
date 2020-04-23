@@ -7,14 +7,15 @@ you have a crash in `bcdb merge`:
 ```bash
 #!/bin/sh
 set -e
-bin/bcdb add   -uri sqlite:bugpoint.bcdb "$@" -name test
-bin/bcdb merge -uri sqlite:bugpoint.bcdb test > /dev/null
+bin/bcdb add   "$@" -name test
+bin/bcdb merge test > /dev/null
 ```
 
 If this script is in `try-merge.sh`, you can run bugpoint like so:
 
 ```shell
-$ bin/bcdb init -uri sqlite:bugpoint.bcdb
-$ bugpoint -compile-custom -compile-command=./custom.sh failing-test.bc
+$ export BCDB_URI=sqlite:bugpoint.bcdb
+$ bin/bcdb init
+$ bugpoint -compile-custom -compile-command=./try-merge.sh failing-test.bc
 $ opt -globalopt -S < bugpoint-reduced-simplified.bc
 ```
