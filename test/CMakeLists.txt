@@ -27,6 +27,7 @@ add_subdirectory(BCDB)
 add_subdirectory(Merge)
 add_subdirectory(Mux)
 add_subdirectory(Split)
+add_subdirectory(WholeProgram)
 
 add_lit_testsuite(check-unit "Running unit tests"
   ${CMAKE_CURRENT_BINARY_DIR}/Unit

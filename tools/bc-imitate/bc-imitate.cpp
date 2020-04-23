@@ -34,9 +34,8 @@ static cl::SubCommand
 
 static cl::opt<std::string>
     InputFilenameBitcode(cl::Positional, cl::desc("<input bitcode file>"),
-                         cl::init("-"), cl::value_desc("filename"),
-                         cl::sub(AnnotateCommand), cl::sub(ClangCommand),
-                         cl::sub(ClangArgsCommand));
+                         cl::value_desc("filename"), cl::sub(AnnotateCommand),
+                         cl::sub(ClangCommand), cl::sub(ClangArgsCommand));
 
 static cl::opt<std::string> BinaryFilename("binary",
                                            cl::desc("<input binary file>"),
@@ -57,17 +56,26 @@ static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"),
                            cl::sub(AnnotateCommand));
 
 static int Annotate() {
-  LLVMContext Context;
-  SMDiagnostic Diag;
-  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, Context);
-  if (!M) {
-    Diag.print("bc-imitate", errs());
-    return 1;
-  }
-
   ExitOnError Err("bc-imitate annotate: ");
   OwningBinary<Binary> OBinary = Err(createBinary(BinaryFilename));
   Binary &Binary = *OBinary.getBinary();
+
+  LLVMContext Context;
+  std::unique_ptr<Module> M;
+  if (!InputFilenameBitcode.empty()) {
+    SMDiagnostic Diag;
+    M = parseIRFile(InputFilenameBitcode, Diag, Context);
+    if (!M) {
+      Diag.print("bc-imitate", errs());
+      return 1;
+    }
+  } else {
+    M = ExtractModuleFromBinary(Context, Binary);
+    if (!M) {
+      errs() << "can't extract bitcode from " << BinaryFilename << "\n";
+      return 1;
+    }
+  }
 
   if (!AnnotateModuleWithBinary(*M, Binary)) {
     errs() << "unsupported binary file\n";

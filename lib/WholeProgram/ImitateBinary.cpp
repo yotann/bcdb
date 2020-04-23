@@ -1,11 +1,15 @@
 #include "bcdb/WholeProgram.h"
 
 #include <algorithm>
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Linker/Linker.h>
 #include <llvm/Object/ELFObjectFile.h>
 #include <llvm/Support/Error.h>
+
+#include "bcdb/AlignBitcode.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -14,6 +18,34 @@ using namespace llvm::object;
 // TODO: support other binary formats
 // TODO: update symbol linkage types to match the binary
 // TODO: detect additional symbols in the binary that came from assembly files
+
+// Extract a module from an ELF file created with "clang -fembed-bitcode".
+template <class ELFT>
+static std::unique_ptr<Module>
+ExtractModuleFromELF(LLVMContext &Context, const ELFObjectFile<ELFT> &ELF) {
+  ExitOnError Err("ExtractModuleFromELF: ");
+  std::unique_ptr<Module> M =
+      std::make_unique<Module>(ELF.getFileName(), Context);
+  Linker Linker(*M);
+
+  for (auto &Section : ELF.sections()) {
+    auto Name = Err(Section.getName());
+    if (Name.startswith(".llvmbc")) {
+      StringRef Contents = Err(Section.getContents());
+      // When ELF files containing .llvmbc sections are linked, the .llvmbc
+      // sections are concatenated, possibly with padding bytes between them.
+      while (!Contents.empty()) {
+        size_t Size = GetBitcodeSize(MemoryBufferRef(Contents, ".llvmbc"));
+        MemoryBufferRef Buffer(Contents.substr(0, Size), ".llvmbc");
+        Contents = Contents.substr(Size).ltrim('\x00');
+
+        std::unique_ptr<Module> MPart = Err(parseBitcodeFile(Buffer, Context));
+        Linker.linkInModule(std::move(MPart));
+      }
+    }
+  }
+  return M;
+}
 
 template <class ELFT>
 static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
@@ -96,6 +128,20 @@ static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
                     MDTuple::get(M.getContext(), Needed));
 
   return true;
+}
+
+std::unique_ptr<Module> bcdb::ExtractModuleFromBinary(LLVMContext &Context,
+                                                      Binary &B) {
+  if (auto *ELF = dyn_cast<ELF64LEObjectFile>(&B)) {
+    return ExtractModuleFromELF(Context, *ELF);
+  } else if (auto *ELF = dyn_cast<ELF64BEObjectFile>(&B)) {
+    return ExtractModuleFromELF(Context, *ELF);
+  } else if (auto *ELF = dyn_cast<ELF32LEObjectFile>(&B)) {
+    return ExtractModuleFromELF(Context, *ELF);
+  } else if (auto *ELF = dyn_cast<ELF32BEObjectFile>(&B)) {
+    return ExtractModuleFromELF(Context, *ELF);
+  }
+  return nullptr;
 }
 
 bool bcdb::AnnotateModuleWithBinary(Module &M, Binary &B) {

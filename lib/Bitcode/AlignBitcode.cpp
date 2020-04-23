@@ -316,3 +316,36 @@ void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
       MemoryBufferRef(StringRef(TmpBuffer.data(), TmpBuffer.size()), ""),
       Buffer);
 }
+
+size_t bcdb::GetBitcodeSize(MemoryBufferRef Buffer) {
+  ExitOnError Err("GetBitcodeSize: ");
+
+  const unsigned char *BufPtr =
+      reinterpret_cast<const unsigned char *>(Buffer.getBufferStart());
+  const unsigned char *EndBufPtr =
+      reinterpret_cast<const unsigned char *>(Buffer.getBufferEnd());
+  if (isBitcodeWrapper(BufPtr, EndBufPtr)) {
+    const unsigned char *FixedBufPtr = BufPtr;
+    if (SkipBitcodeWrapperHeader(FixedBufPtr, EndBufPtr, true))
+      report_fatal_error("Invalid bitcode wrapper");
+    return EndBufPtr - BufPtr;
+  }
+
+  if (!isRawBitcode(BufPtr, EndBufPtr))
+    report_fatal_error("Invalid magic bytes; not a bitcode file?");
+
+  BitstreamCursor Reader(Buffer);
+  Reader.Read(32); // skip signature
+  while (true) {
+    size_t EntryStart = Reader.getCurrentByteNo();
+    BitstreamEntry Entry =
+        Reader.advance(BitstreamCursor::AF_DontAutoprocessAbbrevs);
+    if (Entry.Kind == BitstreamEntry::SubBlock) {
+      if (Reader.SkipBlock())
+        report_fatal_error("Invalid bitcode file");
+    } else {
+      // We must have reached the end of the module.
+      return EntryStart;
+    }
+  }
+}

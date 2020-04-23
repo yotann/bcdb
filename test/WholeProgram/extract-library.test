@@ -1,0 +1,21 @@
+; RUN: bc-imitate annotate --binary %p/Inputs/library.so | llvm-dis | FileCheck %s
+
+; CHECK: source_filename = "{{.*}}/Inputs/library.so"
+
+; CHECK: define i32 @x1()
+; CHECK-NEXT: tail call i32 (...) bitcast (i32 ()* @x2 to i32 (...)*)()
+
+; CHECK: define i32 @x2()
+; CHECK-NEXT: tail call i8* @zlibVersion()
+
+; CHECK: declare i8* @zlibVersion()
+
+; CHECK: !llvm.module.flags = !{!1, !2, !3, !4, !5, !7}
+; CHECK: !1 = !{i32 1, !"wchar_size", i32 4}
+; CHECK: !2 = !{i32 7, !"PIC Level", i32 2}
+; CHECK: !3 = !{i32 2, !"bcdb.elf.type", i32 3}
+; CHECK: !4 = !{i32 2, !"bcdb.elf.soname", !"libsoname.so"}
+; CHECK: !5 = !{i32 6, !"bcdb.elf.runpath", !6}
+; CHECK: !6 = !{!"/nix/store/8wanm00dzn5vlajz1rznbf6dbj8931d6-zlib-1.2.11/lib", !"/nix/store/an6bdv4phxsz14q2sk57iscl2dc7bnj1-glibc-2.30/lib"}
+; CHECK: !7 = !{i32 6, !"bcdb.elf.needed", !8}
+; CHECK: !8 = !{!"libz.so.1", !"libc.so.6"}
