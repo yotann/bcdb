@@ -202,6 +202,24 @@ static int Melt() {
   return WriteModule(Melter.GetModule());
 }
 
+// bcdb head-get
+
+static cl::SubCommand HeadGetCommand("head-get", "Look up value ID of a head");
+
+static cl::list<std::string> HeadGetNames(cl::Positional, cl::OneOrMore,
+                                          cl::desc("<head names>"),
+                                          cl::sub(HeadGetCommand));
+
+static int HeadGet() {
+  ExitOnError Err("bcdb head-get: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  for (StringRef Name : HeadGetNames) {
+    memodb_ref value = db->get_db().head_get(Name);
+    outs() << StringRef(value) << "\n";
+  }
+  return 0;
+}
+
 // bcdb init
 
 static cl::SubCommand InitCommand("init", "Initialize the database");
@@ -415,6 +433,8 @@ int main(int argc, char **argv) {
     return Get();
   } else if (GetFunctionCommand) {
     return GetFunction();
+  } else if (HeadGetCommand) {
+    return HeadGet();
   } else if (InitCommand) {
     return Init();
   } else if (InvalidateCommand) {
