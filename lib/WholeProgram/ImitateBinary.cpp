@@ -38,8 +38,6 @@ static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
     if (Dyn.d_tag == ELF::DT_STRSZ)
       StringTableSize = Dyn.getVal();
   }
-  if (!StringTableBegin)
-    return false;
 
   M.addModuleFlag(Module::Warning, "bcdb.elf.type",
                   ELF.getELFFile()->getHeader()->e_type);
@@ -50,7 +48,7 @@ static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
       uint64_t Value = Dyn.getVal();
       if (StringTableBegin && Value < StringTableSize)
         return StringTableBegin + Value;
-      return {};
+      report_fatal_error("invalid dynamic string in ELF file");
     };
     auto splitRunpath = [&](StringRef Name) {
       SmallVector<StringRef, 8> Dirs;
