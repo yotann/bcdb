@@ -70,6 +70,25 @@ static int Add() {
   return 0;
 }
 
+// bcdb cp
+
+static cl::SubCommand CpCommand("cp", "Copy a head");
+
+static cl::opt<std::string> CpSource(cl::Positional, cl::Required,
+                                     cl::value_desc("source"),
+                                     cl::sub(CpCommand));
+
+static cl::opt<std::string> CpDest(cl::Positional, cl::Required,
+                                   cl::value_desc("dest"), cl::sub(CpCommand));
+
+static int Cp() {
+  ExitOnError Err("bcdb cp: ");
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  memodb_ref value = db->get_db().head_get(CpSource);
+  db->get_db().head_set(CpDest, value);
+  return 0;
+}
+
 // bcdb delete
 
 static cl::SubCommand DeleteCommand("delete", "Remove a module");
@@ -386,6 +405,8 @@ int main(int argc, char **argv) {
     return Add();
   } else if (CacheCommand) {
     return Cache();
+  } else if (CpCommand) {
+    return Cp();
   } else if (DeleteCommand) {
     return Delete();
   } else if (EvaluateCommand) {
