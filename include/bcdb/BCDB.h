@@ -1,6 +1,7 @@
 #ifndef BCDB_BCDB_H
 #define BCDB_BCDB_H
 
+#include <llvm/ADT/StringMap.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
 #include <map>
@@ -54,7 +55,9 @@ public:
   Merge(const std::vector<llvm::StringRef> &Names);
   llvm::Expected<std::unique_ptr<llvm::Module>>
   Mux(std::vector<llvm::StringRef> Names);
-  void Mux2(std::vector<llvm::StringRef> Names);
+  std::unique_ptr<llvm::Module>
+  Mux2(std::vector<llvm::StringRef> Names,
+       llvm::StringMap<std::unique_ptr<llvm::Module>> &Stubs);
 
   llvm::Expected<std::unique_ptr<llvm::Module>>
   LoadParts(llvm::StringRef Name, std::map<std::string, std::string> &PartIDs);

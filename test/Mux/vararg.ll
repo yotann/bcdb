@@ -13,7 +13,7 @@
 declare void @llvm.va_start(i8*)
 declare void @llvm.va_end(i8*)
 
-define internal void @func(...) {
+define void @func(...) {
   %ap = alloca %struct.va_list
   %ap2 = bitcast %struct.va_list* %ap to i8*
   call void @llvm.va_start(i8* %ap2)

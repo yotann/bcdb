@@ -7,6 +7,7 @@
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
@@ -120,7 +121,7 @@ static cl::opt<bool> DisableVerify("disable-verify",
                                    cl::sub(GetCommand),
                                    cl::sub(GetFunctionCommand),
                                    cl::sub(MeltCommand), cl::sub(MergeCommand),
-                                   cl::sub(MuxCommand));
+                                   cl::sub(MuxCommand), cl::sub(Mux2Command));
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
@@ -303,15 +304,43 @@ static int Mux() {
   return WriteModule(*M);
 }
 
+static cl::opt<std::string> Mux2LibraryName("muxed-name",
+                                            cl::desc("<name of muxed library>"),
+                                            cl::Required,
+                                            cl::value_desc("filename"),
+                                            cl::sub(Mux2Command));
+
+static cl::opt<std::string>
+    Mux2OutputName("o", cl::desc("<output root directory>"), cl::Required,
+                   cl::value_desc("directory"), cl::sub(Mux2Command));
+
 static int Mux2() {
   ExitOnError Err("bcdb mux2: ");
-  if (!Err(ShouldWriteModule()))
-    return 0;
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
-  db->Mux2(Names);
+  StringMap<std::unique_ptr<Module>> Stubs;
+  std::unique_ptr<Module> M = db->Mux2(Names, Stubs);
+
+  auto SaveModule = [&](StringRef Path, Module &M) {
+    if (!DisableVerify && verifyModule(M, &errs()))
+      exit(1);
+    auto OutPath = (Mux2OutputName + "/" + Path).str();
+
+    std::error_code EC;
+    EC = sys::fs::create_directories(sys::path::parent_path(OutPath));
+    Err(errorCodeToError(EC));
+    ToolOutputFile OutputFile(OutPath, EC, sys::fs::F_None);
+    Err(errorCodeToError(EC));
+    WriteBitcodeToFile(M, OutputFile.os());
+    OutputFile.keep();
+  };
+
+  SaveModule(Mux2LibraryName, *M);
+  for (auto &Stub : Stubs)
+    SaveModule(Stub.first(), *Stub.second);
+
   return 0;
 }
 

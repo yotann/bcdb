@@ -167,29 +167,29 @@ std::vector<std::string> bcdb::ImitateClangArgs(Module &M) {
     report_fatal_error("unsupported ELF type");
   }
 
-  switch (getIntegerOr0("PIC Level")) {
-  case 0:
+  switch (M.getPICLevel()) {
+  case PICLevel::NotPIC:
     break;
-  case 1:
+  case PICLevel::SmallPIC:
     Args.emplace_back("-fpic");
     break;
-  case 2:
+  case PICLevel::BigPIC:
     Args.emplace_back("-fPIC");
     break;
   default:
-    report_fatal_error("unsupported PIC level");
+    llvm_unreachable("impossible PIC level");
   }
-  switch (getIntegerOr0("PIE Level")) {
-  case 0:
+  switch (M.getPIELevel()) {
+  case PIELevel::Default:
     break;
-  case 1:
+  case PIELevel::Small:
     Args.emplace_back("-fpie");
     break;
-  case 2:
+  case PIELevel::Large:
     Args.emplace_back("-fPIE");
     break;
   default:
-    report_fatal_error("unsupported PIE level");
+    llvm_unreachable("impossible PIE level");
   }
 
   uint32_t Flags = getIntegerOr0("bcdb.elf.flags");
@@ -258,6 +258,11 @@ std::vector<std::string> bcdb::ImitateClangArgs(Module &M) {
         Args.emplace_back(("-l:" + Str).str());
     }
   }
+
+  if (NamedMDNode *NMD = M.getNamedMetadata("bcdb.linker.options"))
+    for (MDNode *MDNode : NMD->operands())
+      for (Metadata *MD : MDNode->operands())
+        LinkerArgs.emplace_back(cast<MDString>(MD)->getString());
 
   for (std::string &LinkerArg : LinkerArgs)
     Args.insert(Args.end(), {"-Xlinker", LinkerArg});

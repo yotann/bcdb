@@ -43,13 +43,30 @@ public:
                      const std::map<std::string, ResolvedReference> &Refs);
 
   struct GlobalItem {
+    // Name of the module that contained the original definition.
     std::string ModuleName;
+
+    // Name of the original definition.
     std::string Name;
+
+    // Value ID of the function module (if any).
     std::string PartID;
+
+    // New name to resolve references to (may be a stub).
     std::string NewName;
+
+    // New name to use for the actual definition (may be shared with other
+    // GlobalItems).
     std::string NewDefName;
+
+    // Other globals that this GlobalItem refers to.
     std::map<std::string, ResolvedReference> Refs;
+
+    // Other GlobalItems that this GlobalItem refers to (used for the
+    // dependency graph).
     SmallVector<GlobalItem *, 8> RefItems;
+
+    // If true, don't create a stub named NewName.
     bool SkipStub = false;
   };
 

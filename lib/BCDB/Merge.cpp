@@ -46,10 +46,10 @@ void Merger::AddModule(StringRef ModuleName) {
 
   // Find all references to globals.
   for (const auto &item : PartIDs) {
-    GlobalValue *GV = Remainder->getNamedValue(item.first);
-    GlobalItems[GV].PartID = item.second;
+    GlobalValue &GV = *Remainder->getNamedValue(item.first);
+    GlobalItems[&GV].PartID = item.second;
     for (const auto &ref : LoadPartRefs(item.second))
-      GlobalItems[GV].Refs[ref.first()] = ResolvedReference();
+      GlobalItems[&GV].Refs[ref.first()] = ResolvedReference();
   }
   for (GlobalValue &GV :
        concat<GlobalValue>(Remainder->global_objects(), Remainder->aliases(),

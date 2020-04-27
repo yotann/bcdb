@@ -2,6 +2,11 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
+#if LLVM_VERSION_MAJOR >= 5
+#include <llvm/BinaryFormat/ELF.h>
+#else
+#include <llvm/Support/ELF.h>
+#endif
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/IPO.h>
@@ -16,9 +21,10 @@ using namespace llvm;
 
 class Mux2Merger : public Merger {
 public:
-  Mux2Merger(BCDB &bcdb) : Merger(bcdb) {}
+  Mux2Merger(BCDB &bcdb);
   ResolvedReference Resolve(StringRef ModuleName, StringRef Name) override;
   void PrepareToRename();
+  std::unique_ptr<Module> Finish();
 
   StringMap<std::unique_ptr<Module>> StubModules;
 
@@ -28,6 +34,16 @@ protected:
   void LoadRemainder(std::unique_ptr<Module> M,
                      std::vector<GlobalItem *> &GIs) override;
 };
+
+Mux2Merger::Mux2Merger(BCDB &bcdb) : Merger(bcdb) {
+  MergedModule->setPICLevel(PICLevel::BigPIC);
+  MergedModule->addModuleFlag(Module::Warning, "bcdb.elf.type", ELF::ET_DYN);
+  NamedMDNode *NMD =
+      MergedModule->getOrInsertNamedMetadata("bcdb.linker.options");
+  NMD->addOperand(MDTuple::get(
+      bcdb.GetContext(), {MDString::get(bcdb.GetContext(), "-zundefs"),
+                          MDString::get(bcdb.GetContext(), "-Bsymbolic")}));
+}
 
 ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
   GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
@@ -50,6 +66,12 @@ void Mux2Merger::PrepareToRename() {
       if (!GV.isDeclaration())
         GV.setLinkage(GlobalValue::InternalLinkage);
     }
+
+    NamedMDNode *NMD = M->getOrInsertNamedMetadata("bcdb.linker.options");
+    NMD->addOperand(MDTuple::get(
+        bcdb.GetContext(),
+        {MDString::get(bcdb.GetContext(), "--allow-shlib-undefined")}));
+
     StubModules[Item.first()] = std::move(M);
   }
   for (auto &Item : GlobalItems) {
@@ -66,16 +88,24 @@ void Mux2Merger::PrepareToRename() {
 
 void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
                              GlobalValue *Def, GlobalValue *Decl) {
-  if (Decl->hasLocalLinkage()) {
-    return Merger::AddPartStub(MergedModule, GI, Def, Decl);
-  }
-  LinkageMap[Def] = GlobalValue::ExternalLinkage;
   Module &StubModule = *StubModules[GI.ModuleName];
-  Function *DeclInStubModule = Function::Create(
-      cast<Function>(Def)->getFunctionType(), GlobalValue::ExternalLinkage,
-      Def->getName(), &StubModule);
-  assert(DeclInStubModule->getName() == Def->getName());
-  Merger::AddPartStub(StubModule, GI, DeclInStubModule, Decl);
+  GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
+
+  // There could be references to this global in both the merged module and the
+  // stub module.
+  //
+  // FIXME: Avoid creating two stub globals in this case.
+
+  if (Decl->hasLocalLinkage())
+    Merger::AddPartStub(MergedModule, GI, Def, Decl);
+  if (!Decl->hasLocalLinkage() || !StubInStubModule->use_empty()) {
+    LinkageMap[Def] = GlobalValue::ExternalLinkage;
+    Function *DeclInStubModule = Function::Create(
+        cast<Function>(Def)->getFunctionType(), GlobalValue::ExternalLinkage,
+        Def->getName(), &StubModule);
+    assert(DeclInStubModule->getName() == Def->getName());
+    Merger::AddPartStub(StubModule, GI, DeclInStubModule, Decl);
+  }
 }
 
 void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
@@ -89,25 +119,46 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
     } else {
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setLinkage(GV->getLinkage());
+
 #if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(GV->isDSOLocal());
 #endif
     }
   }
-  // FIXME: add merged module to stub module's bcdb.elf.needed
-  createGlobalDCEPass()->runOnModule(StubModule);
+
   Merger::LoadRemainder(std::move(M), MergedGIs);
 }
 
-void BCDB::Mux2(std::vector<StringRef> Names) {
+std::unique_ptr<Module> Mux2Merger::Finish() {
+  auto M = Merger::Finish();
+
+  for (auto &Item : StubModules) {
+    Module &StubModule = *Item.second;
+    // Prevent deletion of linkonce globals--they may be needed by the muxed
+    // module.
+    for (GlobalValue &GV :
+         concat<GlobalValue>(StubModule.global_objects(), StubModule.aliases(),
+                             StubModule.ifuncs()))
+      if (GV.hasLinkOnceLinkage())
+        GV.setLinkage(GlobalValue::getWeakLinkage(GV.hasLinkOnceODRLinkage()));
+
+    createGlobalDCEPass()->runOnModule(StubModule);
+  }
+
+  return M;
+}
+
+std::unique_ptr<llvm::Module>
+BCDB::Mux2(std::vector<llvm::StringRef> Names,
+           llvm::StringMap<std::unique_ptr<llvm::Module>> &Stubs) {
   Mux2Merger Merger(*this);
   for (StringRef Name : Names) {
     Merger.AddModule(Name);
   }
   Merger.PrepareToRename();
   Merger.RenameEverything();
-  errs() << *Merger.Finish();
-  for (auto &Item : Merger.StubModules) {
-    errs() << *Item.second;
-  }
+  auto Result = Merger.Finish();
+
+  Stubs = std::move(Merger.StubModules);
+  return Result;
 }
