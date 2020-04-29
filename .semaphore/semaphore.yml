@@ -23,10 +23,10 @@ blocks:
           matrix:
             - env_var: A
               values:
-                - bcdb-llvm4
                 - bcdb-llvm5
                 - bcdb-llvm6
                 - bcdb-llvm7
                 - bcdb-llvm8
                 - bcdb-llvm9
+                - bcdb-llvm10
                 - bcdb-clang

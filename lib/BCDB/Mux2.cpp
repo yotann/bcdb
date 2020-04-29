@@ -2,11 +2,7 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
-#if LLVM_VERSION_MAJOR >= 5
 #include <llvm/BinaryFormat/ELF.h>
-#else
-#include <llvm/Support/ELF.h>
-#endif
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/IPO.h>

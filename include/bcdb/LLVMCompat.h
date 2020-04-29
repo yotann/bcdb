@@ -5,12 +5,6 @@
 
 #include <llvm/Config/llvm-config.h>
 
-#if LLVM_VERSION_MAJOR < 5 && defined(LLVM_IR_ATTRIBUTES_H)
-namespace llvm {
-using AttributeList = AttributeSet;
-} // end namespace llvm
-#endif
-
 #if LLVM_VERSION_MAJOR < 6 && defined(LLVM_SUPPORT_TOOLOUTPUTFILE_H)
 namespace llvm {
 class tool_output_file;

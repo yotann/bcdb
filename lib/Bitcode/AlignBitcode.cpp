@@ -298,15 +298,11 @@ void bcdb::WriteUnalignedModule(const Module &M,
   BitcodeWriter Writer(Buffer);
 #if LLVM_VERSION_MAJOR >= 7
   Writer.writeModule(M);
-  Writer.writeSymtab();
-  Writer.writeStrtab();
-#elif LLVM_VERSION_MAJOR >= 5
-  Writer.writeModule(&M);
-  Writer.writeSymtab();
-  Writer.writeStrtab();
 #else
   Writer.writeModule(&M);
 #endif
+  Writer.writeSymtab();
+  Writer.writeStrtab();
 }
 
 void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {

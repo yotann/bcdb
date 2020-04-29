@@ -45,8 +45,8 @@ MARK_AS_ADVANCED(
 find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-if( ${LLVM_PACKAGE_VERSION} VERSION_LESS 4.0 )
-  message(FATAL_ERROR "LLVM 4.0 or newer is required")
+if( ${LLVM_PACKAGE_VERSION} VERSION_LESS 5.0 )
+  message(FATAL_ERROR "LLVM 5.0 or newer is required")
 endif()
 if( ${LLVM_PACKAGE_VERSION} STREQUAL 11.0.0git )
   message(WARNING "Support for this version of LLVM is unstable")

@@ -43,9 +43,6 @@ Error bcdb::Melter::Merge(std::unique_ptr<Module> MPart) {
   }
   return Mover.move(
       std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-#if LLVM_VERSION_MAJOR <= 4
-      /* LinkModuleInlineAsm */ false,
-#endif
       /* IsPerformingImport */ false);
 }
 
@@ -106,9 +103,6 @@ void Joiner::JoinGlobal(llvm::StringRef Name,
   ExitOnError Err("JoinGlobal");
   Err(Mover.move(
       std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-#if LLVM_VERSION_MAJOR <= 4
-      /* LinkModuleInlineAsm */ false,
-#endif
       /* IsPerformingImport */ false));
   assert(M->getFunction(Name) != Stub && "stub was not replaced");
 }

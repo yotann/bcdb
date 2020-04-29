@@ -8,12 +8,6 @@ let
     rev = "d44a752b91e896c499e37036eb8f58236eeac750";
     sha256 = "075xzn25jza3g82gii340223s6j0z36dvwsygssaq32s7f3h8wj5";
   };
-  nixpkgs_llvm4 = (import <nixpkgs> {}).fetchFromGitHub {
-    owner = "NixOS";
-    repo = "nixpkgs-channels";
-    rev = "cc6cf0a96a627e678ffc996a8f9d1416200d6c81";
-    sha256 = "1srjikizp8ip4h42x7kr4qf00lxcp1l8zp6h0r1ddfdyw8gv9001";
-  };
   debugLLVM = llvmPackages: (llvmPackages.llvm.override {
     debugVersion = true;
   }).overrideAttrs (o: {
@@ -24,10 +18,6 @@ in
 
 with import nixpkgs {};
 rec {
-  bcdb-llvm4 = callPackage ./build.nix {
-    llvm = debugLLVM llvmPackages_4;
-    clang = clang_4;
-  };
   bcdb-llvm5 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_5;
     clang = clang_5;
@@ -59,6 +49,4 @@ rec {
   };
 
   bcdb = bcdb-llvm10;
-
-  inherit (import nixpkgs_llvm4 {}) llvmPackages_4 clang_4;
 }

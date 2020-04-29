@@ -352,28 +352,6 @@ Value *DeclMaterializer::materialize(Value *V) {
   return NewGV;
 }
 
-static void CopyFunctionAttributesExceptSection(Function *DF, Function *SF) {
-#if LLVM_VERSION_MAJOR >= 5
-  DF->copyAttributesFrom(SF);
-  DF->setSection("");
-#else
-  // Avoid copying the section to work around a bug in LLVM 4 where
-  // DF->setSection("") crashes after a section is set.
-  DF->GlobalValue::copyAttributesFrom(SF);
-  DF->setAlignment(SF->getAlignment());
-  DF->setCallingConv(SF->getCallingConv());
-  DF->setAttributes(SF->getAttributes());
-  if (SF->hasGC())
-    DF->setGC(SF->getGC());
-  if (SF->hasPersonalityFn())
-    DF->setPersonalityFn(SF->getPersonalityFn());
-  if (SF->hasPrefixData())
-    DF->setPrefixData(SF->getPrefixData());
-  if (SF->hasPrologueData())
-    DF->setPrologueData(SF->getPrologueData());
-#endif
-}
-
 static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   auto MPart = std::make_unique<Module>(SF.getName(), M.getContext());
   MPart->setSourceFileName("");
@@ -403,8 +381,10 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
 
   // Copy attributes.
   // Calling convention, GC, and alignment are kept on both functions.
-  CopyFunctionAttributesExceptSection(DF, &SF);
+  DF->copyAttributesFrom(&SF);
   DF->setAttributes(Materializer.mapAttributeTypes(DF->getAttributes()));
+  // Section is kept only on the stub.
+  DF->setSection("");
   // Personality, prefix, and prologue are only kept on the full function.
   SF.setPersonalityFn(nullptr);
   SF.setPrefixData(nullptr);

@@ -155,9 +155,6 @@ GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI) {
   // Move the definition into the main module.
   Err(MergedModuleMover.move(
       std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-#if LLVM_VERSION_MAJOR <= 4
-      /* LinkModuleInlineAsm */ false,
-#endif
       /* IsPerformingImport */ false));
 
   Result = MergedModule->getNamedValue(GI.NewDefName);
@@ -264,9 +261,6 @@ void Merger::LoadRemainder(std::unique_ptr<Module> M,
   Err(MergedModuleMover.move(
       std::move(M), ValuesToLink,
       [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-#if LLVM_VERSION_MAJOR <= 4
-      /* LinkModuleInlineAsm */ false,
-#endif
       /* IsPerformingImport */ false));
 
   for (auto &Item : NameLinkageMap)
