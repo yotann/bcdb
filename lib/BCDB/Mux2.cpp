@@ -145,6 +145,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
     }
   }
 
+  M->setModuleInlineAsm("");
   eraseModuleFlag(*M, "bcdb.elf.soname");
   eraseModuleFlag(*M, "bcdb.elf.type");
   eraseModuleFlag(*M, "bcdb.elf.flags");
