@@ -389,7 +389,10 @@ void Merger::RenameEverything() {
           // same module.
           // TODO: We can't do this in some cases (if the program compares
           // executable.&foo with library.&foo).
-          if (New->NewName.empty() &&
+          // TODO: Disabled with mux2 because it can break (e.g., multiple
+          // input modules define internal function st_mutex_init and external
+          // function st_rwlock_init with same ID).
+          if (EnableNameReuse && New->NewName.empty() &&
               !ModuleReservedNames.count(
                   std::make_pair(New->ModuleName, Existing->NewName))) {
             New->NewName = Existing->NewName;

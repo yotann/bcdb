@@ -53,6 +53,7 @@ private:
 
 Mux2Merger::Mux2Merger(BCDB &bcdb) : Merger(bcdb) {
   EnableMustTail = true;
+  EnableNameReuse = false;
 
   MergedModule->setPICLevel(PICLevel::BigPIC);
   MergedModule->addModuleFlag(Module::Warning, "bcdb.elf.type", ELF::ET_DYN);

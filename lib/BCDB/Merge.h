@@ -89,6 +89,7 @@ protected:
   StringSet<> ReservedNames;
 
   bool EnableMustTail = false;
+  bool EnableNameReuse = true;
 
   friend class MergerGlobalGraph;
 };
