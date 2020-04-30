@@ -46,9 +46,6 @@ protected:
                    GlobalValue *Decl, StringRef NewName) override;
   void LoadRemainder(std::unique_ptr<Module> M,
                      std::vector<GlobalItem *> &GIs) override;
-
-private:
-  std::vector<GlobalItem *> WeakGlobals;
 };
 
 Mux2Merger::Mux2Merger(BCDB &bcdb) : Merger(bcdb) {
@@ -108,8 +105,6 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 
   if (Decl->hasLocalLinkage())
     Merger::AddPartStub(MergedModule, GI, Def, Decl, NewName);
-  else
-    WeakGlobals.push_back(&GI);
 
   if (!Decl->hasLocalLinkage() || !StubInStubModule->use_empty()) {
     LinkageMap[Def] = GlobalValue::ExternalLinkage;
@@ -135,7 +130,6 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
     if (GV->hasLocalLinkage()) {
       MergedGIs.push_back(GI);
     } else {
-      WeakGlobals.push_back(GI);
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setLinkage(GV->getLinkage());
 
@@ -172,19 +166,21 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     createGlobalDCEPass()->runOnModule(StubModule);
   }
 
-  // Make weak definitions for everything defined in a stub library that might
-  // be used in the muxed library. That way we can link against the muxed
-  // library even if we're not linking against that particular stub library.
-  for (GlobalItem *GI : WeakGlobals) {
-    GlobalValue *GV = M->getNamedValue(GI->NewName);
-    if (GV && GV->isDeclaration()) {
-      if (GlobalVariable *Var = dyn_cast<GlobalVariable>(GV)) {
+  // Make weak definitions for everything defined in a stub library or an
+  // external library. That way we can link against the muxed library even if
+  // we're not linking against that particular stub library.
+  for (GlobalObject &GO : M->global_objects()) {
+    if (GO.isDeclaration()) {
+      if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
         Var->setInitializer(Constant::getNullValue(Var->getValueType()));
-      } else if (Function *F = dyn_cast<Function>(GV)) {
-        BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
-        new UnreachableInst(F->getContext(), BB);
+        Var->setLinkage(GlobalValue::LinkOnceAnyLinkage);
+      } else if (Function *F = dyn_cast<Function>(&GO)) {
+        if (!F->isIntrinsic()) {
+          BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
+          new UnreachableInst(F->getContext(), BB);
+          F->setLinkage(GlobalValue::LinkOnceAnyLinkage);
+        }
       }
-      GV->setLinkage(GlobalValue::LinkOnceAnyLinkage);
     }
   }
 
