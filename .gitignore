@@ -4,6 +4,8 @@
 # Vi swap files
 *.swp
 
+/tags
+
 /build*/
 /install
 /result

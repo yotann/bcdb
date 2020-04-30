@@ -146,6 +146,10 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
 
   eraseModuleFlag(*M, "bcdb.elf.soname");
   eraseModuleFlag(*M, "bcdb.elf.type");
+  eraseModuleFlag(*M, "bcdb.elf.flags");
+  eraseModuleFlag(*M, "bcdb.elf.flags_1");
+  eraseModuleFlag(*M, "bcdb.elf.auxiliary");
+  eraseModuleFlag(*M, "bcdb.elf.filter");
   eraseModuleFlag(*M, "bcdb.elf.needed");
   Merger::LoadRemainder(std::move(M), MergedGIs);
 }

@@ -1,19 +1,14 @@
-{ stdenv, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd }:
-
-let
-  inherit (stdenv) lib;
-  sourceFilter = name: type: let baseName = baseNameOf (toString name); in
-    (lib.cleanSourceFilter name type) && !(
-      (type == "directory" && (lib.hasPrefix "build" baseName ||
-                               lib.hasPrefix "install" baseName))
-  );
-in
+{ stdenv, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd }:
 
 stdenv.mkDerivation {
   name = "bcdb";
   version = "0.0.1";
 
-  src = builtins.filterSource sourceFilter ./.;
+  src = nix-gitignore.gitignoreSource [''
+    .*
+    *.nix
+    /nix/
+  ''] ./.;
 
   nativeBuildInputs = [ clang cmake pkgconfig python2 xxd ];
   buildInputs = [ libsodium llvm sqlite ];
