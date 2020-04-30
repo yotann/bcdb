@@ -22,7 +22,7 @@ define i32 @main(i32, i8**) {
   ret i32 1
 }
 
-; MUXED: @global = external global void ()*
+; MUXED: @global = linkonce global void ()* null
 ; MUXED: @global2 = internal global void ()* @func
 ; MUXED: define internal void @func()
 ; MUXED-NEXT: call void @__bcdb_id_{{.*}}()

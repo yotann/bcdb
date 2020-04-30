@@ -74,7 +74,8 @@ protected:
   StringSet<> LoadPartRefs(StringRef ID);
   GlobalValue *LoadPartDefinition(GlobalItem &GI);
   virtual void AddPartStub(Module &MergedModule, GlobalItem &GI,
-                           GlobalValue *Def, GlobalValue *Decl);
+                           GlobalValue *Def, GlobalValue *Decl,
+                           StringRef NewName = "");
   virtual void LoadRemainder(std::unique_ptr<Module> M,
                              std::vector<GlobalItem *> &GIs);
 
@@ -86,6 +87,8 @@ protected:
   StringMap<std::pair<std::string, GlobalValue::LinkageTypes>> AliasMap;
   DenseMap<GlobalValue *, GlobalValue::LinkageTypes> LinkageMap;
   StringSet<> ReservedNames;
+
+  bool EnableMustTail = false;
 
   friend class MergerGlobalGraph;
 };

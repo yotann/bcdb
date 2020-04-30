@@ -11,7 +11,7 @@ define i8* @f() {
   ret i8* @x
 }
 
-; MUXED: @x = external constant i8
+; MUXED: @x = linkonce constant i8 0
 ; MUXED: define i8* @__bcdb_id_
 ; MUXED-NEXT: ret i8* @x
 

@@ -178,11 +178,17 @@ void Merger::ReplaceGlobal(Module &M, StringRef Name, GlobalValue *New) {
 }
 
 void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
-                         GlobalValue *DefGV, GlobalValue *DeclGV) {
+                         GlobalValue *DefGV, GlobalValue *DeclGV,
+                         StringRef NewName) {
   Function *Def = cast<Function>(DefGV);
   Function *Decl = cast<Function>(DeclGV);
+  if (NewName.empty())
+    NewName = GI.NewName;
 
-  if (Def->isVarArg()) {
+  CallInst::TailCallKind TCK =
+      Def->isVarArg() ? CallInst::TCK_MustTail : CallInst::TCK_Tail;
+
+  if (TCK == CallInst::TCK_MustTail && !EnableMustTail) {
     // In theory, it should be fine to create stubs for these using musttail.
     // But LLVM's optimizations are buggy and will break the musttail call. As
     // a stopgap we just create an alias, even though this is incorrect in some
@@ -191,15 +197,15 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
     // FIXME: Create an actual stub. Rewrite the definition to take a va_list*
     // instead of ..., then put @llvm.va_start in the stub.
 
-    GlobalAlias *Stub = GlobalAlias::create(Def->getLinkage(), GI.NewName, Def);
-    ReplaceGlobal(MergedModule, GI.NewName, Stub);
+    GlobalAlias *Stub = GlobalAlias::create(Def->getLinkage(), NewName, Def);
+    ReplaceGlobal(MergedModule, NewName, Stub);
     LinkageMap[Stub] = Decl->getLinkage();
     return;
   }
 
   // see llvm::MergeFunctions::writeThunk
   Function *Stub = Function::Create(Def->getFunctionType(), Def->getLinkage(),
-                                    GI.NewName, &MergedModule);
+                                    NewName, &MergedModule);
   for (auto I : zip(Stub->args(), Def->args()))
     std::get<0>(I).setName(std::get<1>(I).getName());
   Stub->copyAttributesFrom(Def);
@@ -210,7 +216,7 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
     Args.push_back(
         Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
   CallInst *CI = Builder.CreateCall(Def, Args);
-  CI->setTailCall();
+  CI->setTailCallKind(TCK);
   CI->setCallingConv(Def->getCallingConv());
   CI->setAttributes(Def->getAttributes());
   if (Stub->getReturnType()->isVoidTy())
@@ -218,7 +224,7 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   else
     Builder.CreateRet(CI);
 
-  ReplaceGlobal(MergedModule, GI.NewName, Stub);
+  ReplaceGlobal(MergedModule, NewName, Stub);
   LinkageMap[Stub] = Decl->getLinkage();
   if (Decl->getComdat()) {
     Comdat *CD = MergedModule.getOrInsertComdat(Decl->getComdat()->getName());

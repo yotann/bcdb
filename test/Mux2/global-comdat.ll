@@ -14,6 +14,7 @@ define void @g() {
   ret void
 }
 
-; MUXED: declare void @f()
+; MUXED: define linkonce void @f() {
+; MUXED-NEXT: unreachable
 
 ; STUB: define weak_odr void @f() comdat
