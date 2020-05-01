@@ -248,6 +248,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
+      Var->setVisibility(GlobalValue::DefaultVisibility);
       new GlobalVariable(*WeakModule, Var->getValueType(), Var->isConstant(),
                          GlobalValue::WeakAnyLinkage,
                          Constant::getNullValue(Var->getValueType()),
@@ -260,6 +261,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     } else if (Function *F = dyn_cast<Function>(&GO)) {
       if (F->isIntrinsic())
         continue;
+      F->setVisibility(GlobalValue::DefaultVisibility);
       F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
 #if LLVM_VERSION_MAJOR >= 8
                            F->getAddressSpace(),
