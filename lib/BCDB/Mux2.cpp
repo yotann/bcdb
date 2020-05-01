@@ -161,8 +161,8 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
   }
 
   M->setModuleInlineAsm("");
-  M->setPICLevel(PICLevel::NotPIC);
-  M->setPIELevel(PIELevel::Default);
+  eraseModuleFlag(*M, "PIC Level");
+  eraseModuleFlag(*M, "PIE Level");
   eraseModuleFlag(*M, "bcdb.elf.auxiliary");
   eraseModuleFlag(*M, "bcdb.elf.filter");
   eraseModuleFlag(*M, "bcdb.elf.flags");
