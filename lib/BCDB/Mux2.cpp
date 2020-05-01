@@ -251,14 +251,20 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       new GlobalVariable(*WeakModule, Var->getValueType(), Var->isConstant(),
                          GlobalValue::WeakAnyLinkage,
                          Constant::getNullValue(Var->getValueType()),
-                         Var->getName(), nullptr, Var->getThreadLocalMode(),
-                         Var->getAddressSpace());
+                         Var->getName(), nullptr, Var->getThreadLocalMode()
+#if LLVM_VERSION_MAJOR >= 8
+                                                      ,
+                         Var->getAddressSpace()
+#endif
+      );
     } else if (Function *F = dyn_cast<Function>(&GO)) {
       if (F->isIntrinsic())
         continue;
       F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
-                           F->getAddressSpace(), F->getName(),
-                           WeakModule.get());
+#if LLVM_VERSION_MAJOR >= 8
+                           F->getAddressSpace(),
+#endif
+                           F->getName(), WeakModule.get());
       BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
       IRBuilder<> Builder(BB);
       Builder.CreateCall(WeakDefCalled,
