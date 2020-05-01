@@ -174,10 +174,26 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
   Merger::LoadRemainder(std::move(M), MergedGIs);
 }
 
+static void DiagnoseUnreachableFunctions(Module &M,
+                                         FunctionType *UndefFuncType) {
+  auto UndefFuncCalled = M.getOrInsertFunction(
+      "__bcdb_unreachable_function_called", UndefFuncType);
+  for (Function &F : M.functions()) {
+    if (!F.isDeclaration() &&
+        F.front().front().getOpcode() == Instruction::Unreachable) {
+      IRBuilder<> Builder(&F.front().front());
+      Builder.CreateCall(UndefFuncCalled,
+                         {Builder.CreateGlobalStringPtr(F.getName())});
+    }
+  }
+}
+
 std::unique_ptr<Module> Mux2Merger::Finish() {
   auto M = Merger::Finish();
 
   Linker::linkModules(*M, LoadMuxLibrary(M->getContext()));
+  FunctionType *UndefFuncType =
+      M->getFunction("__bcdb_unreachable_function_called")->getFunctionType();
   Function *WeakDefCalled = M->getFunction("__bcdb_weak_definition_called");
 
   for (auto &Item : StubModules) {
@@ -240,6 +256,12 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
         }
       }
     }
+  }
+
+  DiagnoseUnreachableFunctions(*M, UndefFuncType);
+  for (auto &Item : StubModules) {
+    Module &StubModule = *Item.second;
+    DiagnoseUnreachableFunctions(StubModule, UndefFuncType);
   }
 
   return M;
