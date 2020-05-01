@@ -17,4 +17,4 @@ define void @g() {
 ; MUXED: define linkonce void @f() {
 ; MUXED-NEXT: call void @__bcdb_weak_definition_called
 
-; STUB: define weak_odr void @f() comdat
+; STUB: define void @f() comdat

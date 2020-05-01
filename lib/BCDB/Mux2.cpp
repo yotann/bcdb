@@ -182,6 +182,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
 
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
+
     // Prevent deletion of linkonce globals--they may be needed by the muxed
     // module.
     for (GlobalValue &GV :
@@ -189,6 +190,14 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
                              StubModule.ifuncs()))
       if (GV.hasLinkOnceLinkage())
         GV.setLinkage(GlobalValue::getWeakLinkage(GV.hasLinkOnceODRLinkage()));
+
+    // Make weak symbols strong, to prevent them being overridden by the weak
+    // definitions in the muxed library.
+    for (GlobalValue &GV :
+         concat<GlobalValue>(StubModule.global_objects(), StubModule.aliases(),
+                             StubModule.ifuncs()))
+      if (GV.hasLinkOnceLinkage() || GV.hasWeakLinkage())
+        GV.setLinkage(GlobalValue::ExternalLinkage);
 
     createGlobalDCEPass()->runOnModule(StubModule);
   }
