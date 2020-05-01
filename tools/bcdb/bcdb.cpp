@@ -311,6 +311,10 @@ static cl::opt<std::string> Mux2LibraryName("muxed-name",
                                             cl::sub(Mux2Command));
 
 static cl::opt<std::string>
+    Mux2WeakName("weak-name", cl::desc("<name of weak definitions library>"),
+                 cl::value_desc("filename"), cl::sub(Mux2Command));
+
+static cl::opt<std::string>
     Mux2OutputName("o", cl::desc("<output root directory>"), cl::Required,
                    cl::value_desc("directory"), cl::sub(Mux2Command));
 
@@ -321,7 +325,8 @@ static int Mux2() {
   for (auto &Name : MergeNames)
     Names.push_back(Name);
   StringMap<std::unique_ptr<Module>> Stubs;
-  std::unique_ptr<Module> M = db->Mux2(Names, Stubs);
+  std::unique_ptr<Module> WeakM;
+  std::unique_ptr<Module> M = db->Mux2(Names, Stubs, WeakM);
 
   auto SaveModule = [&](StringRef Path, Module &M) {
     if (!DisableVerify && verifyModule(M, &errs()))
@@ -338,6 +343,8 @@ static int Mux2() {
   };
 
   SaveModule(Mux2LibraryName, *M);
+  if (!Mux2WeakName.empty())
+    SaveModule(Mux2WeakName, *WeakM);
   for (auto &Stub : Stubs)
     SaveModule(Stub.first(), *Stub.second);
 

@@ -61,6 +61,7 @@ public:
   std::unique_ptr<Module> Finish();
 
   StringMap<std::unique_ptr<Module>> StubModules;
+  std::unique_ptr<Module> WeakModule;
 
 protected:
   void AddPartStub(Module &MergedModule, GlobalItem &GI, GlobalValue *Def,
@@ -72,6 +73,8 @@ protected:
 Mux2Merger::Mux2Merger(BCDB &bcdb) : Merger(bcdb) {
   EnableMustTail = true;
   EnableNameReuse = false;
+
+  WeakModule = std::make_unique<Module>("weak", bcdb.GetContext());
 
   MergedModule->setPICLevel(PICLevel::BigPIC);
   MergedModule->addModuleFlag(Module::Warning, "bcdb.elf.type", ELF::ET_DYN);
@@ -194,7 +197,8 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   Linker::linkModules(*M, LoadMuxLibrary(M->getContext()));
   FunctionType *UndefFuncType =
       M->getFunction("__bcdb_unreachable_function_called")->getFunctionType();
-  Function *WeakDefCalled = M->getFunction("__bcdb_weak_definition_called");
+  auto WeakDefCalled = WeakModule->getOrInsertFunction(
+      "__bcdb_weak_definition_called", UndefFuncType);
 
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
@@ -222,39 +226,44 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   // external library. That way we can link against the muxed library even if
   // we're not linking against that particular stub library.
   for (GlobalObject &GO : M->global_objects()) {
-    if (GO.isDeclaration()) {
+    if (!GO.isDeclaration())
+      continue;
 
-      static const StringSet<> NO_PLACEHOLDER = {
-          // These are weakly defined in libc_nonshared.a; don't override them!
-          "atexit",          "at_quick_exit",
-          "__fstat",         "fstat",
-          "fstat64",         "fstatat",
-          "fstatat64",       "__libc_csu_fini",
-          "__libc_csu_init", "__lstat",
-          "lstat",           "lstat64",
-          "__mknod",         "mknod",
-          "mknodat",         "__pthread_atfork",
-          "pthread_atfork",  "__stack_chk_fail_local",
-          "__stat",          "stat",
-          "stat64",
-      };
+    static const StringSet<> NO_PLACEHOLDER = {
+        // These are weakly defined in libc_nonshared.a; don't override them!
+        "atexit",          "at_quick_exit",
+        "__fstat",         "fstat",
+        "fstat64",         "fstatat",
+        "fstatat64",       "__libc_csu_fini",
+        "__libc_csu_init", "__lstat",
+        "lstat",           "lstat64",
+        "__mknod",         "mknod",
+        "mknodat",         "__pthread_atfork",
+        "pthread_atfork",  "__stack_chk_fail_local",
+        "__stat",          "stat",
+        "stat64",
+    };
 
-      if (NO_PLACEHOLDER.count(GO.getName()))
+    if (NO_PLACEHOLDER.count(GO.getName()))
+      continue;
+
+    if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
+      new GlobalVariable(*WeakModule, Var->getValueType(), Var->isConstant(),
+                         GlobalValue::WeakAnyLinkage,
+                         Constant::getNullValue(Var->getValueType()),
+                         Var->getName(), nullptr, Var->getThreadLocalMode(),
+                         Var->getAddressSpace());
+    } else if (Function *F = dyn_cast<Function>(&GO)) {
+      if (F->isIntrinsic())
         continue;
-
-      if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
-        Var->setInitializer(Constant::getNullValue(Var->getValueType()));
-        Var->setLinkage(GlobalValue::LinkOnceAnyLinkage);
-      } else if (Function *F = dyn_cast<Function>(&GO)) {
-        if (!F->isIntrinsic()) {
-          BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
-          IRBuilder<> Builder(BB);
-          Builder.CreateCall(WeakDefCalled,
-                             {Builder.CreateGlobalStringPtr(GO.getName())});
-          Builder.CreateUnreachable();
-          F->setLinkage(GlobalValue::LinkOnceAnyLinkage);
-        }
-      }
+      F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
+                           F->getAddressSpace(), F->getName(),
+                           WeakModule.get());
+      BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
+      IRBuilder<> Builder(BB);
+      Builder.CreateCall(WeakDefCalled,
+                         {Builder.CreateGlobalStringPtr(GO.getName())});
+      Builder.CreateUnreachable();
     }
   }
 
@@ -269,7 +278,8 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
 
 std::unique_ptr<llvm::Module>
 BCDB::Mux2(std::vector<llvm::StringRef> Names,
-           llvm::StringMap<std::unique_ptr<llvm::Module>> &Stubs) {
+           llvm::StringMap<std::unique_ptr<llvm::Module>> &Stubs,
+           std::unique_ptr<llvm::Module> &WeakModule) {
   Mux2Merger Merger(*this);
   for (StringRef Name : Names) {
     Merger.AddModule(Name);
@@ -278,6 +288,7 @@ BCDB::Mux2(std::vector<llvm::StringRef> Names,
   Merger.RenameEverything();
   auto Result = Merger.Finish();
 
+  WeakModule = std::move(Merger.WeakModule);
   Stubs = std::move(Merger.StubModules);
   return Result;
 }

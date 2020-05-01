@@ -1,8 +1,9 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so
+; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so
 ; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=STUB  %s
+; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s
 
 $f = comdat any
 define linkonce_odr void @f() comdat {
@@ -14,7 +15,9 @@ define void @g() {
   ret void
 }
 
-; MUXED: define linkonce void @f() {
-; MUXED-NEXT: call void @__bcdb_weak_definition_called
+; MUXED: declare void @f()
 
 ; STUB: define void @f() comdat
+
+; WEAK: define weak void @f() {
+; WEAK-NEXT: call void @__bcdb_weak_definition_called

@@ -1,8 +1,9 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so
+; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so
 ; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=STUB  %s
+; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s
 
 @global = global void ()* @func
 @global2 = internal global void ()* @func
@@ -22,7 +23,7 @@ define i32 @main(i32, i8**) {
   ret i32 1
 }
 
-; MUXED: @global = linkonce global void ()* null
+; MUXED: @global = external global void ()*
 ; MUXED: @global2 = internal global void ()* @func
 ; MUXED: define internal void @func()
 ; MUXED-NEXT: call void @__bcdb_id_{{.*}}()
@@ -31,3 +32,5 @@ define i32 @main(i32, i8**) {
 ; STUB-NOT: @global2
 ; STUB: define internal void @func()
 ; STUB-NEXT: call void @__bcdb_id_{{.*}}()
+
+; WEAK: @global = weak global void ()* null
