@@ -5,9 +5,12 @@
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/BinaryFormat/ELF.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Linker/Linker.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
@@ -15,8 +18,22 @@
 #include "Merge.h"
 #include "bcdb/LLVMCompat.h"
 
+namespace {
+#include "mux2_library.inc"
+}
+
 using namespace bcdb;
 using namespace llvm;
+
+static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
+  ExitOnError Err("LoadMuxLibrary: ");
+  StringRef Buffer(reinterpret_cast<char *>(mux2_library_bc),
+                   mux2_library_bc_len);
+  auto MainMod =
+      Err(parseBitcodeFile(MemoryBufferRef(Buffer, "main"), Context));
+  MainMod->setTargetTriple("");
+  return MainMod;
+}
 
 // Handling references from the muxed library to the stub libraries:
 // - The muxed library will refer to various symbols that are defined in the
@@ -160,6 +177,9 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
 std::unique_ptr<Module> Mux2Merger::Finish() {
   auto M = Merger::Finish();
 
+  Linker::linkModules(*M, LoadMuxLibrary(M->getContext()));
+  Function *WeakDefCalled = M->getFunction("__bcdb_weak_definition_called");
+
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
     // Prevent deletion of linkonce globals--they may be needed by the muxed
@@ -203,7 +223,10 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       } else if (Function *F = dyn_cast<Function>(&GO)) {
         if (!F->isIntrinsic()) {
           BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
-          new UnreachableInst(F->getContext(), BB);
+          IRBuilder<> Builder(BB);
+          Builder.CreateCall(WeakDefCalled,
+                             {Builder.CreateGlobalStringPtr(GO.getName())});
+          Builder.CreateUnreachable();
           F->setLinkage(GlobalValue::LinkOnceAnyLinkage);
         }
       }

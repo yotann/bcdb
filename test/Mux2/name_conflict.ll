@@ -24,7 +24,7 @@ define i32 @main() {
 ; MUXED: define i32 @__bcdb_id_2()
 ; MUXED-NEXT: tail call i32 (...) bitcast (i32 ()* @init_player to i32 (...)*)()
 ; MUXED: define linkonce i32 @init_player()
-; MUXED-NEXT: unreachable
+; MUXED-NEXT: call void @__bcdb_weak_definition_called
 
 ; ANGBAND: @player_module = global i32 ()* @init_player
 ; ANGBAND: define internal i32 @init_player()
