@@ -51,6 +51,10 @@ static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
 // - Instead we can add weak definitions of everything to the muxed library.
 //   - We need to set LD_DYNAMIC_WEAK whenever we run a muxed program, to
 //     ensure that the weak definition is overridden by any strong definitions.
+//   - This still doesn't work right in some cases.
+// - Instead we can add weak definitions of everything to a separate "weak
+//   library", and ensure that that library is the last thing loaded by the
+//   dynamic linker, so it's checked for symbols last.
 // - See also ld's -Bsymbolic option.
 
 class Mux2Merger : public Merger {
