@@ -3,7 +3,6 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/StringMap.h>
-#include <llvm/ADT/StringSet.h>
 #include <llvm/BinaryFormat/ELF.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/IRBuilder.h>
@@ -246,24 +245,6 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   // we're not linking against that particular stub library.
   for (GlobalObject &GO : M->global_objects()) {
     if (!GO.isDeclaration())
-      continue;
-
-    static const StringSet<> NO_PLACEHOLDER = {
-        // These are weakly defined in libc_nonshared.a; don't override them!
-        "atexit",          "at_quick_exit",
-        "__fstat",         "fstat",
-        "fstat64",         "fstatat",
-        "fstatat64",       "__libc_csu_fini",
-        "__libc_csu_init", "__lstat",
-        "lstat",           "lstat64",
-        "__mknod",         "mknod",
-        "mknodat",         "__pthread_atfork",
-        "pthread_atfork",  "__stack_chk_fail_local",
-        "__stat",          "stat",
-        "stat64",
-    };
-
-    if (NO_PLACEHOLDER.count(GO.getName()))
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
