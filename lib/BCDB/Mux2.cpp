@@ -85,7 +85,7 @@ Mux2Merger::Mux2Merger(BCDB &bcdb) : Merger(bcdb) {
 
 ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
   GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
-  if (GV && GV->hasLocalLinkage())
+  if (GV && GV->hasExactDefinition())
     return ResolvedReference(&GlobalItems[GV]);
   else
     return ResolvedReference(Name);
@@ -94,7 +94,6 @@ ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
 void Mux2Merger::PrepareToRename() {
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
-    ValueToValueMapTy VMap;
     std::unique_ptr<Module> M = CloneModule(*Item.second);
     // Make all definitions internal by default, since the actual definition
     // will probably be in the merged module. That will be changed in
@@ -104,22 +103,24 @@ void Mux2Merger::PrepareToRename() {
       if (!GV.isDeclaration())
         GV.setLinkage(GlobalValue::InternalLinkage);
     }
-
     StubModules[Item.first()] = std::move(M);
   }
+
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
     if (!GV->hasLocalLinkage()) {
       // The stub function will go into a stub module. Keep the existing name.
-      // We do NOT add it to ReservedNames, because it isn't going into the
-      // merged module.
       GI.NewName = GI.Name;
-    } else if (isa<GlobalVariable>(GV)) {
-      // Rename private global variables so that we can define them in the
-      // merged module, export them, and use them in the stub module, if
-      // necessary.
-      GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
+      ReservedNames.insert(GI.Name);
+    } else {
+      Module &StubModule = *StubModules[GI.ModuleName];
+      GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
+      if (!StubInStubModule->use_empty()) {
+        // Rename private globals so that we can define them in the merged
+        // module, export them, and use them in the stub module.
+        GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
+      }
     }
   }
 }
@@ -127,19 +128,29 @@ void Mux2Merger::PrepareToRename() {
 void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
                              GlobalValue *Def, GlobalValue *Decl,
                              StringRef NewName) {
+  if (NewName.empty())
+    NewName = GI.NewName;
   Module &StubModule = *StubModules[GI.ModuleName];
   GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
 
-  // There could be references to this global in both the merged module and the
-  // stub module.
-  //
-  // FIXME: Avoid creating two stub globals in this case. Instead, do the same
-  // thing we do for private global variables.
-
-  if (Decl->hasLocalLinkage())
+  if (Decl->hasLocalLinkage()) {
     Merger::AddPartStub(MergedModule, GI, Def, Decl, NewName);
 
-  if (!Decl->hasLocalLinkage() || !StubInStubModule->use_empty()) {
+    if (!StubInStubModule->use_empty()) {
+      GlobalValue *NewStub = MergedModule.getNamedValue(NewName);
+      LinkageMap[NewStub] = GlobalValue::ExternalLinkage;
+      NewStub->setLinkage(GlobalValue::ExternalLinkage);
+      NewStub->setVisibility(GlobalValue::ProtectedVisibility);
+
+      StubInStubModule->setName(NewName);
+      LinkageMap[StubInStubModule] = GlobalValue::ExternalLinkage;
+      StubInStubModule->setLinkage(GlobalValue::ExternalLinkage);
+      cast<Function>(StubInStubModule)->deleteBody();
+#if LLVM_VERSION_MAJOR >= 7
+      StubInStubModule->setDSOLocal(false);
+#endif
+    }
+  } else {
     LinkageMap[Def] = GlobalValue::ExternalLinkage;
     Def->setLinkage(GlobalValue::ExternalLinkage);
     Def->setVisibility(GlobalValue::ProtectedVisibility);
@@ -164,23 +175,19 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
   for (GlobalItem *GI : GIs) {
     GlobalValue *GV = M->getNamedValue(GI->NewName);
     if (GV->hasLocalLinkage()) {
-      if (isa<GlobalVariable>(GV)) {
-        GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
-        NewGV->setName(GI->NewName);
-        NewGV->setLinkage(GlobalValue::AvailableExternallyLinkage);
+      GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
+      NewGV->setName(GI->NewName);
+      NewGV->setLinkage(GlobalValue::AvailableExternallyLinkage);
 #if LLVM_VERSION_MAJOR >= 7
-        NewGV->setDSOLocal(false);
+      NewGV->setDSOLocal(false);
 #endif
 
-        MergedGIs.push_back(GI);
-        if (!NewGV->use_empty()) {
-          // Define internal global variables in the merged module, but export
-          // them so the stub module can use them.
-          GV->setLinkage(GlobalValue::ExternalLinkage);
-          GV->setVisibility(GlobalValue::ProtectedVisibility);
-        }
-      } else {
-        MergedGIs.push_back(GI);
+      MergedGIs.push_back(GI);
+      if (!NewGV->use_empty()) {
+        // Define private globals in the merged module, but export them so the
+        // stub module can use them.
+        GV->setLinkage(GlobalValue::ExternalLinkage);
+        GV->setVisibility(GlobalValue::ProtectedVisibility);
       }
     } else {
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
