@@ -116,8 +116,9 @@ void Mux2Merger::PrepareToRename() {
       // merged module.
       GI.NewName = GI.Name;
     } else if (isa<GlobalVariable>(GV)) {
-      // Rename private global variables so that we can define them in the stub
-      // module, export them, and use them in the muxed module.
+      // Rename private global variables so that we can define them in the
+      // merged module, export them, and use them in the stub module, if
+      // necessary.
       GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
     }
   }
@@ -132,7 +133,8 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   // There could be references to this global in both the merged module and the
   // stub module.
   //
-  // FIXME: Avoid creating two stub globals in this case.
+  // FIXME: Avoid creating two stub globals in this case. Instead, do the same
+  // thing we do for private global variables.
 
   if (Decl->hasLocalLinkage())
     Merger::AddPartStub(MergedModule, GI, Def, Decl, NewName);
@@ -160,14 +162,21 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
     GlobalValue *GV = M->getNamedValue(GI->NewName);
     if (GV->hasLocalLinkage()) {
       if (isa<GlobalVariable>(GV)) {
-        // Define all global variables in the stub modules, but export them so
-        // the muxed module can use them.
         GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
         NewGV->setName(GI->NewName);
-        NewGV->setLinkage(GlobalValue::ExternalLinkage);
+        NewGV->setLinkage(GlobalValue::AvailableExternallyLinkage);
 #if LLVM_VERSION_MAJOR >= 7
         NewGV->setDSOLocal(false);
 #endif
+
+        MergedGIs.push_back(GI);
+        if (!NewGV->use_empty()) {
+          // Define internal global variables in the merged module, but export
+          // them so the stub module can use them.
+          LinkageMap[GV] = GlobalValue::ExternalLinkage;
+          GV->setLinkage(GlobalValue::ExternalLinkage);
+          GV->setVisibility(GlobalValue::ProtectedVisibility);
+        }
       } else {
         MergedGIs.push_back(GI);
       }
