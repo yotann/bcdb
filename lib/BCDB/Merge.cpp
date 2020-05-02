@@ -48,7 +48,7 @@ void Merger::AddModule(StringRef ModuleName) {
   for (const auto &item : PartIDs) {
     GlobalValue &GV = *Remainder->getNamedValue(item.first);
     GlobalItems[&GV].PartID = item.second;
-    for (const auto &ref : LoadPartRefs(item.second))
+    for (const auto &ref : LoadPartRefs(item.second, item.first))
       GlobalItems[&GV].Refs[ref.first()] = ResolvedReference();
   }
   for (GlobalValue &GV :
@@ -66,12 +66,30 @@ void Merger::AddModule(StringRef ModuleName) {
 
 // Given the ID of a single function definition, find all global names
 // referenced by that definition.
-StringSet<> Merger::LoadPartRefs(StringRef ID) {
+StringSet<> Merger::LoadPartRefs(StringRef ID, StringRef SelfName) {
   // TODO: Cache results.
   // TODO: Retain the loaded module to be used by LoadPartDefinition().
   ExitOnError Err("Merger::LoadPartRefs: ");
   auto MPart = Err(bcdb.GetFunctionById(ID));
   StringSet<> Result;
+
+  Function *Def = nullptr;
+  for (Function &F : *MPart) {
+    if (!F.isDeclaration()) {
+      if (Def) {
+        Err(make_error<StringError>("multiple functions in function module " +
+                                        ID,
+                                    errc::invalid_argument));
+      }
+      Def = &F;
+    }
+  }
+
+  // If the function takes its own address, add a reference using its own name.
+  if (!Def->use_empty()) {
+    Result.insert(SelfName);
+  }
+
   for (GlobalValue &GV : concat<GlobalValue>(MPart->global_objects(),
                                              MPart->aliases(), MPart->ifuncs()))
     if (GV.hasName())

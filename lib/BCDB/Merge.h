@@ -71,7 +71,7 @@ public:
   };
 
 protected:
-  StringSet<> LoadPartRefs(StringRef ID);
+  StringSet<> LoadPartRefs(StringRef ID, StringRef SelfName);
   GlobalValue *LoadPartDefinition(GlobalItem &GI);
   virtual void AddPartStub(Module &MergedModule, GlobalItem &GI,
                            GlobalValue *Def, GlobalValue *Decl,
