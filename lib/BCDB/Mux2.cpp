@@ -173,7 +173,6 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
         if (!NewGV->use_empty()) {
           // Define internal global variables in the merged module, but export
           // them so the stub module can use them.
-          LinkageMap[GV] = GlobalValue::ExternalLinkage;
           GV->setLinkage(GlobalValue::ExternalLinkage);
           GV->setVisibility(GlobalValue::ProtectedVisibility);
         }
