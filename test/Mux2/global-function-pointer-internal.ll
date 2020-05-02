@@ -23,14 +23,17 @@ define i32 @main(i32, i8**) {
   ret i32 1
 }
 
+; MUXED-NOT: @global2
 ; MUXED: @global = external global void ()*
-; MUXED: @global2 = internal global void ()* @func
+; MUXED: @__bcdb_private_global2 = external global void ()*
 ; MUXED: define internal void @func()
 ; MUXED-NEXT: call void @__bcdb_id_{{.*}}()
 
-; STUB: @global = global void ()* @func
 ; STUB-NOT: @global2
+; STUB: @global = global void ()* @func
+; STUB: @__bcdb_private_global2 = global void ()* @func
 ; STUB: define internal void @func()
 ; STUB-NEXT: call void @__bcdb_id_{{.*}}()
 
 ; WEAK: @global = weak global void ()* null
+; WEAK: @__bcdb_private_global2 = weak global void ()* null

@@ -111,11 +111,15 @@ void Mux2Merger::PrepareToRename() {
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
-    // If the stub will go into a stub ELF, we keep the existing name. We do
-    // NOT add it to ReservedNames, because it isn't going into the merged
-    // module.
     if (!GV->hasLocalLinkage()) {
+      // The stub function will go into a stub module. Keep the existing name.
+      // We do NOT add it to ReservedNames, because it isn't going into the
+      // merged module.
       GI.NewName = GI.Name;
+    } else if (isa<GlobalVariable>(GV)) {
+      // Rename private global variables so that we can define them in the stub
+      // module, export them, and use them in the muxed module.
+      GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
     }
   }
 }
@@ -156,7 +160,18 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
   for (GlobalItem *GI : GIs) {
     GlobalValue *GV = M->getNamedValue(GI->NewName);
     if (GV->hasLocalLinkage()) {
-      MergedGIs.push_back(GI);
+      if (isa<GlobalVariable>(GV)) {
+        // Define all global variables in the stub modules, but export them so
+        // the muxed module can use them.
+        GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
+        NewGV->setName(GI->NewName);
+        NewGV->setLinkage(GlobalValue::ExternalLinkage);
+#if LLVM_VERSION_MAJOR >= 7
+        NewGV->setDSOLocal(false);
+#endif
+      } else {
+        MergedGIs.push_back(GI);
+      }
     } else {
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setLinkage(GV->getLinkage());
