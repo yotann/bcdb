@@ -13,9 +13,9 @@ define linkonce_odr void @f() comdat {
   ret void
 }
 
-; MUXED-DAG: define void @__bcdb_id_1()
+; MUXED-DAG: define protected void @__bcdb_id_1()
 ; MUXED-DAG: call void @f()
-; MUXED-DAG: define void @__bcdb_id_1.0()
+; MUXED-DAG: define protected void @__bcdb_id_1.0()
 ; MUXED-DAG: call void @g()
 ; F: define void @f() comdat
 ; F-NEXT: tail call void @__bcdb_id_{{.*}}()

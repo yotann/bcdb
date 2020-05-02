@@ -141,6 +141,9 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 
   if (!Decl->hasLocalLinkage() || !StubInStubModule->use_empty()) {
     LinkageMap[Def] = GlobalValue::ExternalLinkage;
+    Def->setLinkage(GlobalValue::ExternalLinkage);
+    Def->setVisibility(GlobalValue::ProtectedVisibility);
+
     Function *BodyDecl = StubModule.getFunction(Def->getName());
     if (!BodyDecl) {
       BodyDecl = Function::Create(cast<Function>(Def)->getFunctionType(),
