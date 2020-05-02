@@ -12,10 +12,10 @@ define i8* @f() {
   ret i8* @x
 }
 
-; MUXED: @x = external constant i8
+; MUXED: @x = extern_weak constant i8
 ; MUXED: define i8* @__bcdb_id_
 ; MUXED-NEXT: ret i8* @x
 
 ; STUB: @x = constant i8 1, comdat
 
-; WEAK: @x = weak constant i8 0
+; WEAK-NOT: @x

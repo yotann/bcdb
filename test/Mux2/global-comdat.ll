@@ -15,7 +15,7 @@ define void @g() {
   ret void
 }
 
-; MUXED: declare void @f()
+; MUXED: declare extern_weak void @f()
 
 ; STUB: define void @f() comdat
 

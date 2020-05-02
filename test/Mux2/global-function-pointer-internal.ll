@@ -24,8 +24,8 @@ define i32 @main(i32, i8**) {
 }
 
 ; MUXED-NOT: @global2
-; MUXED: @global = external global void ()*
-; MUXED: @__bcdb_private_global2 = external global void ()*
+; MUXED: @global = extern_weak global void ()*
+; MUXED: @__bcdb_private_global2 = extern_weak global void ()*
 ; MUXED: define internal void @func()
 ; MUXED-NEXT: call void @__bcdb_id_{{.*}}()
 
@@ -35,5 +35,5 @@ define i32 @main(i32, i8**) {
 ; STUB: define internal void @func()
 ; STUB-NEXT: call void @__bcdb_id_{{.*}}()
 
-; WEAK: @global = weak global void ()* null
-; WEAK: @__bcdb_private_global2 = weak global void ()* null
+; WEAK-NOT: @global
+; WEAK-NOT: @__bcdb_private_global2
