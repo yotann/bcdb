@@ -295,7 +295,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   if (WeakModule)
     WeakDefCalled =
         Function::Create(UndefFuncType, GlobalValue::ExternalLinkage,
-                         "__bcdb_weak_definition_called", *WeakModule);
+                         "__bcdb_weak_definition_called", WeakModule.get());
 
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
