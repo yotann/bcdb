@@ -18,9 +18,10 @@ define i32 @main() {
 
 ; MUXED: define protected i32 @__bcdb_id_1()
 ; MUXED-NEXT: ret i32 1
+; MUXED: define available_externally i32 @init_player()
+; MUXED-NEXT: call i32 @__bcdb_id_1()
 ; MUXED: define protected i32 @__bcdb_id_2()
 ; MUXED-NEXT: tail call i32 (...) bitcast (i32 ()* @init_player to i32 (...)*)()
-; MUXED: declare extern_weak i32 @init_player()
 ; MUXED: define internal i32 @__bcdb_id_5()
 ; MUXED-NEXT: ret i32 2
 ; MUXED: define protected i32 @__bcdb_private_init_player()

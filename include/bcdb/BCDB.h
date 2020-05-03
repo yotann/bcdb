@@ -58,7 +58,7 @@ public:
   std::unique_ptr<llvm::Module>
   Mux2(std::vector<llvm::StringRef> Names,
        llvm::StringMap<std::unique_ptr<llvm::Module>> &Stubs,
-       std::unique_ptr<llvm::Module> &WeakModule);
+       std::unique_ptr<llvm::Module> *WeakModule);
 
   llvm::Expected<std::unique_ptr<llvm::Module>>
   LoadParts(llvm::StringRef Name, std::map<std::string, std::string> &PartIDs);

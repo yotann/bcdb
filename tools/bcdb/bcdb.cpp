@@ -326,7 +326,8 @@ static int Mux2() {
     Names.push_back(Name);
   StringMap<std::unique_ptr<Module>> Stubs;
   std::unique_ptr<Module> WeakM;
-  std::unique_ptr<Module> M = db->Mux2(Names, Stubs, WeakM);
+  std::unique_ptr<Module> M =
+      db->Mux2(Names, Stubs, Mux2WeakName.empty() ? nullptr : &WeakM);
 
   auto SaveModule = [&](StringRef Path, Module &M) {
     if (!DisableVerify && verifyModule(M, &errs()))

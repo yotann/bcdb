@@ -13,6 +13,7 @@
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
+#include <set>
 
 #include "Merge.h"
 #include "bcdb/LLVMCompat.h"
@@ -58,7 +59,7 @@ static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
 
 class Mux2Merger : public Merger {
 public:
-  Mux2Merger(BCDB &bcdb);
+  Mux2Merger(BCDB &bcdb, bool enable_weak_module);
   ResolvedReference Resolve(StringRef ModuleName, StringRef Name) override;
   void PrepareToRename();
   std::unique_ptr<Module> Finish();
@@ -71,13 +72,18 @@ protected:
                    GlobalValue *Decl, StringRef NewName) override;
   void LoadRemainder(std::unique_ptr<Module> M,
                      std::vector<GlobalItem *> &GIs) override;
+
+private:
+  std::map<std::string, int> ExportedCount;
+  std::set<GlobalItem *> DirectlyReferenced;
 };
 
-Mux2Merger::Mux2Merger(BCDB &bcdb) : Merger(bcdb) {
+Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module) : Merger(bcdb) {
   EnableMustTail = true;
   EnableNameReuse = false;
 
-  WeakModule = std::make_unique<Module>("weak", bcdb.GetContext());
+  if (enable_weak_module)
+    WeakModule = std::make_unique<Module>("weak", bcdb.GetContext());
 
   MergedModule->setPICLevel(PICLevel::BigPIC);
   MergedModule->addModuleFlag(Module::Warning, "bcdb.elf.type", ELF::ET_DYN);
@@ -109,10 +115,32 @@ void Mux2Merger::PrepareToRename() {
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
+    if (!GV->hasLocalLinkage())
+      ExportedCount[GI.Name]++;
+    for (auto &Ref : GI.Refs) {
+      auto Res = Resolve(GI.ModuleName, Ref.first);
+      if (Res.GI)
+        DirectlyReferenced.insert(Res.GI);
+      else
+        ExportedCount[Res.Name]++;
+    }
+  }
+
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
     if (!GV->hasLocalLinkage()) {
-      // The stub function will go into a stub module. Keep the existing name.
-      GI.NewName = GI.Name;
-      ReservedNames.insert(GI.Name);
+      // The stub function will go into a stub module.
+      if (ExportedCount[GI.Name] > 1 && DirectlyReferenced.count(&GI) &&
+          WeakModule) {
+        // Add an alias, so we can add an available_externally copy to the
+        // merged library and use it for direct references.
+        GI.NewName = ReserveName("__bcdb_direct_" + GI.Name);
+      } else {
+        // Keep the existing name.
+        GI.NewName = GI.Name;
+        ReservedNames.insert(GI.NewName);
+      }
     } else {
       Module &StubModule = *StubModules[GI.ModuleName];
       GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
@@ -151,6 +179,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 #endif
     }
   } else {
+    // Export the body from the muxed library.
     LinkageMap[Def] = GlobalValue::ExternalLinkage;
     Def->setLinkage(GlobalValue::ExternalLinkage);
     Def->setVisibility(GlobalValue::ProtectedVisibility);
@@ -165,6 +194,21 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
     assert(BodyDecl->getFunctionType() ==
            cast<Function>(Def)->getFunctionType());
     Merger::AddPartStub(StubModule, GI, BodyDecl, Decl, GI.Name);
+
+    if (GI.Name != GI.NewName) {
+      GlobalAlias::create(GlobalValue::ExternalLinkage, GI.NewName,
+                          StubModule.getNamedValue(GI.Name));
+    }
+
+    if (WeakModule && DirectlyReferenced.count(&GI)) {
+      Merger::AddPartStub(MergedModule, GI, Def, Decl, GI.NewName);
+      GlobalValue *NewStub = MergedModule.getNamedValue(NewName);
+      LinkageMap[NewStub] = GlobalValue::AvailableExternallyLinkage;
+      NewStub->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+      NewStub->setDSOLocal(false);
+#endif
+    }
   }
 }
 
@@ -178,6 +222,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setName(GI->NewName);
       NewGV->setLinkage(GlobalValue::AvailableExternallyLinkage);
+      NewGV->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(false);
 #endif
@@ -192,10 +237,23 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
     } else {
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setLinkage(GV->getLinkage());
-
 #if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(GV->isDSOLocal());
 #endif
+
+      if (GI->Name != GI->NewName) {
+        GlobalAlias::create(GlobalValue::ExternalLinkage, GI->NewName, NewGV);
+      }
+
+      if (WeakModule && DirectlyReferenced.count(GI) && isa<GlobalObject>(GV)) {
+        // TODO: handle aliases too.
+        MergedGIs.push_back(GI);
+        GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
+        GV->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+        GV->setDSOLocal(false);
+#endif
+      }
     }
   }
 
@@ -233,8 +291,11 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   Linker::linkModules(*M, LoadMuxLibrary(M->getContext()));
   FunctionType *UndefFuncType =
       M->getFunction("__bcdb_unreachable_function_called")->getFunctionType();
-  auto WeakDefCalled = WeakModule->getOrInsertFunction(
-      "__bcdb_weak_definition_called", UndefFuncType);
+  Function *WeakDefCalled;
+  if (WeakModule)
+    WeakDefCalled =
+        Function::Create(UndefFuncType, GlobalValue::ExternalLinkage,
+                         "__bcdb_weak_definition_called", *WeakModule);
 
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
@@ -262,27 +323,52 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   // external library. That way we can link against the muxed library even if
   // we're not linking against that particular stub library.
   for (GlobalObject &GO : M->global_objects()) {
-    if (!GO.isDeclaration())
+    if (!GO.isDeclaration() && !GO.hasAvailableExternallyLinkage())
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
-      Var->setLinkage(GlobalValue::ExternalWeakLinkage);
-      Var->setVisibility(GlobalValue::DefaultVisibility);
+      if (!WeakModule)
+        Var->setInitializer(nullptr);
+      if (Var->isDeclaration()) {
+        Var->setLinkage(GlobalValue::ExternalWeakLinkage);
+        Var->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+        Var->setDSOLocal(false);
+#endif
+      } else {
+        new GlobalVariable(*WeakModule, Var->getValueType(), Var->isConstant(),
+                           GlobalValue::WeakAnyLinkage,
+                           Constant::getNullValue(Var->getValueType()),
+                           Var->getName(), nullptr, Var->getThreadLocalMode(),
+#if LLVM_VERSION_MAJOR >= 8
+                           Var->getAddressSpace(),
+#endif
+                           false);
+      }
     } else if (Function *F = dyn_cast<Function>(&GO)) {
       if (F->isIntrinsic())
         continue;
-      F->setLinkage(GlobalValue::ExternalWeakLinkage);
-      F->setVisibility(GlobalValue::DefaultVisibility);
-      F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
-#if LLVM_VERSION_MAJOR >= 8
-                           F->getAddressSpace(),
+      if (!WeakModule)
+        F->deleteBody();
+      if (F->isDeclaration()) {
+        F->setLinkage(GlobalValue::ExternalWeakLinkage);
+        F->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+        F->setDSOLocal(false);
 #endif
-                           F->getName(), WeakModule.get());
-      BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
-      IRBuilder<> Builder(BB);
-      Builder.CreateCall(WeakDefCalled,
-                         {Builder.CreateGlobalStringPtr(GO.getName())});
-      Builder.CreateUnreachable();
+      }
+      if (WeakModule) {
+        F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
+#if LLVM_VERSION_MAJOR >= 8
+                             F->getAddressSpace(),
+#endif
+                             F->getName(), WeakModule.get());
+        BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
+        IRBuilder<> Builder(BB);
+        Builder.CreateCall(WeakDefCalled,
+                           {Builder.CreateGlobalStringPtr(GO.getName())});
+        Builder.CreateUnreachable();
+      }
     }
   }
 
@@ -298,8 +384,8 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
 std::unique_ptr<llvm::Module>
 BCDB::Mux2(std::vector<llvm::StringRef> Names,
            llvm::StringMap<std::unique_ptr<llvm::Module>> &Stubs,
-           std::unique_ptr<llvm::Module> &WeakModule) {
-  Mux2Merger Merger(*this);
+           std::unique_ptr<llvm::Module> *WeakModule) {
+  Mux2Merger Merger(*this, WeakModule != nullptr);
   for (StringRef Name : Names) {
     Merger.AddModule(Name);
   }
@@ -307,7 +393,8 @@ BCDB::Mux2(std::vector<llvm::StringRef> Names,
   Merger.RenameEverything();
   auto Result = Merger.Finish();
 
-  WeakModule = std::move(Merger.WeakModule);
+  if (WeakModule)
+    *WeakModule = std::move(Merger.WeakModule);
   Stubs = std::move(Merger.StubModules);
   return Result;
 }
