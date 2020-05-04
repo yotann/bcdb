@@ -174,14 +174,13 @@ void Mux2Merger::PrepareToRename() {
     GlobalItem &GI = Item.second;
     if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
       if (ExportedCount[GI.Name] > 1)
-        ExportedCount[GA->getAliasee()->getName()] = 2;
+        ExportedCount[GA->getBaseObject()->getName()] = 2;
   }
-
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
     if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      if (ExportedCount[GA->getAliasee()->getName()] > 1)
+      if (ExportedCount[GA->getBaseObject()->getName()] > 1)
         ExportedCount[GI.Name] = 2;
   }
 
