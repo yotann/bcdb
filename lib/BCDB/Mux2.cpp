@@ -172,6 +172,22 @@ void Mux2Merger::PrepareToRename() {
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
+      if (ExportedCount[GI.Name] > 1)
+        ExportedCount[GA->getAliasee()->getName()] = 2;
+  }
+
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
+      if (ExportedCount[GA->getAliasee()->getName()] > 1)
+        ExportedCount[GI.Name] = 2;
+  }
+
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
     if (!GV->hasLocalLinkage()) {
       // The stub function will go into a stub module.
       if (ExportedCount[GI.Name] > 1 && DirectlyReferenced.count(&GI) &&
@@ -282,6 +298,24 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
 #if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(false);
 #endif
+      if (isa<GlobalAlias>(NewGV)) {
+        Type *Type = NewGV->getValueType();
+        GlobalValue *NewGV2;
+        if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
+          NewGV2 = Function::Create(FType, GlobalValue::ExternalLinkage, "",
+                                    &StubModule);
+        } else {
+          GlobalVariable *Base =
+              cast<GlobalVariable>(cast<GlobalAlias>(NewGV)->getBaseObject());
+          NewGV2 = new GlobalVariable(StubModule, Type, Base->isConstant(),
+                                      GlobalValue::ExternalLinkage, nullptr);
+          NewGV2->setThreadLocalMode(Base->getThreadLocalMode());
+        }
+        std::string Name = NewGV->getName();
+        NewGV->replaceAllUsesWith(NewGV2);
+        NewGV->eraseFromParent();
+        NewGV2->setName(Name);
+      }
 
       MergedGIs.push_back(GI);
       if (!NewGV->use_empty()) {
