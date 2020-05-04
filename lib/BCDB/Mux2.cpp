@@ -10,6 +10,7 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Linker/Linker.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
@@ -24,6 +25,24 @@ namespace {
 
 using namespace bcdb;
 using namespace llvm;
+
+static cl::opt<bool> AllowSpuriousExports(
+    "allow-spurious-exports",
+    cl::desc("Allow the muxed module to export extra symbols that the original "
+             "modules didn't export"),
+    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+
+static cl::opt<bool>
+    NoUnmuxedDefs("no-unmuxed-defs",
+                  cl::desc("Assume no symbol imported by a muxed module is "
+                           "exported by a module that isn't muxed"),
+                  cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+
+static cl::opt<bool>
+    NoUnmuxedUsers("no-unmuxed-users",
+                   cl::desc("Assume no symbol exported by a muxed module is "
+                            "imported by a module that isn't muxed"),
+                   cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
 static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
   ExitOnError Err("LoadMuxLibrary: ");
@@ -74,8 +93,12 @@ protected:
                      std::vector<GlobalItem *> &GIs) override;
 
 private:
+  bool ShouldDefineInMuxedModule(GlobalItem &GI, GlobalValue *Decl);
+
   std::map<std::string, int> ExportedCount;
+  StringMap<GlobalItem *> ExportedItems;
   std::set<GlobalItem *> DirectlyReferenced;
+  StringSet<> IndirectlyReferenced;
 };
 
 Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module) : Merger(bcdb) {
@@ -91,10 +114,16 @@ Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module) : Merger(bcdb) {
 
 ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
   GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
-  if (GV && GV->hasExactDefinition())
+  if (GV && GV->hasExactDefinition()) {
+    assert(GlobalItems.count(GV));
     return ResolvedReference(&GlobalItems[GV]);
-  else
+  } else if (NoUnmuxedDefs && ExportedCount[Name] == 1) {
+    assert(ExportedItems.count(Name));
+    return ResolvedReference(ExportedItems[Name]);
+  } else {
+    assert(!Name.empty());
     return ResolvedReference(Name);
+  }
 }
 
 void Mux2Merger::PrepareToRename() {
@@ -106,7 +135,7 @@ void Mux2Merger::PrepareToRename() {
     // LoadRemainder if necessary.
     for (GlobalValue &GV :
          concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
-      if (!GV.isDeclaration())
+      if (!GV.isDeclarationForLinker())
         GV.setLinkage(GlobalValue::InternalLinkage);
     }
     StubModules[Item.first()] = std::move(M);
@@ -115,14 +144,28 @@ void Mux2Merger::PrepareToRename() {
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
-    if (!GV->hasLocalLinkage())
+    if (!GV->hasLocalLinkage()) {
       ExportedCount[GI.Name]++;
+      ExportedItems[GI.Name] = &GI;
+    }
+  }
+
+  ExportedCount["main"] = 2;
+  ExportedCount["llvm.used"] = 2;
+  ExportedCount["llvm.compiler.used"] = 2;
+  ExportedCount["llvm.global_ctors"] = 2;
+  ExportedCount["llvm.global_dtors"] = 2;
+
+  for (auto &Item : GlobalItems) {
+    GlobalItem &GI = Item.second;
     for (auto &Ref : GI.Refs) {
       auto Res = Resolve(GI.ModuleName, Ref.first);
-      if (Res.GI)
+      if (Res.GI) {
         DirectlyReferenced.insert(Res.GI);
-      else
-        ExportedCount[Res.Name]++;
+      } else {
+        ExportedCount[Res.Name] = 2;
+        IndirectlyReferenced.insert(Res.Name);
+      }
     }
   }
 
@@ -153,6 +196,15 @@ void Mux2Merger::PrepareToRename() {
   }
 }
 
+bool Mux2Merger::ShouldDefineInMuxedModule(GlobalItem &GI, GlobalValue *Decl) {
+  if (Decl->hasLocalLinkage())
+    return true;
+  if (AllowSpuriousExports || NoUnmuxedUsers)
+    if (ExportedCount[GI.Name] == 1 && !IndirectlyReferenced.count(GI.Name))
+      return true;
+  return false;
+}
+
 void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
                              GlobalValue *Def, GlobalValue *Decl,
                              StringRef NewName) {
@@ -161,7 +213,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   Module &StubModule = *StubModules[GI.ModuleName];
   GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
 
-  if (Decl->hasLocalLinkage()) {
+  if (ShouldDefineInMuxedModule(GI, Decl)) {
     Merger::AddPartStub(MergedModule, GI, Def, Decl, NewName);
 
     if (!StubInStubModule->use_empty()) {
@@ -174,6 +226,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
       LinkageMap[StubInStubModule] = GlobalValue::ExternalLinkage;
       StubInStubModule->setLinkage(GlobalValue::ExternalLinkage);
       cast<Function>(StubInStubModule)->deleteBody();
+      cast<Function>(StubInStubModule)->setComdat(nullptr);
 #if LLVM_VERSION_MAJOR >= 7
       StubInStubModule->setDSOLocal(false);
 #endif
@@ -204,6 +257,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
       Merger::AddPartStub(MergedModule, GI, Def, Decl, GI.NewName);
       GlobalValue *NewStub = MergedModule.getNamedValue(NewName);
       LinkageMap[NewStub] = GlobalValue::AvailableExternallyLinkage;
+      cast<Function>(NewStub)->setComdat(nullptr);
       NewStub->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
       NewStub->setDSOLocal(false);
@@ -218,10 +272,12 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
   std::vector<GlobalItem *> MergedGIs;
   for (GlobalItem *GI : GIs) {
     GlobalValue *GV = M->getNamedValue(GI->NewName);
-    if (GV->hasLocalLinkage()) {
+    if (ShouldDefineInMuxedModule(*GI, GV)) {
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setName(GI->NewName);
       NewGV->setLinkage(GlobalValue::AvailableExternallyLinkage);
+      if (GlobalObject *NewGO = dyn_cast<GlobalObject>(NewGV))
+        NewGO->setComdat(nullptr);
       NewGV->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(false);
@@ -234,6 +290,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
         GV->setLinkage(GlobalValue::ExternalLinkage);
         GV->setVisibility(GlobalValue::ProtectedVisibility);
       }
+
     } else {
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setLinkage(GV->getLinkage());
@@ -249,6 +306,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
         // TODO: handle aliases too.
         MergedGIs.push_back(GI);
         GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
+        cast<GlobalObject>(GV)->setComdat(nullptr);
         GV->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
         GV->setDSOLocal(false);
@@ -323,12 +381,14 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   // external library. That way we can link against the muxed library even if
   // we're not linking against that particular stub library.
   for (GlobalObject &GO : M->global_objects()) {
-    if (!GO.isDeclaration() && !GO.hasAvailableExternallyLinkage())
+    if (!GO.isDeclarationForLinker())
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
-      if (!WeakModule)
+      if (!WeakModule) {
         Var->setInitializer(nullptr);
+        Var->setComdat(nullptr);
+      }
       if (Var->isDeclaration()) {
         Var->setLinkage(GlobalValue::ExternalWeakLinkage);
         Var->setVisibility(GlobalValue::DefaultVisibility);
@@ -348,8 +408,10 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     } else if (Function *F = dyn_cast<Function>(&GO)) {
       if (F->isIntrinsic())
         continue;
-      if (!WeakModule)
+      if (!WeakModule) {
         F->deleteBody();
+        F->setComdat(nullptr);
+      }
       if (F->isDeclaration()) {
         F->setLinkage(GlobalValue::ExternalWeakLinkage);
         F->setVisibility(GlobalValue::DefaultVisibility);
@@ -368,6 +430,38 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
         Builder.CreateCall(WeakDefCalled,
                            {Builder.CreateGlobalStringPtr(GO.getName())});
         Builder.CreateUnreachable();
+      }
+    }
+  }
+
+  if (NoUnmuxedDefs) {
+    for (GlobalObject &GO : M->global_objects()) {
+      if (!GO.isDeclaration() && GO.isInterposable()) {
+        GO.setLinkage(GO.hasLinkOnceLinkage() ? GlobalValue::LinkOnceODRLinkage
+                                              : GlobalValue::WeakODRLinkage);
+      }
+    }
+  }
+
+  if (NoUnmuxedUsers) {
+    StringSet<> MustExport;
+    MustExport.insert("llvm.used");
+    MustExport.insert("llvm.compiler.used");
+    MustExport.insert("llvm.global_ctors");
+    MustExport.insert("llvm.global_dtors");
+    MustExport.insert("main");
+    MustExport.insert("__bcdb_unreachable_function_called");
+    MustExport.insert("__bcdb_weak_definition_called");
+    for (auto &Item : StubModules) {
+      Module &StubModule = *Item.second;
+      for (GlobalObject &GO : StubModule.global_objects())
+        if (GO.isDeclarationForLinker())
+          MustExport.insert(GO.getName());
+    }
+    for (GlobalObject &GO : M->global_objects()) {
+      if (!GO.isDeclarationForLinker() && !GO.hasLocalLinkage() &&
+          !MustExport.count(GO.getName())) {
+        GO.setLinkage(GlobalValue::InternalLinkage);
       }
     }
   }
