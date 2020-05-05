@@ -68,6 +68,19 @@ public:
 
     // If true, don't create a stub named NewName.
     bool SkipStub = false;
+
+    // For mux2 only, whether we should put the NewName definition in the
+    // merged module.
+    bool DefineInMergedModule = true;
+
+    // For mux2 only, whether we should put an available_externally NewName
+    // definition in the merged module. Applies only if DefineInMergedModule is
+    // false.
+    bool AvailableExternallyInMergedModule = false;
+
+    // For mux2 only, whether we need a declaration of NewName in the stub
+    // module. Applies only if DefineInMergedModule is true.
+    bool NeededInStubModule = false;
   };
 
 protected:

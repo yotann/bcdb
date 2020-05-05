@@ -23,13 +23,13 @@ define weak_odr void @target2() {
 ; MUXED: define protected void @__bcdb_id_2()
 ; MUXED-NEXT: ret void
 
-; PROG: @alias1 = alias void (), void ()* @target1
-; PROG: @alias2 = alias void (), void ()* @target2
+; PROG: @alias1 = weak_odr alias void (), void ()* @target1
+; PROG: @alias2 = weak_odr alias void (), void ()* @target2
 ; PROG: declare void @__bcdb_id_1()
-; PROG: define void @target1()
+; PROG: define weak_odr void @target1()
 ; PROG-NEXT: call void @__bcdb_id_1()
 ; PROG: declare void @__bcdb_id_2()
-; PROG: define void @target2()
+; PROG: define weak_odr void @target2()
 ; PROG-NEXT: call void @__bcdb_id_2()
 
 ; WEAK: define weak void @alias1()

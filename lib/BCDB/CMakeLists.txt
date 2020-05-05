@@ -18,6 +18,12 @@ add_custom_command(OUTPUT mux2_library.inc
 )
 add_custom_target(mux2_library DEPENDS mux2_library.inc)
 
+add_custom_command(OUTPUT mux2_default_symbol_list.inc
+  COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/data/mux2_default_symbol_list.txt mux2_default_symbol_list.txt
+  COMMAND xxd -i mux2_default_symbol_list.txt mux2_default_symbol_list.inc
+  DEPENDS data/mux2_default_symbol_list.txt)
+add_custom_target(mux2_default_symbol_list DEPENDS mux2_default_symbol_list.inc)
+
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 add_llvm_library(BCDB
@@ -34,3 +40,4 @@ target_link_libraries(BCDB PRIVATE
 )
 add_dependencies(BCDB mux_main)
 add_dependencies(BCDB mux2_library)
+add_dependencies(BCDB mux2_default_symbol_list)

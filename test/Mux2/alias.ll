@@ -15,8 +15,6 @@ define void @target() {
 ; MUXED: define protected void @__bcdb_id_1()
 ; MUXED-NEXT: call void @alias()
 ; MUXED: declare extern_weak void @alias()
-; MUXED: define available_externally void @target()
-; MUXED-NEXT: call void @__bcdb_id_1()
 
 ; PROG: @alias = alias void (), void ()* @target
 ; PROG: declare void @__bcdb_id_1()
@@ -24,4 +22,3 @@ define void @target() {
 ; PROG-NEXT: call void @__bcdb_id_1()
 
 ; WEAK: define weak void @alias()
-; WEAK: define weak void @target()

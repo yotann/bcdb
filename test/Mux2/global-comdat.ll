@@ -17,7 +17,7 @@ define void @g() {
 
 ; MUXED: declare extern_weak void @f()
 
-; STUB: define void @f() comdat
+; STUB: define weak_odr void @f() comdat
 
 ; WEAK: define weak void @f() {
 ; WEAK-NEXT: call void @__bcdb_weak_definition_called

@@ -16,6 +16,6 @@ define i8* @f() {
 ; MUXED: define protected i8* @__bcdb_id_
 ; MUXED-NEXT: ret i8* @x
 
-; STUB: @x = constant i8 1, comdat
+; STUB: @x = weak_odr constant i8 1, comdat
 
 ; WEAK-NOT: @x

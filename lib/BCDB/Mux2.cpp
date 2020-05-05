@@ -11,6 +11,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/SpecialCaseList.h>
+#include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
@@ -20,11 +22,17 @@
 #include "bcdb/LLVMCompat.h"
 
 namespace {
+#include "mux2_default_symbol_list.inc"
 #include "mux2_library.inc"
-}
+} // namespace
 
 using namespace bcdb;
 using namespace llvm;
+
+static cl::list<std::string> SpecialCaseFilename(
+    "mux-symbol-list",
+    cl::desc("Special case symbol list (sanitizer blacklist format)"),
+    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
 static cl::opt<bool> AllowSpuriousExports(
     "allow-spurious-exports",
@@ -44,6 +52,13 @@ static cl::opt<bool>
                             "imported by a module that isn't muxed"),
                    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
+static cl::opt<bool>
+    TrapUnreachableFunctions("trap-unreachable-functions",
+                             cl::desc("Print an error message at run time if "
+                                      "an unreachable function is called"),
+                             cl::cat(MergeCategory),
+                             cl::sub(*cl::AllSubCommands));
+
 static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
   ExitOnError Err("LoadMuxLibrary: ");
   StringRef Buffer(reinterpret_cast<char *>(mux2_library_bc),
@@ -52,6 +67,12 @@ static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
       Err(parseBitcodeFile(MemoryBufferRef(Buffer, "main"), Context));
   MainMod->setTargetTriple("");
   return MainMod;
+}
+
+static std::unique_ptr<MemoryBuffer> LoadDefaultSymbolList() {
+  StringRef Buffer(reinterpret_cast<char *>(mux2_default_symbol_list_txt),
+                   mux2_default_symbol_list_txt_len);
+  return MemoryBuffer::getMemBuffer(Buffer, "mux2_default_symbol_list.txt");
 }
 
 // Handling references from the muxed library to the stub libraries:
@@ -93,15 +114,28 @@ protected:
                      std::vector<GlobalItem *> &GIs) override;
 
 private:
-  bool ShouldDefineInMuxedModule(GlobalItem &GI, GlobalValue *Decl);
+  bool symbolInSection(StringRef Section, StringRef ModuleName, StringRef Name,
+                       StringRef Category = StringRef());
+  bool symbolInSection(StringRef Section, GlobalItem &GI,
+                       StringRef Category = StringRef());
+  bool mayBeDefinedElsewhere(StringRef ModuleName, StringRef Name);
+  bool mayBeUsedElsewhere(StringRef ModuleName, StringRef Name);
+  void MakeAvailableExternally(GlobalValue *GV);
 
-  std::map<std::string, int> ExportedCount;
-  StringMap<GlobalItem *> ExportedItems;
+  std::unique_ptr<SpecialCaseList> DefaultSymbolList, SymbolList;
+  StringMap<GlobalItem *> GlobalDefinitions;
   std::set<GlobalItem *> DirectlyReferenced;
-  StringSet<> IndirectlyReferenced;
 };
 
-Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module) : Merger(bcdb) {
+Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module)
+    : Merger(bcdb), SymbolList(SpecialCaseList::createOrDie(
+                        SpecialCaseFilename, *vfs::getRealFileSystem())) {
+  std::string Error;
+  DefaultSymbolList =
+      SpecialCaseList::create(LoadDefaultSymbolList().get(), Error);
+  if (!Error.empty())
+    report_fatal_error(Error);
+
   EnableMustTail = true;
   EnableNameReuse = false;
 
@@ -112,21 +146,44 @@ Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module) : Merger(bcdb) {
   MergedModule->addModuleFlag(Module::Warning, "bcdb.elf.type", ELF::ET_DYN);
 }
 
-ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
-  GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
-  if (GV && GV->hasExactDefinition()) {
-    assert(GlobalItems.count(GV));
-    return ResolvedReference(&GlobalItems[GV]);
-  } else if (NoUnmuxedDefs && ExportedCount[Name] == 1) {
-    assert(ExportedItems.count(Name));
-    return ResolvedReference(ExportedItems[Name]);
-  } else {
-    assert(!Name.empty());
-    return ResolvedReference(Name);
-  }
+bool Mux2Merger::symbolInSection(StringRef Section, StringRef ModuleName,
+                                 StringRef Name, StringRef Category) {
+  if (DefaultSymbolList->inSection(Section, "fun", Name))
+    return true;
+  if (DefaultSymbolList->inSection(Section, "global", Name))
+    return true;
+  if (SymbolList->inSection(Section, "fun", Name))
+    return true;
+  if (SymbolList->inSection(Section, "global", Name))
+    return true;
+  return false;
+}
+
+bool Mux2Merger::symbolInSection(StringRef Section, GlobalItem &GI,
+                                 StringRef Category) {
+  return symbolInSection(Section, GI.ModuleName, GI.Name, Category);
+}
+
+bool Mux2Merger::mayBeDefinedElsewhere(StringRef ModuleName, StringRef Name) {
+  if (!NoUnmuxedDefs)
+    return true;
+  if (symbolInSection("mux-defined-elsewhere", ModuleName, Name))
+    return true;
+  if (symbolInSection("mux-always-defined-elsewhere", ModuleName, Name))
+    return true;
+  return false;
+}
+
+bool Mux2Merger::mayBeUsedElsewhere(StringRef ModuleName, StringRef Name) {
+  if (!NoUnmuxedUsers)
+    return true;
+  if (symbolInSection("mux-used-elsewhere", ModuleName, Name))
+    return true;
+  return false;
 }
 
 void Mux2Merger::PrepareToRename() {
+  // Make stub modules.
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
     std::unique_ptr<Module> M = CloneModule(*Item.second);
@@ -141,21 +198,28 @@ void Mux2Merger::PrepareToRename() {
     StubModules[Item.first()] = std::move(M);
   }
 
+  // Find symbols that only have one definition.
+  StringMap<int> ExportedCount;
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
     if (!GV->hasLocalLinkage()) {
       ExportedCount[GI.Name]++;
-      ExportedItems[GI.Name] = &GI;
+      GlobalDefinitions[GI.Name] = &GI;
     }
   }
+  for (auto &Item : ExportedCount)
+    if (Item.second > 1)
+      GlobalDefinitions.erase(Item.first());
+  // If the symbol may be defined elsewhere, we can't be sure whether to use
+  // our definition or the external one.
+  for (auto &Item : GlobalItems) {
+    GlobalItem &GI = Item.second;
+    if (mayBeDefinedElsewhere(GI.ModuleName, GI.Name))
+      GlobalDefinitions.erase(GI.Name);
+  }
 
-  ExportedCount["main"] = 2;
-  ExportedCount["llvm.used"] = 2;
-  ExportedCount["llvm.compiler.used"] = 2;
-  ExportedCount["llvm.global_ctors"] = 2;
-  ExportedCount["llvm.global_dtors"] = 2;
-
+  // Find GIs that have some reference directly resolved to them.
   for (auto &Item : GlobalItems) {
     GlobalItem &GI = Item.second;
     for (auto &Ref : GI.Refs) {
@@ -163,61 +227,134 @@ void Mux2Merger::PrepareToRename() {
       if (Res.GI) {
         DirectlyReferenced.insert(Res.GI);
       } else {
+        // The indirect reference prevents us from putting a definition of
+        // Res.Name in the muxed module, just as if we had multiple definitions
+        // of it.
         ExportedCount[Res.Name] = 2;
-        IndirectlyReferenced.insert(Res.Name);
       }
+    }
+  }
+
+  // Determine which GIs should be defined in the merged module.
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
+
+    if (GV->hasLocalLinkage()) {
+      GI.DefineInMergedModule = true;
+    } else if (ExportedCount[GI.Name] == 1) {
+      if (AllowSpuriousExports)
+        GI.DefineInMergedModule = true;
+      else if (!mayBeUsedElsewhere(GI.ModuleName, GI.Name))
+        GI.DefineInMergedModule = true;
+      else
+        GI.DefineInMergedModule = false;
+    } else {
+      GI.DefineInMergedModule = false;
+    }
+  }
+
+  // If an alias gets defined in a stub module, so must the aliasee.
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV)) {
+      GlobalItem &Aliasee = GlobalItems[GA->getBaseObject()];
+      if (!GI.DefineInMergedModule)
+        Aliasee.DefineInMergedModule = false;
+    }
+  }
+  // If an aliasee gets defined in a stub module, so must the alias.
+  for (auto &Item : GlobalItems) {
+    GlobalValue *GV = Item.first;
+    GlobalItem &GI = Item.second;
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV)) {
+      GlobalItem &Aliasee = GlobalItems[GA->getBaseObject()];
+      if (!Aliasee.DefineInMergedModule)
+        GI.DefineInMergedModule = false;
     }
   }
 
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
-    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      if (ExportedCount[GI.Name] > 1)
-        ExportedCount[GA->getBaseObject()->getName()] = 2;
-  }
-  for (auto &Item : GlobalItems) {
-    GlobalValue *GV = Item.first;
-    GlobalItem &GI = Item.second;
-    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      if (ExportedCount[GA->getBaseObject()->getName()] > 1)
-        ExportedCount[GI.Name] = 2;
-  }
 
-  for (auto &Item : GlobalItems) {
-    GlobalValue *GV = Item.first;
-    GlobalItem &GI = Item.second;
-    if (!GV->hasLocalLinkage()) {
-      // The stub function will go into a stub module.
-      if (ExportedCount[GI.Name] > 1 && DirectlyReferenced.count(&GI) &&
-          WeakModule) {
-        // Add an alias, so we can add an available_externally copy to the
-        // merged library and use it for direct references.
-        GI.NewName = ReserveName("__bcdb_direct_" + GI.Name);
-      } else {
-        // Keep the existing name.
-        GI.NewName = GI.Name;
-        ReservedNames.insert(GI.NewName);
-      }
+    GI.AvailableExternallyInMergedModule = false;
+    if (!GI.DefineInMergedModule && DirectlyReferenced.count(&GI) && WeakModule)
+      GI.AvailableExternallyInMergedModule = true;
+
+    Module &StubModule = *StubModules[GI.ModuleName];
+    GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
+
+    // TODO: only do this if the use is being kept in the stub module.
+    GI.NeededInStubModule = !StubInStubModule->use_empty();
+
+    if (GV->hasLocalLinkage() && GI.DefineInMergedModule &&
+        GI.NeededInStubModule) {
+      // The definition will go in the merged module. But the stub module may
+      // need to import it, e.g., if it includes a global variable that points
+      // to the private symbol. Rename the private global so we can safely
+      // export it.
+      GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
+    } else if (GI.AvailableExternallyInMergedModule &&
+               ExportedCount[GI.Name] > 1) {
+      // Add an alias, so we can make an available_externally copy for this
+      // specific definition.
+      // TODO: only do this if something will actually use the
+      // available_externally copy.
+      GI.NewName = ReserveName("__bcdb_direct_" + GI.Name);
+    } else if (!GV->hasLocalLinkage()) {
+      // Keep the existing name.
+      GI.NewName = GI.Name;
+      ReservedNames.insert(GI.NewName);
     } else {
-      Module &StubModule = *StubModules[GI.ModuleName];
-      GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
-      if (!StubInStubModule->use_empty()) {
-        // Rename private globals so that we can define them in the merged
-        // module, export them, and use them in the stub module.
-        GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
-      }
+      // We don't care what the new name is! Merger::RenameEverything() will
+      // handle it.
     }
   }
 }
 
-bool Mux2Merger::ShouldDefineInMuxedModule(GlobalItem &GI, GlobalValue *Decl) {
-  if (Decl->hasLocalLinkage())
-    return true;
-  if (AllowSpuriousExports || NoUnmuxedUsers)
-    if (ExportedCount[GI.Name] == 1 && !IndirectlyReferenced.count(GI.Name))
-      return true;
-  return false;
+ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
+  GlobalValue *GV = ModRemainders[ModuleName]->getNamedValue(Name);
+  if (GV && GV->hasExactDefinition()) {
+    assert(GlobalItems.count(GV));
+    return ResolvedReference(&GlobalItems[GV]);
+  } else if (GlobalDefinitions.count(Name)) {
+    return ResolvedReference(GlobalDefinitions[Name]);
+  } else {
+    assert(!Name.empty());
+    return ResolvedReference(Name);
+  }
+}
+
+void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
+  LinkageMap.erase(GV);
+  GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
+  if (GlobalObject *GO = dyn_cast<GlobalObject>(GV))
+    GO->setComdat(nullptr);
+  GV->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+  GV->setDSOLocal(false);
+#endif
+}
+
+static GlobalObject *ReplaceAliasWithDeclaration(GlobalAlias *GA) {
+  Type *Type = GA->getValueType();
+  GlobalObject *Decl;
+  if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
+    Decl = Function::Create(FType, GlobalValue::ExternalLinkage, "",
+                            GA->getParent());
+  } else {
+    GlobalVariable *Base = cast<GlobalVariable>(GA->getBaseObject());
+    Decl = new GlobalVariable(*GA->getParent(), Type, Base->isConstant(),
+                              GlobalValue::ExternalLinkage, nullptr);
+    Decl->setThreadLocalMode(Base->getThreadLocalMode());
+  }
+  std::string Name = GA->getName();
+  GA->replaceAllUsesWith(Decl);
+  GA->eraseFromParent();
+  Decl->setName(Name);
+  return Decl;
 }
 
 void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
@@ -226,17 +363,19 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
   if (NewName.empty())
     NewName = GI.NewName;
   Module &StubModule = *StubModules[GI.ModuleName];
-  GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
 
-  if (ShouldDefineInMuxedModule(GI, Decl)) {
+  if (GI.DefineInMergedModule) {
     Merger::AddPartStub(MergedModule, GI, Def, Decl, NewName);
 
-    if (!StubInStubModule->use_empty()) {
+    if (GI.NeededInStubModule) {
+      // Export the symbol from the merged module.
       GlobalValue *NewStub = MergedModule.getNamedValue(NewName);
       LinkageMap[NewStub] = GlobalValue::ExternalLinkage;
       NewStub->setLinkage(GlobalValue::ExternalLinkage);
       NewStub->setVisibility(GlobalValue::ProtectedVisibility);
 
+      // Import the symbol into the stub module.
+      GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
       StubInStubModule->setName(NewName);
       LinkageMap[StubInStubModule] = GlobalValue::ExternalLinkage;
       StubInStubModule->setLinkage(GlobalValue::ExternalLinkage);
@@ -247,11 +386,12 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 #endif
     }
   } else {
-    // Export the body from the muxed library.
+    // Export the body from the merged module.
     LinkageMap[Def] = GlobalValue::ExternalLinkage;
     Def->setLinkage(GlobalValue::ExternalLinkage);
     Def->setVisibility(GlobalValue::ProtectedVisibility);
 
+    // Import the body into the stub module.
     Function *BodyDecl = StubModule.getFunction(Def->getName());
     if (!BodyDecl) {
       BodyDecl = Function::Create(cast<Function>(Def)->getFunctionType(),
@@ -263,20 +403,16 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
            cast<Function>(Def)->getFunctionType());
     Merger::AddPartStub(StubModule, GI, BodyDecl, Decl, GI.Name);
 
+    // If we have an alternate NewName, we need an alias.
     if (GI.Name != GI.NewName) {
       GlobalAlias::create(GlobalValue::ExternalLinkage, GI.NewName,
                           StubModule.getNamedValue(GI.Name));
     }
 
-    if (WeakModule && DirectlyReferenced.count(&GI)) {
+    if (GI.AvailableExternallyInMergedModule) {
+      // Add an available_externally definition to the merged module.
       Merger::AddPartStub(MergedModule, GI, Def, Decl, GI.NewName);
-      GlobalValue *NewStub = MergedModule.getNamedValue(NewName);
-      LinkageMap[NewStub] = GlobalValue::AvailableExternallyLinkage;
-      cast<Function>(NewStub)->setComdat(nullptr);
-      NewStub->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
-      NewStub->setDSOLocal(false);
-#endif
+      MakeAvailableExternally(MergedModule.getNamedValue(NewName));
     }
   }
 }
@@ -284,66 +420,49 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
                                std::vector<GlobalItem *> &GIs) {
   Module &StubModule = *StubModules[M->getModuleIdentifier()];
-  std::vector<GlobalItem *> MergedGIs;
-  for (GlobalItem *GI : GIs) {
-    GlobalValue *GV = M->getNamedValue(GI->NewName);
-    if (ShouldDefineInMuxedModule(*GI, GV)) {
-      GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
-      NewGV->setName(GI->NewName);
-      NewGV->setLinkage(GlobalValue::AvailableExternallyLinkage);
-      if (GlobalObject *NewGO = dyn_cast<GlobalObject>(NewGV))
-        NewGO->setComdat(nullptr);
-      NewGV->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
-      NewGV->setDSOLocal(false);
-#endif
-      if (isa<GlobalAlias>(NewGV)) {
-        Type *Type = NewGV->getValueType();
-        GlobalValue *NewGV2;
-        if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
-          NewGV2 = Function::Create(FType, GlobalValue::ExternalLinkage, "",
-                                    &StubModule);
-        } else {
-          GlobalVariable *Base =
-              cast<GlobalVariable>(cast<GlobalAlias>(NewGV)->getBaseObject());
-          NewGV2 = new GlobalVariable(StubModule, Type, Base->isConstant(),
-                                      GlobalValue::ExternalLinkage, nullptr);
-          NewGV2->setThreadLocalMode(Base->getThreadLocalMode());
-        }
-        std::string Name = NewGV->getName();
-        NewGV->replaceAllUsesWith(NewGV2);
-        NewGV->eraseFromParent();
-        NewGV2->setName(Name);
-      }
+  std::vector<GlobalItem *> GIsToMerge;
 
-      MergedGIs.push_back(GI);
-      if (!NewGV->use_empty()) {
+  for (GlobalItem *GI : GIs) {
+    if (GI->DefineInMergedModule) {
+
+      // Define in the merged module.
+      GIsToMerge.push_back(GI);
+      if (GI->NeededInStubModule) {
         // Define private globals in the merged module, but export them so the
         // stub module can use them.
+        GlobalValue *GV = M->getNamedValue(GI->NewName);
         GV->setLinkage(GlobalValue::ExternalLinkage);
         GV->setVisibility(GlobalValue::ProtectedVisibility);
       }
 
+      // Make the stub module's version available_externally.
+      GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
+      NewGV->setName(GI->NewName);
+      MakeAvailableExternally(NewGV);
+
+      // If it's an alias, replace it with a declaration in the stub module.
+      if (GlobalAlias *GA = dyn_cast<GlobalAlias>(NewGV))
+        NewGV = ReplaceAliasWithDeclaration(GA);
+
     } else {
+      // Export the definition from the stub module.
+      GlobalValue *GV = M->getNamedValue(GI->NewName);
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setLinkage(GV->getLinkage());
 #if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(GV->isDSOLocal());
 #endif
 
+      // If we have an alternate NewName, we need an alias.
       if (GI->Name != GI->NewName) {
         GlobalAlias::create(GlobalValue::ExternalLinkage, GI->NewName, NewGV);
       }
 
-      if (WeakModule && DirectlyReferenced.count(GI) && isa<GlobalObject>(GV)) {
+      if (GI->AvailableExternallyInMergedModule && isa<GlobalObject>(GV)) {
+        // Add an available_externally definition to the merged module.
         // TODO: handle aliases too.
-        MergedGIs.push_back(GI);
-        GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
-        cast<GlobalObject>(GV)->setComdat(nullptr);
-        GV->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
-        GV->setDSOLocal(false);
-#endif
+        GIsToMerge.push_back(GI);
+        MakeAvailableExternally(GV);
       }
     }
   }
@@ -359,7 +478,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
   eraseModuleFlag(*M, "bcdb.elf.rpath");
   eraseModuleFlag(*M, "bcdb.elf.soname");
   eraseModuleFlag(*M, "bcdb.elf.type");
-  Merger::LoadRemainder(std::move(M), MergedGIs);
+  Merger::LoadRemainder(std::move(M), GIsToMerge);
 }
 
 static void DiagnoseUnreachableFunctions(Module &M,
@@ -378,6 +497,7 @@ static void DiagnoseUnreachableFunctions(Module &M,
 
 std::unique_ptr<Module> Mux2Merger::Finish() {
   auto M = Merger::Finish();
+  createGlobalDCEPass()->runOnModule(*M);
 
   Linker::linkModules(*M, LoadMuxLibrary(M->getContext()));
   FunctionType *UndefFuncType =
@@ -395,26 +515,39 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     // module.
     for (GlobalValue &GV :
          concat<GlobalValue>(StubModule.global_objects(), StubModule.aliases(),
-                             StubModule.ifuncs()))
-      if (GV.hasLinkOnceLinkage())
-        GV.setLinkage(GlobalValue::getWeakLinkage(GV.hasLinkOnceODRLinkage()));
+                             StubModule.ifuncs())) {
+      if (GV.hasLinkOnceLinkage()) {
+        GlobalValue *Used = M->getNamedValue(GV.getName());
+        if (Used && !Used->use_empty() && !Used->hasExactDefinition())
+          GV.setLinkage(
+              GlobalValue::getWeakLinkage(GV.hasLinkOnceODRLinkage()));
+      }
+    }
 
-    // Make weak symbols strong, to prevent them being overridden by the weak
-    // definitions in the muxed library.
-    for (GlobalValue &GV :
-         concat<GlobalValue>(StubModule.global_objects(), StubModule.aliases(),
-                             StubModule.ifuncs()))
-      if (GV.hasLinkOnceLinkage() || GV.hasWeakLinkage())
-        GV.setLinkage(GlobalValue::ExternalLinkage);
+    if (false && WeakModule) {
+      // Make weak symbols strong, to prevent them being overridden by the weak
+      // definitions in the weak library.
+      // XXX: this isn't normally necessary because glibc's ld.so doesn't care
+      // about weakness. It only matters if LD_DYNAMIC_WEAK is set at run time.
+      for (GlobalValue &GV :
+           concat<GlobalValue>(StubModule.global_objects(),
+                               StubModule.aliases(), StubModule.ifuncs()))
+        if (GV.hasLinkOnceLinkage() || GV.hasWeakLinkage())
+          GV.setLinkage(GlobalValue::ExternalLinkage);
+    }
 
+    // Remove anything we didn't decide to export.
     createGlobalDCEPass()->runOnModule(StubModule);
   }
 
-  // Make weak definitions for everything defined in a stub library or an
-  // external library. That way we can link against the muxed library even if
-  // we're not linking against that particular stub library.
+  // Make weak definitions for everything declared in the merged module. That
+  // way we can link against the merged library even if we're not linking
+  // against any particular stub library.
   for (GlobalObject &GO : M->global_objects()) {
     if (!GO.isDeclarationForLinker())
+      continue;
+
+    if (symbolInSection("mux-always-defined-elsewhere", "", GO.getName()))
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
@@ -439,8 +572,6 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
                            false);
       }
     } else if (Function *F = dyn_cast<Function>(&GO)) {
-      if (F->isIntrinsic())
-        continue;
       if (!WeakModule) {
         F->deleteBody();
         F->setComdat(nullptr);
@@ -467,42 +598,45 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     }
   }
 
-  if (NoUnmuxedDefs) {
-    for (GlobalObject &GO : M->global_objects()) {
-      if (!GO.isDeclaration() && GO.isInterposable()) {
-        GO.setLinkage(GO.hasLinkOnceLinkage() ? GlobalValue::LinkOnceODRLinkage
-                                              : GlobalValue::WeakODRLinkage);
-      }
-    }
-  }
-
-  if (NoUnmuxedUsers) {
-    StringSet<> MustExport;
-    MustExport.insert("llvm.used");
-    MustExport.insert("llvm.compiler.used");
-    MustExport.insert("llvm.global_ctors");
-    MustExport.insert("llvm.global_dtors");
-    MustExport.insert("main");
-    MustExport.insert("__bcdb_unreachable_function_called");
-    MustExport.insert("__bcdb_weak_definition_called");
-    for (auto &Item : StubModules) {
-      Module &StubModule = *Item.second;
-      for (GlobalObject &GO : StubModule.global_objects())
-        if (GO.isDeclarationForLinker())
-          MustExport.insert(GO.getName());
-    }
-    for (GlobalObject &GO : M->global_objects()) {
-      if (!GO.isDeclarationForLinker() && !GO.hasLocalLinkage() &&
-          !MustExport.count(GO.getName())) {
-        GO.setLinkage(GlobalValue::InternalLinkage);
-      }
-    }
-  }
-
-  DiagnoseUnreachableFunctions(*M, UndefFuncType);
+  StringSet<> MustExport;
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
-    DiagnoseUnreachableFunctions(StubModule, UndefFuncType);
+    for (GlobalObject &GO : StubModule.global_objects())
+      if (GO.isDeclarationForLinker())
+        MustExport.insert(GO.getName());
+  }
+
+  for (auto &Item : GlobalItems) {
+    GlobalItem &GI = Item.second;
+    if (!GI.DefineInMergedModule)
+      continue;
+    GlobalValue *GV = M->getNamedValue(GI.NewName);
+    assert(!GV->isDeclarationForLinker());
+    if (GlobalObject *GO = dyn_cast<GlobalObject>(GV)) {
+      // If we know there's only one possible definition, use a
+      // non-interposable linkage and a protected visibility.
+      if (!mayBeDefinedElsewhere(GI.ModuleName, GI.NewName)) {
+        if (!GO->isDefinitionExact())
+          GO->setLinkage(GlobalValue::ExternalLinkage);
+        if (!GO->hasLocalLinkage() && GO->hasDefaultVisibility())
+          GO->setVisibility(GlobalValue::ProtectedVisibility);
+      }
+
+      // If we know there are no users outside the merged module, internalize
+      // it.
+      if (!mayBeUsedElsewhere(GI.ModuleName, GI.NewName) &&
+          !MustExport.count(GI.NewName)) {
+        GO->setLinkage(GlobalValue::InternalLinkage);
+      }
+    }
+  }
+
+  if (TrapUnreachableFunctions) {
+    DiagnoseUnreachableFunctions(*M, UndefFuncType);
+    for (auto &Item : StubModules) {
+      Module &StubModule = *Item.second;
+      DiagnoseUnreachableFunctions(StubModule, UndefFuncType);
+    }
   }
 
   return M;
