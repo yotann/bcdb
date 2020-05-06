@@ -40,17 +40,15 @@ static cl::opt<bool> AllowSpuriousExports(
              "modules didn't export"),
     cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
-static cl::opt<bool>
-    NoUnmuxedDefs("no-unmuxed-defs",
-                  cl::desc("Assume no symbol imported by a muxed module is "
-                           "exported by a module that isn't muxed"),
-                  cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<bool> KnownDynamicDefs(
+    "known-dynamic-defs",
+    cl::desc("All dynamic definitions are listed with --mux-symbol-list"),
+    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
-static cl::opt<bool>
-    NoUnmuxedUsers("no-unmuxed-users",
-                   cl::desc("Assume no symbol exported by a muxed module is "
-                            "imported by a module that isn't muxed"),
-                   cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<bool> KnownDynamicUses(
+    "known-dynamic-uses",
+    cl::desc("All dynamic uses are listed with --mux-symbol-list"),
+    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
 static cl::opt<bool>
     TrapUnreachableFunctions("trap-unreachable-functions",
@@ -118,8 +116,8 @@ private:
                        StringRef Category = StringRef());
   bool symbolInSection(StringRef Section, GlobalItem &GI,
                        StringRef Category = StringRef());
-  bool mayBeDefinedElsewhere(StringRef ModuleName, StringRef Name);
-  bool mayBeUsedElsewhere(StringRef ModuleName, StringRef Name);
+  bool mayBeDefinedDynamically(StringRef ModuleName, StringRef Name);
+  bool mayBeUsedDynamically(StringRef ModuleName, StringRef Name);
   void MakeAvailableExternally(GlobalValue *GV);
 
   std::unique_ptr<SpecialCaseList> DefaultSymbolList, SymbolList;
@@ -163,20 +161,20 @@ bool Mux2Merger::symbolInSection(StringRef Section, GlobalItem &GI,
   return symbolInSection(Section, GI.ModuleName, GI.Name, Category);
 }
 
-bool Mux2Merger::mayBeDefinedElsewhere(StringRef ModuleName, StringRef Name) {
-  if (!NoUnmuxedDefs)
+bool Mux2Merger::mayBeDefinedDynamically(StringRef ModuleName, StringRef Name) {
+  if (!KnownDynamicDefs)
     return true;
-  if (symbolInSection("mux-defined-elsewhere", ModuleName, Name))
+  if (symbolInSection("mux-dynamic-defs", ModuleName, Name))
     return true;
   if (symbolInSection("mux-always-defined-elsewhere", ModuleName, Name))
     return true;
   return false;
 }
 
-bool Mux2Merger::mayBeUsedElsewhere(StringRef ModuleName, StringRef Name) {
-  if (!NoUnmuxedUsers)
+bool Mux2Merger::mayBeUsedDynamically(StringRef ModuleName, StringRef Name) {
+  if (!KnownDynamicUses)
     return true;
-  if (symbolInSection("mux-used-elsewhere", ModuleName, Name))
+  if (symbolInSection("mux-dynamic-uses", ModuleName, Name))
     return true;
   return false;
 }
@@ -214,7 +212,7 @@ void Mux2Merger::PrepareToRename() {
   // our definition or the external one.
   for (auto &Item : GlobalItems) {
     GlobalItem &GI = Item.second;
-    if (mayBeDefinedElsewhere(GI.ModuleName, GI.Name))
+    if (mayBeDefinedDynamically(GI.ModuleName, GI.Name))
       GlobalDefinitions.erase(GI.Name);
   }
 
@@ -244,7 +242,7 @@ void Mux2Merger::PrepareToRename() {
     } else if (ExportedCount[GI.Name] == 1) {
       if (AllowSpuriousExports)
         GI.DefineInMergedModule = true;
-      else if (!mayBeUsedElsewhere(GI.ModuleName, GI.Name))
+      else if (!mayBeUsedDynamically(GI.ModuleName, GI.Name))
         GI.DefineInMergedModule = true;
       else
         GI.DefineInMergedModule = false;
@@ -625,7 +623,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     if (GlobalObject *GO = dyn_cast<GlobalObject>(GV)) {
       // If we know there's only one possible definition, use a
       // non-interposable linkage and a protected visibility.
-      if (!mayBeDefinedElsewhere(GI.ModuleName, GI.NewName)) {
+      if (!mayBeDefinedDynamically(GI.ModuleName, GI.NewName)) {
         if (!GO->isDefinitionExact())
           GO->setLinkage(GlobalValue::ExternalLinkage);
         if (!GO->hasLocalLinkage() && GO->hasDefaultVisibility())
@@ -634,7 +632,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
 
       // If we know there are no users outside the merged module, internalize
       // it.
-      if (!mayBeUsedElsewhere(GI.ModuleName, GI.NewName) &&
+      if (!mayBeUsedDynamically(GI.ModuleName, GI.NewName) &&
           !MustExport.count(GI.NewName)) {
         GO->setLinkage(GlobalValue::InternalLinkage);
       }

@@ -1,12 +1,12 @@
 # Force these symbols to go in the actual executable, not the muxed library.
-[mux-defined-elsewhere]
+[mux-dynamic-defs]
 fun:main
 global:llvm\.used
 global:llvm\.compiler\.used
 global:llvm\.global_ctors
 global:llvm\.global_dtors
 
-[mux-used-elsewhere]
+[mux-dynamic-uses]
 fun:__bcdb_unreachable_function_called
 fun:__bcdb_weak_definition_called
 fun:main
