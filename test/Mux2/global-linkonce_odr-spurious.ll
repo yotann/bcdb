@@ -1,6 +1,6 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --allow-spurious-exports
+; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --allow-spurious-exports --known-rtld-local
 ; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=STUB  %s
 ; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s

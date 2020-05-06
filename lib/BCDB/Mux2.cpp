@@ -50,6 +50,11 @@ static cl::opt<bool> KnownDynamicUses(
     cl::desc("All dynamic uses are listed with --mux-symbol-list"),
     cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
+static cl::opt<bool> KnownRTLDLocal(
+    "known-rtld-local",
+    cl::desc("All RTLD_LOCAL declarations are listed with --mux-symbol-list"),
+    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+
 static cl::opt<bool>
     TrapUnreachableFunctions("trap-unreachable-functions",
                              cl::desc("Print an error message at run time if "
@@ -118,6 +123,7 @@ private:
                        StringRef Category = StringRef());
   bool mayBeDefinedDynamically(StringRef ModuleName, StringRef Name);
   bool mayBeUsedDynamically(StringRef ModuleName, StringRef Name);
+  bool mayBeRTLDLocal(StringRef ModuleName, StringRef Name);
   void MakeAvailableExternally(GlobalValue *GV);
 
   std::unique_ptr<SpecialCaseList> DefaultSymbolList, SymbolList;
@@ -145,14 +151,14 @@ Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module)
 
 bool Mux2Merger::symbolInSection(StringRef Section, StringRef ModuleName,
                                  StringRef Name, StringRef Category) {
-  if (DefaultSymbolList->inSection(Section, "fun", Name))
-    return true;
-  if (DefaultSymbolList->inSection(Section, "global", Name))
-    return true;
-  if (SymbolList->inSection(Section, "fun", Name))
-    return true;
-  if (SymbolList->inSection(Section, "global", Name))
-    return true;
+  for (SpecialCaseList *SCL : {DefaultSymbolList.get(), SymbolList.get()}) {
+    if (SCL->inSection(Section, "fun", Name))
+      return true;
+    if (SCL->inSection(Section, "global", Name))
+      return true;
+    if (SCL->inSection(Section, "lib", ModuleName))
+      return true;
+  }
   return false;
 }
 
@@ -177,6 +183,12 @@ bool Mux2Merger::mayBeUsedDynamically(StringRef ModuleName, StringRef Name) {
   if (symbolInSection("mux-dynamic-uses", ModuleName, Name))
     return true;
   return false;
+}
+
+bool Mux2Merger::mayBeRTLDLocal(StringRef ModuleName, StringRef Name) {
+  if (!KnownRTLDLocal)
+    return true;
+  return symbolInSection("mux-rtld-local", ModuleName, Name);
 }
 
 void Mux2Merger::PrepareToRename() {
@@ -249,6 +261,23 @@ void Mux2Merger::PrepareToRename() {
     } else {
       GI.DefineInMergedModule = false;
     }
+
+    // Some declarations can only be resolved correctly from the stub module.
+    // If the GI refers to such a declaration, keep it in the stub module.
+    for (auto &Ref : GI.Refs) {
+      if (!mayBeRTLDLocal(GI.ModuleName, Ref.first))
+        continue;
+      // If we can statically resolve the reference, we don't need to worry
+      // about RTLD_LOCAL.
+      auto Res = Resolve(GI.ModuleName, Ref.first);
+      if (Res.GI)
+        continue;
+      // Move the definition to the stub module.
+      GI.DefineInMergedModule = false;
+      GlobalValue *GV = ModRemainders[GI.ModuleName]->getNamedValue(Ref.first);
+      if (GV && !GV->isDeclaration())
+        GlobalItems[GV].DefineInMergedModule = false;
+    }
   }
 
   // Some global references must stay within the same module (an alias to an
@@ -274,19 +303,27 @@ void Mux2Merger::PrepareToRename() {
       break;
   }
 
+  // Find GIs that are directly referenced from the merged module or the stub
+  // module.
+  for (auto &Item : GlobalItems) {
+    GlobalItem &GI = Item.second;
+    bool RefFromMerged = GI.DefineInMergedModule || !GI.PartID.empty();
+    for (auto &Ref : GI.Refs) {
+      auto Res = Resolve(GI.ModuleName, Ref.first);
+      if (Res.GI && RefFromMerged)
+        Res.GI->NeededInMergedModule = true;
+      if (Res.GI && !RefFromMerged)
+        Res.GI->NeededInStubModule = true;
+    }
+  }
+
   for (auto &Item : GlobalItems) {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
 
     GI.AvailableExternallyInMergedModule = false;
-    if (!GI.DefineInMergedModule && DirectlyReferenced.count(&GI) && WeakModule)
+    if (!GI.DefineInMergedModule && GI.NeededInMergedModule && WeakModule)
       GI.AvailableExternallyInMergedModule = true;
-
-    Module &StubModule = *StubModules[GI.ModuleName];
-    GlobalValue *StubInStubModule = StubModule.getNamedValue(GI.Name);
-
-    // TODO: only do this if the use is being kept in the stub module.
-    GI.NeededInStubModule = !StubInStubModule->use_empty();
 
     if (GV->hasLocalLinkage() && GI.DefineInMergedModule &&
         GI.NeededInStubModule) {
@@ -295,12 +332,13 @@ void Mux2Merger::PrepareToRename() {
       // to the private symbol. Rename the private global so we can safely
       // export it.
       GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
+    } else if (GV->hasLocalLinkage() && !GI.DefineInMergedModule &&
+               GI.NeededInMergedModule) {
+      GI.NewName = ReserveName("__bcdb_private_" + GI.Name);
     } else if (GI.AvailableExternallyInMergedModule &&
                ExportedCount[GI.Name] > 1) {
       // Add an alias, so we can make an available_externally copy for this
       // specific definition.
-      // TODO: only do this if something will actually use the
-      // available_externally copy.
       GI.NewName = ReserveName("__bcdb_direct_" + GI.Name);
     } else if (!GV->hasLocalLinkage()) {
       // Keep the existing name.
@@ -405,11 +443,17 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
     assert(BodyDecl->getFunctionType() ==
            cast<Function>(Def)->getFunctionType());
     Merger::AddPartStub(StubModule, GI, BodyDecl, Decl, GI.Name);
+    GlobalValue *StubStub = StubModule.getNamedValue(GI.Name);
 
-    // If we have an alternate NewName, we need an alias.
-    if (GI.Name != GI.NewName) {
-      GlobalAlias::create(GlobalValue::ExternalLinkage, GI.NewName,
-                          StubModule.getNamedValue(GI.Name));
+    if (GlobalValue::isLocalLinkage(LinkageMap[StubStub]) &&
+        GI.NeededInMergedModule) {
+      LinkageMap.erase(StubStub);
+      StubStub->setName(GI.NewName);
+      StubStub->setLinkage(GlobalValue::ExternalLinkage);
+      StubStub->setVisibility(GlobalValue::ProtectedVisibility);
+    } else if (GI.Name != GI.NewName) {
+      // If we have an alternate NewName, we need an alias.
+      GlobalAlias::create(GlobalValue::ExternalLinkage, GI.NewName, StubStub);
     }
 
     if (GI.AvailableExternallyInMergedModule) {
@@ -459,8 +503,12 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
       NewGV->setDSOLocal(GV->isDSOLocal());
 #endif
 
-      // If we have an alternate NewName, we need an alias.
-      if (GI->Name != GI->NewName) {
+      if (NewGV->hasLocalLinkage() && GI->NeededInMergedModule) {
+        NewGV->setName(GI->NewName);
+        NewGV->setLinkage(GlobalValue::ExternalLinkage);
+        NewGV->setVisibility(GlobalValue::ProtectedVisibility);
+      } else if (GI->Name != GI->NewName) {
+        // If we have an alternate NewName, we need an alias.
         GlobalAlias::create(GlobalValue::ExternalLinkage, GI->NewName, NewGV);
       }
 

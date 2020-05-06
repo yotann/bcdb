@@ -81,6 +81,10 @@ public:
     // For mux2 only, whether we need a declaration of NewName in the stub
     // module. Applies only if DefineInMergedModule is true.
     bool NeededInStubModule = false;
+
+    // For mux2 only, whether we need a declaration of NewName in the merged
+    // module. Applies only if DefineInMergedModule is false.
+    bool NeededInMergedModule = false;
   };
 
 protected:
