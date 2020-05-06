@@ -609,6 +609,8 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     if (!GI.DefineInMergedModule)
       continue;
     GlobalValue *GV = M->getNamedValue(GI.NewName);
+    if (!GV)
+      continue; // globals can be removed by globaldce, above
     assert(!GV->isDeclarationForLinker());
     if (GlobalObject *GO = dyn_cast<GlobalObject>(GV)) {
       // If we know there's only one possible definition, use a
