@@ -18,6 +18,7 @@
 #include <set>
 
 #include "Merge.h"
+#include "Util.h"
 #include "bcdb/LLVMCompat.h"
 
 namespace {
@@ -184,7 +185,7 @@ void Mux2Merger::PrepareToRename() {
   // Make stub modules.
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
-    std::unique_ptr<Module> M = CloneModule(*Item.second);
+    std::unique_ptr<Module> M = CloneModuleCorrectly(*Item.second);
     // Make all definitions internal by default, since the actual definition
     // will probably be in the merged module. That will be changed in
     // LoadRemainder if necessary.
@@ -252,25 +253,27 @@ void Mux2Merger::PrepareToRename() {
     }
   }
 
-  // If an alias gets defined in a stub module, so must the aliasee.
-  for (auto &Item : GlobalItems) {
-    GlobalValue *GV = Item.first;
-    GlobalItem &GI = Item.second;
-    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV)) {
-      GlobalItem &Aliasee = GlobalItems[GA->getBaseObject()];
-      if (!GI.DefineInMergedModule)
-        Aliasee.DefineInMergedModule = false;
+  // Some global references must stay within the same module (an alias to an
+  // aliasee, or a global constant to a blockaddress). Ensure that if either
+  // part is put in the stub module, the other part is too.
+  while (true) {
+    bool Changed = false;
+    for (auto &Item : GlobalItems) {
+      GlobalValue *GV = Item.first;
+      GlobalItem &GI = Item.second;
+      SmallPtrSet<GlobalValue *, 8> ForcedSameModule;
+      FindGlobalReferences(GV, &ForcedSameModule);
+      for (GlobalValue *TargetGV : ForcedSameModule) {
+        GlobalItem &Target = GlobalItems[TargetGV];
+        if (GI.DefineInMergedModule != Target.DefineInMergedModule) {
+          Target.DefineInMergedModule = false;
+          GI.DefineInMergedModule = false;
+          Changed = true;
+        }
+      }
     }
-  }
-  // If an aliasee gets defined in a stub module, so must the alias.
-  for (auto &Item : GlobalItems) {
-    GlobalValue *GV = Item.first;
-    GlobalItem &GI = Item.second;
-    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV)) {
-      GlobalItem &Aliasee = GlobalItems[GA->getBaseObject()];
-      if (!Aliasee.DefineInMergedModule)
-        GI.DefineInMergedModule = false;
-    }
+    if (!Changed)
+      break;
   }
 
   for (auto &Item : GlobalItems) {
@@ -336,21 +339,25 @@ void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
 #endif
 }
 
-static GlobalObject *ReplaceAliasWithDeclaration(GlobalAlias *GA) {
-  Type *Type = GA->getValueType();
+static GlobalObject *ReplaceWithDeclaration(GlobalValue *GV) {
+  Type *Type = GV->getValueType();
   GlobalObject *Decl;
   if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
     Decl = Function::Create(FType, GlobalValue::ExternalLinkage, "",
-                            GA->getParent());
+                            GV->getParent());
   } else {
-    GlobalVariable *Base = cast<GlobalVariable>(GA->getBaseObject());
-    Decl = new GlobalVariable(*GA->getParent(), Type, Base->isConstant(),
+    GlobalVariable *Base;
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
+      Base = cast<GlobalVariable>(GA->getBaseObject());
+    else
+      Base = cast<GlobalVariable>(GV);
+    Decl = new GlobalVariable(*GV->getParent(), Type, Base->isConstant(),
                               GlobalValue::ExternalLinkage, nullptr);
     Decl->setThreadLocalMode(Base->getThreadLocalMode());
   }
-  std::string Name = GA->getName();
-  GA->replaceAllUsesWith(Decl);
-  GA->eraseFromParent();
+  std::string Name = GV->getName();
+  GV->replaceAllUsesWith(Decl);
+  GV->eraseFromParent();
   Decl->setName(Name);
   return Decl;
 }
@@ -438,9 +445,12 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
       NewGV->setName(GI->NewName);
       MakeAvailableExternally(NewGV);
 
-      // If it's an alias, replace it with a declaration in the stub module.
-      if (GlobalAlias *GA = dyn_cast<GlobalAlias>(NewGV))
-        NewGV = ReplaceAliasWithDeclaration(GA);
+      // If it's an alias or uses blockaddresses, replace it with a declaration
+      // in the stub module.
+      SmallPtrSet<GlobalValue *, 8> ForcedSameModule;
+      FindGlobalReferences(NewGV, &ForcedSameModule);
+      if (!ForcedSameModule.empty())
+        NewGV = ReplaceWithDeclaration(NewGV);
 
     } else {
       // Export the definition from the stub module.

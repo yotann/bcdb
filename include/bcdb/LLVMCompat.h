@@ -5,16 +5,6 @@
 
 #include <llvm/Config/llvm-config.h>
 
-#if LLVM_VERSION_MAJOR < 7 && defined(LLVM_TRANSFORMS_UTILS_CLONING_H)
-namespace llvm {
-static std::unique_ptr<Module>
-    LLVM_ATTRIBUTE_UNUSED CloneModule(const Module &M) {
-  ValueToValueMapTy VMap;
-  return CloneModule(&M, VMap);
-}
-} // end namespace llvm
-#endif
-
 #if LLVM_VERSION_MAJOR < 7 && defined(LLVM_BITCODE_BITCODEWRITER_H)
 namespace llvm {
 static void LLVM_ATTRIBUTE_UNUSED WriteBitcodeToFile(const Module &M,
