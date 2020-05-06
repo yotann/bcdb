@@ -12,7 +12,6 @@
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/SpecialCaseList.h>
-#include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
@@ -128,8 +127,7 @@ private:
 };
 
 Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module)
-    : Merger(bcdb), SymbolList(SpecialCaseList::createOrDie(
-                        SpecialCaseFilename, *vfs::getRealFileSystem())) {
+    : Merger(bcdb), SymbolList(createSpecialCaseList(SpecialCaseFilename)) {
   std::string Error;
   DefaultSymbolList =
       SpecialCaseList::create(LoadDefaultSymbolList().get(), Error);

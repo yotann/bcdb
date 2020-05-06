@@ -5,13 +5,6 @@
 
 #include <llvm/Config/llvm-config.h>
 
-#if LLVM_VERSION_MAJOR < 6 && defined(LLVM_SUPPORT_TOOLOUTPUTFILE_H)
-namespace llvm {
-class tool_output_file;
-using ToolOutputFile = tool_output_file;
-} // end namespace llvm
-#endif
-
 #if LLVM_VERSION_MAJOR < 7 && defined(LLVM_TRANSFORMS_UTILS_CLONING_H)
 namespace llvm {
 static std::unique_ptr<Module>
@@ -90,6 +83,23 @@ static inline void eraseModuleFlag(llvm::Module &M, llvm::StringRef Key) {
   for (auto &Flag : Flags)
     if (Flag.Key->getString() != Key)
       M.addModuleFlag(Flag.Behavior, Flag.Key->getString(), Flag.Val);
+}
+} // end namespace bcdb
+#endif
+
+#if defined(LLVM_SUPPORT_SPECIALCASELIST_H)
+#if LLVM_VERSION_MAJOR >= 10
+#include <llvm/Support/VirtualFileSystem.h>
+#endif
+namespace bcdb {
+static inline std::unique_ptr<llvm::SpecialCaseList>
+createSpecialCaseList(const std::vector<std::string> &Paths) {
+#if LLVM_VERSION_MAJOR < 10
+  return llvm::SpecialCaseList::createOrDie(Paths);
+#else
+  return llvm::SpecialCaseList::createOrDie(Paths,
+                                            *llvm::vfs::getRealFileSystem());
+#endif
 }
 } // end namespace bcdb
 #endif

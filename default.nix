@@ -18,10 +18,6 @@ in
 
 with import nixpkgs {};
 rec {
-  bcdb-llvm5 = callPackage ./build.nix {
-    llvm = debugLLVM llvmPackages_5;
-    clang = clang_5;
-  };
   bcdb-llvm6 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_6;
     clang = clang_6;

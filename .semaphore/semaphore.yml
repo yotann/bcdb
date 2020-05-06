@@ -23,7 +23,6 @@ blocks:
           matrix:
             - env_var: A
               values:
-                - bcdb-llvm5
                 - bcdb-llvm6
                 - bcdb-llvm7
                 - bcdb-llvm8

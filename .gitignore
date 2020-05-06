@@ -1,4 +1,5 @@
 # Python byte code files
+__pycache__/
 *.pyc
 
 # Vi swap files
