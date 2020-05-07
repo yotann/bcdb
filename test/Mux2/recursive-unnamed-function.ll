@@ -1,3 +1,5 @@
+; REQUIRES: llvm10
+
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
 ; RUN: bcdb mux2 -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so
@@ -13,7 +15,7 @@ define void @func() unnamed_addr {
 ; Function Attrs: nounwind willreturn
 declare void @llvm.assume(i1) #0
 
-attributes #0 = { nounwind willreturn }
+attributes #0 = { nounwind }
 
 ; MUXED: @func = internal alias void (), void ()* @__bcdb_body_func
 ; MUXED: define protected void @__bcdb_body_func()

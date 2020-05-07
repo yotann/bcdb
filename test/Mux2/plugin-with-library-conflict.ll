@@ -65,7 +65,7 @@ declare dso_local i8* @dlopen(i8*, i32) local_unnamed_addr
 
 declare dso_local i8* @dlsym(i8*, i8*) local_unnamed_addr
 
-define dso_local i32 @main(i32 %0, i8** nocapture readonly %1) local_unnamed_addr {
+define dso_local i32 @main(i32, i8** nocapture readonly) local_unnamed_addr {
   %3 = getelementptr inbounds i8*, i8** %1, i64 1
   %4 = load i8*, i8** %3, align 8
   %5 = tail call i8* @dlopen(i8* %4, i32 2)
