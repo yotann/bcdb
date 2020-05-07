@@ -12,10 +12,10 @@ define weak i32 @func() {
 
 ; MUXED-NOT: @global
 ; MUXED-NOT: @func
-; MUXED: define protected i32 @__bcdb_id_1()
+; MUXED: define protected i32 @__bcdb_body_func()
 ; MUXED-NEXT: ret i32 -1000
 
 ; STUB: @global = weak global i32 ()* @func
-; STUB: declare i32 @__bcdb_id_1()
+; STUB: declare i32 @__bcdb_body_func()
 ; STUB: define weak i32 @func()
-; STUB-NEXT: call i32 @__bcdb_id_1()
+; STUB-NEXT: call i32 @__bcdb_body_func()

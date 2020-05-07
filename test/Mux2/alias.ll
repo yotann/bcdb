@@ -12,13 +12,13 @@ define void @target() {
   ret void
 }
 
-; MUXED: define protected void @__bcdb_id_1()
+; MUXED: define protected void @__bcdb_body_target()
 ; MUXED-NEXT: call void @alias()
 ; MUXED: declare extern_weak void @alias()
 
 ; PROG: @alias = alias void (), void ()* @target
-; PROG: declare void @__bcdb_id_1()
+; PROG: declare void @__bcdb_body_target()
 ; PROG: define void @target()
-; PROG-NEXT: call void @__bcdb_id_1()
+; PROG-NEXT: call void @__bcdb_body_target()
 
 ; WEAK: define weak void @alias()

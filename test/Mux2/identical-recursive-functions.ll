@@ -13,11 +13,11 @@ define linkonce_odr void @f() comdat {
   ret void
 }
 
-; MUXED-DAG: define protected void @__bcdb_id_1()
+; MUXED-DAG: define protected void @__bcdb_body_f()
 ; MUXED-DAG: call void @f()
-; MUXED-DAG: define protected void @__bcdb_id_1.0()
+; MUXED-DAG: define protected void @__bcdb_body_g()
 ; MUXED-DAG: call void @g()
 ; F: define weak_odr void @f() comdat
-; F-NEXT: tail call void @__bcdb_id_{{.*}}()
+; F-NEXT: tail call void @__bcdb_body_f()
 ; G: define weak_odr void @g() comdat
-; G-NEXT: tail call void @__bcdb_id_{{.*}}()
+; G-NEXT: tail call void @__bcdb_body_g()

@@ -17,20 +17,20 @@ define weak_odr void @target2() {
   ret void
 }
 
-; MUXED: define protected void @__bcdb_id_1()
+; MUXED: define protected void @__bcdb_body_target1()
 ; MUXED-NEXT: call void @alias1()
 ; MUXED: declare extern_weak void @alias1()
-; MUXED: define protected void @__bcdb_id_2()
+; MUXED: define protected void @__bcdb_body_target2()
 ; MUXED-NEXT: ret void
 
 ; PROG: @alias1 = weak_odr alias void (), void ()* @target1
 ; PROG: @alias2 = weak_odr alias void (), void ()* @target2
-; PROG: declare void @__bcdb_id_1()
+; PROG: declare void @__bcdb_body_target1()
 ; PROG: define weak_odr void @target1()
-; PROG-NEXT: call void @__bcdb_id_1()
-; PROG: declare void @__bcdb_id_2()
+; PROG-NEXT: call void @__bcdb_body_target1()
+; PROG: declare void @__bcdb_body_target2()
 ; PROG: define weak_odr void @target2()
-; PROG-NEXT: call void @__bcdb_id_2()
+; PROG-NEXT: call void @__bcdb_body_target2()
 
 ; WEAK: define weak void @alias1()
 ; WEAK-NOT: @target1

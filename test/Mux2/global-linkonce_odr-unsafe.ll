@@ -13,10 +13,10 @@ define i8* @f() {
 }
 
 ; MUXED: @x = internal constant i8 1, comdat
-; MUXED: define internal i8* @__bcdb_id_
+; MUXED: define internal i8* @__bcdb_body_f()
 ; MUXED-NEXT: ret i8* @x
 ; MUXED: define internal i8* @f()
-; MUXED-NEXT: call i8* @__bcdb_id_
+; MUXED-NEXT: call i8* @__bcdb_body_f()
 
 ; STUB-NOT: @x
 ; STUB-NOT: @f

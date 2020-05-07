@@ -19,14 +19,14 @@ define weak_odr void @target2() {
 
 ; MUXED: @alias1 = weak_odr alias void (), void ()* @target1
 ; MUXED: @alias2 = weak_odr alias void (), void ()* @target2
-; MUXED: define internal void @__bcdb_id_1()
+; MUXED: define internal void @__bcdb_body_target1()
 ; MUXED-NEXT: call void @alias1()
 ; MUXED: define internal void @target1()
-; MUXED-NEXT: call void @__bcdb_id_1()
-; MUXED: define internal void @__bcdb_id_2()
+; MUXED-NEXT: call void @__bcdb_body_target1()
+; MUXED: define internal void @__bcdb_body_target2()
 ; MUXED-NEXT: ret void
 ; MUXED: define internal void @target2()
-; MUXED-NEXT: call void @__bcdb_id_2()
+; MUXED-NEXT: call void @__bcdb_body_target2()
 
 ; PROG-NOT: @alias1
 ; PROG-NOT: @target1

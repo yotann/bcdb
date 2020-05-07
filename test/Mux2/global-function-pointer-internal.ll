@@ -26,7 +26,7 @@ define i32 @main(i32, i8**) {
 ; MUXED: @global = available_externally global void ()* @__bcdb_private_func
 ; MUXED: @global2 = internal global void ()* @__bcdb_private_func
 ; MUXED: define protected void @__bcdb_private_func()
-; MUXED-NEXT: call void @__bcdb_id_{{.*}}()
+; MUXED-NEXT: call void @__bcdb_body_func()
 
 ; STUB-NOT: @global2
 ; STUB-NOT: @__bcdb_private_global2

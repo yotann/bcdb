@@ -429,7 +429,7 @@ void Merger::RenameEverything() {
         }
       } else {
         if (!Item->PartID.empty() && Item->NewDefName.empty())
-          Item->NewDefName = ReserveName("__bcdb_id_" + Item->PartID);
+          Item->NewDefName = ReserveName("__bcdb_body_" + Item->Name);
       }
       if (Item->NewName.empty())
         Item->NewName = ReserveName(Item->Name);

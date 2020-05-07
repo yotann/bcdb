@@ -13,7 +13,7 @@ define i8* @f() {
 }
 
 ; MUXED: @x = extern_weak constant i8
-; MUXED: define protected i8* @__bcdb_id_
+; MUXED: define protected i8* @__bcdb_body_f()
 ; MUXED-NEXT: ret i8* @x
 
 ; STUB: @x = weak_odr constant i8 1, comdat

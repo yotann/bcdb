@@ -13,12 +13,12 @@ define void @bar() {
   ret void
 }
 
-; MUXED: define internal void @__bcdb_id_1()
+; MUXED: define internal void @__bcdb_body_foo()
 ; MUXED: define internal void @foo()
-; MUXED-NEXT: tail call void @__bcdb_id_1()
-; MUXED: define protected void @__bcdb_id_2()
+; MUXED-NEXT: tail call void @__bcdb_body_foo()
+; MUXED: define protected void @__bcdb_body_bar()
 ; MUXED-NEXT: call void @foo()
 
-; STUB: declare void @__bcdb_id_2()
+; STUB: declare void @__bcdb_body_bar()
 ; STUB: define void @bar()
-; STUB-NEXT: tail call void @__bcdb_id_2()
+; STUB-NEXT: tail call void @__bcdb_body_bar()
