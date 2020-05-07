@@ -101,7 +101,7 @@ protected:
 
   BCDB &bcdb;
   std::unique_ptr<Module> MergedModule;
-  IRMover MergedModuleMover;
+  std::unique_ptr<IRMover> MergedModuleMover;
   StringMap<std::unique_ptr<Module>> ModRemainders;
   std::map<GlobalValue *, GlobalItem> GlobalItems;
   StringMap<std::pair<std::string, GlobalValue::LinkageTypes>> AliasMap;

@@ -34,8 +34,7 @@ static cl::opt<bool> WriteGlobalGraph("write-global-graph",
 
 Merger::Merger(BCDB &bcdb)
     : bcdb(bcdb),
-      MergedModule(std::make_unique<Module>("merged", bcdb.GetContext())),
-      MergedModuleMover(*MergedModule) {}
+      MergedModule(std::make_unique<Module>("merged", bcdb.GetContext())) {}
 
 void Merger::AddModule(StringRef ModuleName) {
   // Load remainder module.
@@ -174,7 +173,7 @@ GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI, Module *M) {
 
   // Move the definition into the main module.
   if (M == MergedModule.get())
-    Err(MergedModuleMover.move(
+    Err(MergedModuleMover->move(
         std::move(MPart), {Def},
         [](GlobalValue &GV, IRMover::ValueAdder Add) {},
         /* IsPerformingImport */ false));
@@ -305,7 +304,7 @@ void Merger::LoadRemainder(std::unique_ptr<Module> M,
   for (GlobalValue &GV : M->global_objects())
     GV.setLinkage(GlobalValue::ExternalLinkage);
 
-  Err(MergedModuleMover.move(
+  Err(MergedModuleMover->move(
       std::move(M), ValuesToLink,
       [](GlobalValue &GV, IRMover::ValueAdder Add) {},
       /* IsPerformingImport */ false));
@@ -465,11 +464,15 @@ void Merger::RenameEverything() {
 }
 
 std::unique_ptr<Module> Merger::Finish() {
+  // Create the IRMover here so it can get the up-to-date
+  // IdentifiedStructTypes.
+  MergedModuleMover = std::make_unique<IRMover>(*MergedModule);
+
   for (auto &MR : ModRemainders) {
     std::unique_ptr<Module> &M = MR.second;
-
     std::vector<GlobalItem *> GIs;
     std::map<std::string, ResolvedReference> Refs;
+    std::vector<std::pair<GlobalValue *, GlobalValue *>> StubsNeeded;
     for (auto &GV :
          concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
       if (!GV.isDeclaration()) {
@@ -477,7 +480,7 @@ std::unique_ptr<Module> Merger::Finish() {
         if (!GI.PartID.empty()) {
           GlobalValue *Def = LoadPartDefinition(GI);
           if (!GI.SkipStub)
-            AddPartStub(*MergedModule, GI, Def, &GV);
+            StubsNeeded.emplace_back(&GV, Def);
         } else {
           // FIXME: what if refs to a definition in the remainder are resolved
           // to something else?
@@ -488,6 +491,16 @@ std::unique_ptr<Module> Merger::Finish() {
         }
       }
     }
+
+    // We have to call AddPartStub() in a separate loop here because it can add
+    // new types to MergedModule, which breaks MergedModuleMover.
+    for (auto &StubNeeded : StubsNeeded) {
+      GlobalValue *GV = StubNeeded.first;
+      GlobalValue *Def = StubNeeded.second;
+      GlobalItem &GI = GlobalItems[GV];
+      AddPartStub(*MergedModule, GI, Def, GV);
+    }
+    MergedModuleMover = std::make_unique<IRMover>(*MergedModule);
 
     ApplyNewNames(*M, Refs);
     LoadRemainder(std::move(M), GIs);
