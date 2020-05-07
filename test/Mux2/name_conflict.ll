@@ -21,7 +21,7 @@ define i32 @main() {
 ; MUXED-NEXT: tail call i32 @__bcdb_body_init_player[[ID0]]()
 ; MUXED: define internal i32 @__bcdb_body_init_player[[ID1:.*]]()
 ; MUXED-NEXT: ret i32 2
-; MUXED: define protected i32 @__bcdb_private_init_player()
+; MUXED: define protected i32 @__bcdb_merged_init_player()
 ; MUXED-NEXT: tail call i32 @__bcdb_body_init_player[[ID1]]()
 
 ; ROGUE: define i32 @init_player()
@@ -30,5 +30,5 @@ define i32 @main() {
 ; ROGUE-NEXT: tail call i32 @__bcdb_body_main()
 
 ; ANGBAND-NOT: @init_player
-; ANGBAND: @player_module = global i32 ()* @__bcdb_private_init_player
-; ANGBAND: declare i32 @__bcdb_private_init_player()
+; ANGBAND: @player_module = global i32 ()* @__bcdb_merged_init_player
+; ANGBAND: declare i32 @__bcdb_merged_init_player()

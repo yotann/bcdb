@@ -11,6 +11,7 @@ optlist, args = getopt.gnu_getopt(sys.argv[1:], '', [
     'known-dynamic-uses',
     'known-rtld-local',
     'weak-library',
+    'disable-opts',
 ])
 filename, out = args
 
