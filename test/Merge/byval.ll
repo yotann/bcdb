@@ -11,4 +11,4 @@ define void @func(%struct* byval) {
   ret void
 }
 ; CHECK: define internal void @__bcdb_body_func(%{{.*}}* byval{{.*}}) {
-; CHECK: define void @func(%{{.*}}* byval{{.*}}) {
+; CHECK: define void @func(%{{.*}}* byval{{.*}}) #0 {

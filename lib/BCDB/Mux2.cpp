@@ -7,12 +7,16 @@
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/SpecialCaseList.h>
 #include <llvm/Transforms/IPO.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
 #include <set>
@@ -322,7 +326,7 @@ void Mux2Merger::PrepareToRename() {
     GlobalItem &GI = Item.second;
 
     GI.AvailableExternallyInMergedModule = false;
-    if (!GI.DefineInMergedModule && GI.NeededInMergedModule && WeakModule)
+    if (!GI.DefineInMergedModule && GI.NeededInMergedModule)
       GI.AvailableExternallyInMergedModule = true;
 
     if (GV->hasLocalLinkage() && GI.DefineInMergedModule &&
@@ -366,13 +370,20 @@ ResolvedReference Mux2Merger::Resolve(StringRef ModuleName, StringRef Name) {
 
 void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
   LinkageMap.erase(GV);
-  GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
-  if (GlobalObject *GO = dyn_cast<GlobalObject>(GV))
+  if (GlobalObject *GO = dyn_cast<GlobalObject>(GV)) {
+    GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
     GO->setComdat(nullptr);
-  GV->setVisibility(GlobalValue::DefaultVisibility);
+    GV->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
-  GV->setDSOLocal(false);
+    GV->setDSOLocal(false);
 #endif
+  } else if (isa<GlobalAlias>(GV)) {
+    GV->setLinkage(GlobalValue::InternalLinkage);
+    GV->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+    GV->setDSOLocal(true);
+#endif
+  }
 }
 
 static GlobalObject *ReplaceWithDeclaration(GlobalValue *GV) {
@@ -551,7 +562,15 @@ static void DiagnoseUnreachableFunctions(Module &M,
 
 std::unique_ptr<Module> Mux2Merger::Finish() {
   auto M = Merger::Finish();
-  createGlobalDCEPass()->runOnModule(*M);
+
+  // Run some optimizations to make use of the available_externally functions
+  // we created.
+  legacy::PassManager PM;
+  PM.add(createInstructionCombiningPass(/*ExpensiveCombines*/ false));
+  PM.add(createConstantPropagationPass());
+  PM.add(createAlwaysInlinerLegacyPass());
+  PM.add(createGlobalDCEPass());
+  PM.run(*M);
 
   Linker::linkModules(*M, LoadMuxLibrary(M->getContext()));
   FunctionType *UndefFuncType =
@@ -578,18 +597,6 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       }
     }
 
-    if (false && WeakModule) {
-      // Make weak symbols strong, to prevent them being overridden by the weak
-      // definitions in the weak library.
-      // XXX: this isn't normally necessary because glibc's ld.so doesn't care
-      // about weakness. It only matters if LD_DYNAMIC_WEAK is set at run time.
-      for (GlobalValue &GV :
-           concat<GlobalValue>(StubModule.global_objects(),
-                               StubModule.aliases(), StubModule.ifuncs()))
-        if (GV.hasLinkOnceLinkage() || GV.hasWeakLinkage())
-          GV.setLinkage(GlobalValue::ExternalLinkage);
-    }
-
     // Remove anything we didn't decide to export.
     createGlobalDCEPass()->runOnModule(StubModule);
   }
@@ -605,38 +612,21 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
-      if (!WeakModule) {
-        Var->setInitializer(nullptr);
-        Var->setComdat(nullptr);
-      }
-      if (Var->isDeclaration()) {
-        Var->setLinkage(GlobalValue::ExternalWeakLinkage);
-        Var->setVisibility(GlobalValue::DefaultVisibility);
+      Var->setInitializer(nullptr);
+      Var->setComdat(nullptr);
+      Var->setLinkage(GlobalValue::ExternalWeakLinkage);
+      Var->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
-        Var->setDSOLocal(false);
+      Var->setDSOLocal(false);
 #endif
-      } else {
-        new GlobalVariable(*WeakModule, Var->getValueType(), Var->isConstant(),
-                           GlobalValue::WeakAnyLinkage,
-                           Constant::getNullValue(Var->getValueType()),
-                           Var->getName(), nullptr, Var->getThreadLocalMode(),
-#if LLVM_VERSION_MAJOR >= 8
-                           Var->getAddressSpace(),
-#endif
-                           false);
-      }
     } else if (Function *F = dyn_cast<Function>(&GO)) {
-      if (!WeakModule) {
-        F->deleteBody();
-        F->setComdat(nullptr);
-      }
-      if (F->isDeclaration()) {
-        F->setLinkage(GlobalValue::ExternalWeakLinkage);
-        F->setVisibility(GlobalValue::DefaultVisibility);
+      F->deleteBody();
+      F->setComdat(nullptr);
+      F->setLinkage(GlobalValue::ExternalWeakLinkage);
+      F->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
-        F->setDSOLocal(false);
+      F->setDSOLocal(false);
 #endif
-      }
       if (WeakModule) {
         F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
 #if LLVM_VERSION_MAJOR >= 8

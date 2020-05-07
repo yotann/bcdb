@@ -200,13 +200,20 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
                          StringRef NewName) {
   Function *Def = cast<Function>(DefGV);
   Function *Decl = cast<Function>(DeclGV);
+  GlobalValue *StubGV;
   if (NewName.empty())
     NewName = GI.NewName;
 
   CallInst::TailCallKind TCK =
       Def->isVarArg() ? CallInst::TCK_MustTail : CallInst::TCK_Tail;
 
-  if (TCK == CallInst::TCK_MustTail && !EnableMustTail) {
+  if (DeclGV->hasGlobalUnnamedAddr() && !DefGV->isDeclaration()) {
+    // If the address of the stub doesn't matter, we can just make an alias to
+    // the body.
+    StubGV = GlobalAlias::create(Def->getLinkage(), NewName, Def);
+
+  } else if (TCK == CallInst::TCK_MustTail && !EnableMustTail &&
+             !DefGV->isDeclaration()) {
     // In theory, it should be fine to create stubs for these using musttail.
     // But LLVM's optimizations are buggy and will break the musttail call. As
     // a stopgap we just create an alias, even though this is incorrect in some
@@ -214,41 +221,45 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 
     // FIXME: Create an actual stub. Rewrite the definition to take a va_list*
     // instead of ..., then put @llvm.va_start in the stub.
+    StubGV = GlobalAlias::create(Def->getLinkage(), NewName, Def);
 
-    GlobalAlias *Stub = GlobalAlias::create(Def->getLinkage(), NewName, Def);
-    ReplaceGlobal(MergedModule, NewName, Stub);
-    LinkageMap[Stub] = Decl->getLinkage();
-    return;
+  } else {
+
+    // see llvm::MergeFunctions::writeThunk
+    Function *Stub = Function::Create(Def->getFunctionType(), Def->getLinkage(),
+                                      NewName, &MergedModule);
+    for (auto I : zip(Stub->args(), Def->args()))
+      std::get<0>(I).setName(std::get<1>(I).getName());
+    Stub->copyAttributesFrom(Def);
+    Stub->removeFnAttr(Attribute::NoInline);
+    Stub->removeFnAttr(Attribute::OptimizeNone);
+    Stub->addFnAttr(Attribute::AlwaysInline);
+
+    BasicBlock *BB = BasicBlock::Create(Stub->getContext(), "", Stub);
+    IRBuilder<> Builder(BB);
+    std::vector<Value *> Args;
+    for (auto A : zip(Stub->args(), Def->args()))
+      Args.push_back(
+          Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
+    CallInst *CI = Builder.CreateCall(Def, Args);
+    CI->setTailCallKind(TCK);
+    CI->setCallingConv(Def->getCallingConv());
+    CI->setAttributes(Def->getAttributes());
+    if (Stub->getReturnType()->isVoidTy())
+      Builder.CreateRetVoid();
+    else
+      Builder.CreateRet(CI);
+
+    if (Decl->getComdat()) {
+      Comdat *CD = MergedModule.getOrInsertComdat(Decl->getComdat()->getName());
+      CD->setSelectionKind(Decl->getComdat()->getSelectionKind());
+      Stub->setComdat(CD);
+    }
+    StubGV = Stub;
   }
 
-  // see llvm::MergeFunctions::writeThunk
-  Function *Stub = Function::Create(Def->getFunctionType(), Def->getLinkage(),
-                                    NewName, &MergedModule);
-  for (auto I : zip(Stub->args(), Def->args()))
-    std::get<0>(I).setName(std::get<1>(I).getName());
-  Stub->copyAttributesFrom(Def);
-  BasicBlock *BB = BasicBlock::Create(Stub->getContext(), "", Stub);
-  IRBuilder<> Builder(BB);
-  std::vector<Value *> Args;
-  for (auto A : zip(Stub->args(), Def->args()))
-    Args.push_back(
-        Builder.CreatePointerCast(&std::get<0>(A), std::get<1>(A).getType()));
-  CallInst *CI = Builder.CreateCall(Def, Args);
-  CI->setTailCallKind(TCK);
-  CI->setCallingConv(Def->getCallingConv());
-  CI->setAttributes(Def->getAttributes());
-  if (Stub->getReturnType()->isVoidTy())
-    Builder.CreateRetVoid();
-  else
-    Builder.CreateRet(CI);
-
-  ReplaceGlobal(MergedModule, NewName, Stub);
-  LinkageMap[Stub] = Decl->getLinkage();
-  if (Decl->getComdat()) {
-    Comdat *CD = MergedModule.getOrInsertComdat(Decl->getComdat()->getName());
-    CD->setSelectionKind(Decl->getComdat()->getSelectionKind());
-    Stub->setComdat(CD);
-  }
+  ReplaceGlobal(MergedModule, NewName, StubGV);
+  LinkageMap[StubGV] = Decl->getLinkage();
 }
 
 void Merger::LoadRemainder(std::unique_ptr<Module> M,

@@ -14,10 +14,8 @@ define void @bar() {
 }
 
 ; MUXED: define internal void @__bcdb_body_foo()
-; MUXED: define internal void @foo()
-; MUXED-NEXT: tail call void @__bcdb_body_foo()
 ; MUXED: define protected void @__bcdb_body_bar()
-; MUXED-NEXT: call void @foo()
+; MUXED-NEXT: call void @__bcdb_body_foo()
 
 ; STUB: declare void @__bcdb_body_bar()
 ; STUB: define void @bar()

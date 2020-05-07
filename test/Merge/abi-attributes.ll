@@ -6,20 +6,20 @@
 
 define inreg i32 @f.inreg.ret() { unreachable }
 ; CHECK: define internal inreg i32 @__bcdb_body_f.inreg.ret() {
-; CHECK: define inreg i32 @f.inreg.ret() {
+; CHECK: define inreg i32 @f.inreg.ret() #0 {
 
 define void @f.inreg(i32 inreg %arg) { unreachable }
 ; CHECK: define internal void @__bcdb_body_f.inreg(i32 inreg %arg) {
-; CHECK: define void @f.inreg(i32 inreg %arg) {
+; CHECK: define void @f.inreg(i32 inreg %arg) #0 {
 
 define void @f.byval(i32* byval %arg) { unreachable }
 ; CHECK: define internal void @__bcdb_body_f.byval(i32* byval{{.*}} %arg) {
-; CHECK: define void @f.byval(i32* byval{{.*}} %arg) {
+; CHECK: define void @f.byval(i32* byval{{.*}} %arg) #0 {
 
 define void @f.align(i32* align 16 %arg) { unreachable }
 ; CHECK: define internal void @__bcdb_body_f.align(i32* align 16 %arg) {
-; CHECK: define void @f.align(i32* align 16 %arg) {
+; CHECK: define void @f.align(i32* align 16 %arg) #0 {
 
 define fastcc void @f.fastcc() { unreachable }
 ; CHECK: define internal fastcc void @__bcdb_body_f.fastcc() {
-; CHECK: define fastcc void @f.fastcc() {
+; CHECK: define fastcc void @f.fastcc() #0 {

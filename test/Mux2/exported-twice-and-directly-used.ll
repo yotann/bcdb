@@ -18,14 +18,11 @@ define i32 @user() {
   ret i32 %x
 }
 
-; MUXED: @__bcdb_direct_exported_constant = available_externally constant i32 -12
 ; MUXED: define protected i32 @__bcdb_body_exported_func()
 ; MUXED-NEXT: ret i32 12
-; MUXED: define available_externally i32 @__bcdb_direct_exported_func()
-; MUXED-NEXT: call i32 @__bcdb_body_exported_func()
 ; MUXED: define protected i32 @__bcdb_body_user()
-; MUXED-NEXT: call i32 @__bcdb_direct_exported_func()
-; MUXED-NEXT: load i32, i32* @__bcdb_direct_exported_constant
+; MUXED-NEXT: call i32 @__bcdb_body_exported_func()
+; MUXED-NEXT: ret i32 -12
 
 ; PROG: @exported_constant = constant i32 -12
 ; PROG: @__bcdb_direct_exported_func = alias i32 (), i32 ()* @exported_func
@@ -35,6 +32,5 @@ define i32 @user() {
 ; PROG: define i32 @user()
 ; PROG-NEXT: call i32 @__bcdb_body_user()
 
-; WEAK: @__bcdb_direct_exported_constant = weak constant i32 0
-; WEAK: define weak i32 @__bcdb_direct_exported_func()
+; WEAK: define weak i32 @exported_func()
 ; WEAK-NEXT: call void @__bcdb_weak_definition_called
