@@ -1,6 +1,5 @@
 # Force these symbols to go in the actual executable, not the muxed library.
-[mux-dynamic-defs]
-fun:main
+[mux-unmovable]
 global:llvm\.used
 global:llvm\.compiler\.used
 global:llvm\.global_ctors

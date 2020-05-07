@@ -253,7 +253,9 @@ void Mux2Merger::PrepareToRename() {
     GlobalValue *GV = Item.first;
     GlobalItem &GI = Item.second;
 
-    if (GV->hasLocalLinkage()) {
+    if (symbolInSection("mux-unmovable", GI)) {
+      GI.DefineInMergedModule = false;
+    } else if (GV->hasLocalLinkage()) {
       GI.DefineInMergedModule = true;
     } else if (ExportedCount[GI.Name] == 1) {
       if (AllowSpuriousExports)
