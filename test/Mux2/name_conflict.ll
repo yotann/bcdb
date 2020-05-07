@@ -16,19 +16,19 @@ define i32 @main() {
   ret i32 %r
 }
 
-; MUXED: define protected i32 @__bcdb_body_init_player()
+; MUXED: define protected i32 @__bcdb_body_init_player[[ID0:.*]]()
 ; MUXED-NEXT: ret i32 1
 ; MUXED: define available_externally i32 @init_player()
-; MUXED-NEXT: call i32 @__bcdb_body_init_player()
+; MUXED-NEXT: call i32 @__bcdb_body_init_player[[ID0]]()
 ; MUXED: define protected i32 @__bcdb_body_main()
 ; MUXED-NEXT: tail call i32 (...) bitcast (i32 ()* @init_player to i32 (...)*)()
-; MUXED: define internal i32 @__bcdb_body_init_player.0()
+; MUXED: define internal i32 @__bcdb_body_init_player[[ID1:.*]]()
 ; MUXED-NEXT: ret i32 2
 ; MUXED: define protected i32 @__bcdb_private_init_player()
-; MUXED-NEXT: call i32 @__bcdb_body_init_player.0()
+; MUXED-NEXT: call i32 @__bcdb_body_init_player[[ID1]]()
 
 ; ROGUE: define i32 @init_player()
-; ROGUE-NEXT: tail call i32 @__bcdb_body_init_player()
+; ROGUE-NEXT: tail call i32 @__bcdb_body_init_player[[ID0:.*]]()
 ; ROGUE: define i32 @main()
 ; ROGUE-NEXT: tail call i32 @__bcdb_body_main()
 
