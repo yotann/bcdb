@@ -1,14 +1,14 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name f
 ; RUN: bcdb add -uri sqlite:%t.bcdb %p/Inputs/identical-recursive-functions.ll -name g
-; RUN: bcdb mux2 -uri sqlite:%t.bcdb f g -o %t --muxed-name=libmuxed.so
+; RUN: bcdb mux2 -uri sqlite:%t.bcdb f g -o %t --muxed-name=libmuxed.so --known-rtld-local
 ; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
 ; RUN: opt -verify -S < %t/f           | FileCheck --check-prefix=F     %s
 ; RUN: opt -verify -S < %t/g           | FileCheck --check-prefix=G     %s
 
 $f = comdat any
 
-define linkonce_odr void @f() comdat {
+define weak_odr void @f() comdat {
   call void @f()
   ret void
 }

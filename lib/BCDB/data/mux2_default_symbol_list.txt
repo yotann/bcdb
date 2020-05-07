@@ -17,6 +17,8 @@ global:llvm\.global_dtors
 # llvm intrinsics
 [mux-always-defined-elsewhere]
 fun:llvm\.*
+[mux-not-rtld-local]
+fun:llvm\.*
 
 # functions defined in libc that we use in mux2_library.c
 [mux-always-defined-elsewhere]

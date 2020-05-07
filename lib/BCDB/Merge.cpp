@@ -139,9 +139,11 @@ void Merger::ApplyNewNames(
   }
 }
 
-GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI) {
+GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI, Module *M) {
+  if (!M)
+    M = MergedModule.get();
   ExitOnError Err("Merger::LoadPartDefinition: ");
-  GlobalValue *Result = MergedModule->getNamedValue(GI.NewDefName);
+  GlobalValue *Result = M->getNamedValue(GI.NewDefName);
   if (Result && !Result->isDeclaration())
     return Result;
   auto MPart = Err(bcdb.GetFunctionById(GI.PartID));
@@ -171,11 +173,18 @@ GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI) {
   }
 
   // Move the definition into the main module.
-  Err(MergedModuleMover.move(
-      std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
-      /* IsPerformingImport */ false));
+  if (M == MergedModule.get())
+    Err(MergedModuleMover.move(
+        std::move(MPart), {Def},
+        [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+        /* IsPerformingImport */ false));
+  else
+    Err(IRMover(*M).move(
+        std::move(MPart), {Def},
+        [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+        /* IsPerformingImport */ false));
 
-  Result = MergedModule->getNamedValue(GI.NewDefName);
+  Result = M->getNamedValue(GI.NewDefName);
   LinkageMap[Result] = GlobalValue::InternalLinkage;
   return Result;
 }
@@ -260,6 +269,9 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 
   ReplaceGlobal(MergedModule, NewName, StubGV);
   LinkageMap[StubGV] = Decl->getLinkage();
+#if LLVM_VERSION_MAJOR >= 7
+  StubGV->setDSOLocal(Decl->isDSOLocal());
+#endif
 }
 
 void Merger::LoadRemainder(std::unique_ptr<Module> M,

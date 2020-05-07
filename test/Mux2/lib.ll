@@ -16,8 +16,9 @@ define void @set_global_to_0() {
   ret void
 }
 
-!llvm.module.flags = !{!1}
+!llvm.module.flags = !{!1, !2}
 !1 = !{i32 2, !"bcdb.elf.type", i32 3}
+!2 = !{i32 7, !"PIC Level", i32 2}
 
 
 

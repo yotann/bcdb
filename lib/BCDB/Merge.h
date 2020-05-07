@@ -85,11 +85,14 @@ public:
     // For mux2 only, whether we need a declaration of NewName in the merged
     // module. Applies only if DefineInMergedModule is false.
     bool NeededInMergedModule = false;
+
+    // For mux2 only, whether the body needs to be defined in the stub module.
+    bool BodyInStubModule = false;
   };
 
 protected:
   StringSet<> LoadPartRefs(StringRef ID, StringRef SelfName);
-  GlobalValue *LoadPartDefinition(GlobalItem &GI);
+  virtual GlobalValue *LoadPartDefinition(GlobalItem &GI, Module *M = nullptr);
   virtual void AddPartStub(Module &MergedModule, GlobalItem &GI,
                            GlobalValue *Def, GlobalValue *Decl,
                            StringRef NewName = "");

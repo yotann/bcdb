@@ -117,6 +117,7 @@ public:
 protected:
   void AddPartStub(Module &MergedModule, GlobalItem &GI, GlobalValue *Def,
                    GlobalValue *Decl, StringRef NewName) override;
+  GlobalValue *LoadPartDefinition(GlobalItem &GI, Module *M = nullptr) override;
   void LoadRemainder(std::unique_ptr<Module> M,
                      std::vector<GlobalItem *> &GIs) override;
 
@@ -190,6 +191,8 @@ bool Mux2Merger::mayBeUsedDynamically(StringRef ModuleName, StringRef Name) {
 }
 
 bool Mux2Merger::mayBeRTLDLocal(StringRef ModuleName, StringRef Name) {
+  if (symbolInSection("mux-not-rtld-local", ModuleName, Name))
+    return false;
   if (!KnownRTLDLocal)
     return true;
   return symbolInSection("mux-rtld-local", ModuleName, Name);
@@ -200,13 +203,12 @@ void Mux2Merger::PrepareToRename() {
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
     std::unique_ptr<Module> M = CloneModuleCorrectly(*Item.second);
-    // Make all definitions internal by default, since the actual definition
-    // will probably be in the merged module. That will be changed in
-    // LoadRemainder if necessary.
+    // Make all definitions external by default, so LoadPartDefinition will
+    // work correctly. That will be changed in LoadRemainder if necessary.
     for (GlobalValue &GV :
          concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
       if (!GV.isDeclarationForLinker())
-        GV.setLinkage(GlobalValue::InternalLinkage);
+        GV.setLinkage(GlobalValue::ExternalLinkage);
     }
     StubModules[Item.first()] = std::move(M);
   }
@@ -267,9 +269,12 @@ void Mux2Merger::PrepareToRename() {
     } else {
       GI.DefineInMergedModule = false;
     }
+  }
 
-    // Some declarations can only be resolved correctly from the stub module.
-    // If the GI refers to such a declaration, keep it in the stub module.
+  // Some declarations can only be resolved correctly from the stub module.
+  // If the GI refers to such a declaration, keep it in the stub module.
+  for (auto &Item : GlobalItems) {
+    GlobalItem &GI = Item.second;
     for (auto &Ref : GI.Refs) {
       if (!mayBeRTLDLocal(GI.ModuleName, Ref.first))
         continue;
@@ -280,6 +285,7 @@ void Mux2Merger::PrepareToRename() {
         continue;
       // Move the definition to the stub module.
       GI.DefineInMergedModule = false;
+      GI.BodyInStubModule = true;
       GlobalValue *GV = ModRemainders[GI.ModuleName]->getNamedValue(Ref.first);
       if (GV && !GV->isDeclaration())
         GlobalItems[GV].DefineInMergedModule = false;
@@ -313,7 +319,8 @@ void Mux2Merger::PrepareToRename() {
   // module.
   for (auto &Item : GlobalItems) {
     GlobalItem &GI = Item.second;
-    bool RefFromMerged = GI.DefineInMergedModule || !GI.PartID.empty();
+    bool RefFromMerged =
+        GI.DefineInMergedModule || (!GI.PartID.empty() && !GI.BodyInStubModule);
     for (auto &Ref : GI.Refs) {
       auto Res = Resolve(GI.ModuleName, Ref.first);
       if (Res.GI && RefFromMerged)
@@ -328,8 +335,17 @@ void Mux2Merger::PrepareToRename() {
     GlobalItem &GI = Item.second;
 
     GI.AvailableExternallyInMergedModule = false;
-    if (!GI.DefineInMergedModule && GI.NeededInMergedModule)
+    if (!GI.DefineInMergedModule && GI.NeededInMergedModule) {
       GI.AvailableExternallyInMergedModule = true;
+      // Not only is available_externally pointless for a non-constant
+      // variable, the __bcdb_direct_ alias also works incorrectly. If
+      // @__bcdb_direct_foo is an alias to @foo in the library, the program may
+      // redefine @foo in its own address space, but @__bcdb_direct_foo will
+      // still point to the library's address space.
+      if (GlobalVariable *Var = dyn_cast<GlobalVariable>(GV))
+        if (!Var->isConstant())
+          GI.AvailableExternallyInMergedModule = false;
+    }
 
     if (GV->hasLocalLinkage() && GI.DefineInMergedModule &&
         GI.NeededInStubModule) {
@@ -411,6 +427,16 @@ static GlobalObject *ReplaceWithDeclaration(GlobalValue *GV) {
   return Decl;
 }
 
+GlobalValue *Mux2Merger::LoadPartDefinition(GlobalItem &GI, Module *M) {
+  if (!GI.DefineInMergedModule && GI.BodyInStubModule) {
+    GlobalValue *Result =
+        Merger::LoadPartDefinition(GI, StubModules[GI.ModuleName].get());
+    return Result;
+  } else {
+    return Merger::LoadPartDefinition(GI, M);
+  }
+}
+
 void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
                              GlobalValue *Def, GlobalValue *Decl,
                              StringRef NewName) {
@@ -440,10 +466,12 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 #endif
     }
   } else {
-    // Export the body from the merged module.
-    LinkageMap[Def] = GlobalValue::ExternalLinkage;
-    Def->setLinkage(GlobalValue::ExternalLinkage);
-    Def->setVisibility(GlobalValue::ProtectedVisibility);
+    if (!GI.BodyInStubModule) {
+      // Export the body from the merged module.
+      LinkageMap[Def] = GlobalValue::ExternalLinkage;
+      Def->setLinkage(GlobalValue::ExternalLinkage);
+      Def->setVisibility(GlobalValue::ProtectedVisibility);
+    }
 
     // Import the body into the stub module.
     Function *BodyDecl = StubModule.getFunction(Def->getName());
@@ -469,7 +497,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
       GlobalAlias::create(GlobalValue::ExternalLinkage, GI.NewName, StubStub);
     }
 
-    if (GI.AvailableExternallyInMergedModule) {
+    if (GI.AvailableExternallyInMergedModule && !GI.BodyInStubModule) {
       // Add an available_externally definition to the merged module.
       Merger::AddPartStub(MergedModule, GI, Def, Decl, GI.NewName);
       MakeAvailableExternally(MergedModule.getNamedValue(NewName));
@@ -481,6 +509,15 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
                                std::vector<GlobalItem *> &GIs) {
   Module &StubModule = *StubModules[M->getModuleIdentifier()];
   std::vector<GlobalItem *> GIsToMerge;
+
+  // Make everything internal by default, unless we actually need it.
+  for (GlobalValue &GV :
+       concat<GlobalValue>(StubModule.global_objects(), StubModule.aliases(),
+                           StubModule.ifuncs())) {
+    if (!GV.isDeclarationForLinker() && !LinkageMap.count(&GV) &&
+        !GV.getName().startswith("__bcdb_private"))
+      GV.setLinkage(GlobalValue::InternalLinkage);
+  }
 
   for (GlobalItem *GI : GIs) {
     if (GI->DefineInMergedModule) {
@@ -498,7 +535,8 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
       // Make the stub module's version available_externally.
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       NewGV->setName(GI->NewName);
-      MakeAvailableExternally(NewGV);
+      if (!NewGV->isDeclaration())
+        MakeAvailableExternally(NewGV);
 
       // If it's an alias or uses blockaddresses, replace it with a declaration
       // in the stub module.
@@ -527,7 +565,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
 
       if (GI->AvailableExternallyInMergedModule && isa<GlobalObject>(GV)) {
         // Add an available_externally definition to the merged module.
-        // TODO: handle aliases too.
+        // TODO: handle aliases too, but only if the aliasee is defined.
         GIsToMerge.push_back(GI);
         MakeAvailableExternally(GV);
       }

@@ -16,5 +16,5 @@ define internal fastcc i32 @pymain_main() {
 }
 
 ; PROG: @Py_DebugFlag = weak global i32 0, align 4
-; PROG: define protected i32 @__bcdb_private_pymain_main()
-; PROG-NEXT: call i32 @__bcdb_body_pymain_main()
+; PROG: define protected fastcc i32 @__bcdb_private_pymain_main()
+; PROG-NEXT: call fastcc i32 @__bcdb_body_pymain_main()
