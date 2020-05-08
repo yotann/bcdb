@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 
-optlist, args = getopt.gnu_getopt(sys.argv[1:], '', [
+optlist, args = getopt.gnu_getopt(sys.argv[1:], 'O:', [
     'allow-spurious-exports',
     'known-dynamic-defs',
     'known-dynamic-uses',
@@ -29,12 +29,15 @@ modules.sort()
 for module in modules:
     subprocess.check_call('cpp -D%s=1 -P -w < %s | bcdb add -uri %s -name %s -'%(module.upper(), filename, bcdb_uri, module.lower()), shell=True)
 
+clang_args = []
 args = ['bcdb', 'mux2', '-uri', bcdb_uri, '-o', out+'.bc']
 args.extend(['--muxed-name=muxed.so'])
 for o, a in optlist:
     if o == '--weak-library':
         args.append('--weak-name=weak.so')
         weak_library = True
+    elif o == '-O':
+        clang_args.append(o+a)
     else:
         args.append(o)
 args.extend([module.lower() for module in modules])
@@ -52,6 +55,7 @@ if weak_library:
 args = subprocess.check_output(('bc-imitate', 'clang-args', out+'.bc/muxed.so'), universal_newlines = True)
 args = args.strip().split('\n')
 args = ['clang++', '-xir', out+'.bc/muxed.so', '-xnone', '-O0', '-o', out+'.elf/muxed.so', '-w'] + args
+args.extend(clang_args)
 args += ['-fuse-ld=gold']
 if weak_library:
     args += [weak_library]
@@ -65,6 +69,7 @@ for module in modules:
     args += ['-L', out+'.elf', '-Xlinker', '-rpath='+out+'.elf']
     args += ['-Xlinker', '--allow-shlib-undefined']
     args += [out+'.elf/muxed.so']
+    args.extend(clang_args)
     if weak_library:
         args += [weak_library]
     subprocess.check_call(args)

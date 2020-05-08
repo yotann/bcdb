@@ -328,6 +328,7 @@ void Mux2Merger::PrepareToRename() {
   // module.
   for (auto &Item : GlobalItems) {
     GlobalItem &GI = Item.second;
+    GI.AvailableExternallyInStubModule = true;
     bool RefFromMerged =
         GI.DefineInMergedModule || (!GI.PartID.empty() && !GI.BodyInStubModule);
     for (auto &Ref : GI.Refs) {
@@ -337,6 +338,38 @@ void Mux2Merger::PrepareToRename() {
       if (Res.GI && !RefFromMerged)
         Res.GI->NeededInStubModule = true;
     }
+  }
+
+  while (true) {
+    bool Changed = false;
+    for (auto &Item : GlobalItems) {
+      GlobalValue *GV = Item.first;
+      GlobalItem &GI = Item.second;
+      if (!GI.AvailableExternallyInStubModule)
+        continue;
+      if (GV->hasLocalLinkage() && GI.DefineInMergedModule &&
+          !GI.NeededInStubModule) {
+        GI.AvailableExternallyInStubModule = false;
+        Changed = true;
+      }
+      SmallPtrSet<GlobalValue *, 8> Refs, ForcedSameModule;
+      Refs = FindGlobalReferences(GV, &ForcedSameModule);
+      if (!ForcedSameModule.empty()) {
+        GI.AvailableExternallyInStubModule = false;
+        Changed = true;
+        continue;
+      }
+      for (GlobalValue *TargetGV : Refs) {
+        GlobalItem &Target = GlobalItems[TargetGV];
+        if (!Target.AvailableExternallyInStubModule) {
+          GI.AvailableExternallyInStubModule = false;
+          Changed = true;
+          break;
+        }
+      }
+    }
+    if (!Changed)
+      break;
   }
 
   for (auto &Item : GlobalItems) {
@@ -395,6 +428,8 @@ void Mux2Merger::PrepareToRename() {
         errs() << "  needed in merged\n";
       if (GI.AvailableExternallyInMergedModule)
         errs() << "  available externally in merged module\n";
+      if (GI.AvailableExternallyInStubModule)
+        errs() << "  available externally in stub module\n";
       errs() << "  export count: " << ExportedCount[GI.Name] << "\n";
       errs() << "  new name: " << GI.NewName << "\n";
     }
@@ -566,15 +601,14 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
       // Make the stub module's version available_externally.
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       ReplaceGlobal(StubModule, GI->NewName, NewGV);
-      if (!NewGV->isDeclaration())
-        MakeAvailableExternally(NewGV);
-
-      // If it's an alias or uses blockaddresses, replace it with a declaration
-      // in the stub module.
-      SmallPtrSet<GlobalValue *, 8> ForcedSameModule;
-      FindGlobalReferences(NewGV, &ForcedSameModule);
-      if (!ForcedSameModule.empty())
-        NewGV = ReplaceWithDeclaration(NewGV);
+      if (!NewGV->isDeclaration()) {
+        if (GI->AvailableExternallyInStubModule) {
+          assert(!M->getNamedValue(GI->NewName)->hasLocalLinkage());
+          MakeAvailableExternally(NewGV);
+        } else {
+          NewGV = ReplaceWithDeclaration(NewGV);
+        }
+      }
 
     } else {
       // Export the definition from the stub module.
