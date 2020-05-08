@@ -15,6 +15,7 @@
 #include <llvm/Support/SpecialCaseList.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/IPO/FunctionImport.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Utils/Cloning.h>
@@ -90,34 +91,6 @@ static std::unique_ptr<MemoryBuffer> LoadDefaultSymbolList() {
   StringRef Buffer(reinterpret_cast<char *>(mux2_default_symbol_list_txt),
                    mux2_default_symbol_list_txt_len);
   return MemoryBuffer::getMemBuffer(Buffer, "mux2_default_symbol_list.txt");
-}
-
-static GlobalObject *CreateDeclarationFor(GlobalValue *GV, Module &M) {
-  Type *Type = GV->getValueType();
-  GlobalObject *Decl;
-  if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
-    Decl = Function::Create(FType, GlobalValue::ExternalLinkage, "", &M);
-  } else {
-    GlobalVariable *Base;
-    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      Base = cast<GlobalVariable>(GA->getBaseObject());
-    else
-      Base = cast<GlobalVariable>(GV);
-    Decl = new GlobalVariable(M, Type, Base->isConstant(),
-                              GlobalValue::ExternalLinkage, nullptr);
-    Decl->setThreadLocalMode(Base->getThreadLocalMode());
-  }
-  return Decl;
-}
-
-static GlobalObject *ReplaceWithDeclaration(GlobalValue *GV) {
-  GlobalObject *Decl = CreateDeclarationFor(GV, *GV->getParent());
-  std::string Name = GV->getName();
-  GV->replaceAllUsesWith(Decl);
-  GV->eraseFromParent();
-  Decl->setName(Name);
-  assert(Decl->getName() == Name);
-  return Decl;
 }
 
 // Handling references from the muxed library to the stub libraries:
@@ -508,6 +481,18 @@ void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
   }
 }
 
+static void replaceConstantWithInstruction(Constant &C, Value &V,
+                                           IRBuilder<> &Builder) {
+  V.setName(C.getName());
+  C.replaceUsesWithIf(&V, [](Use &U) { return !isa<Constant>(U.getUser()); });
+  for (Use &U : C.uses()) {
+    ConstantExpr *CE = cast<ConstantExpr>(U.getUser());
+    Instruction *NewInst = Builder.Insert(CE->getAsInstruction());
+    NewInst->replaceUsesOfWith(&C, &V);
+    replaceConstantWithInstruction(*CE, *NewInst, Builder);
+  }
+}
+
 void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
   if (GI.BodyInStubModule || !GI.RefersToRTLDLocal)
     return;
@@ -515,11 +500,16 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
   IRBuilder<> Builder(&*Body.getEntryBlock().getFirstInsertionPt());
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
     if (ImportVars.count(GO.getName())) {
+      // You might think you could use GO.getType() here, but you would be
+      // wrong. If GO.getType() is a recursive structure type, and we use that
+      // type, it confuses IRMover somehow.
+      Type *T = Type::getInt8PtrTy(Body.getContext());
       GlobalVariable *Var = new GlobalVariable(
-          *Body.getParent(), GO.getType(), false, GlobalValue::ExternalLinkage,
-          nullptr, ImportVars[GO.getName()]);
-      LoadInst *Load = Builder.CreateLoad(Var);
-      GO.replaceAllUsesWith(Load);
+          *Body.getParent(), T, false, GlobalValue::ExternalLinkage, nullptr,
+          ImportVars[GO.getName()]);
+      Value *Load = Builder.CreateLoad(Var);
+      Load = Builder.CreatePointerBitCastOrAddrSpaceCast(Load, GO.getType());
+      replaceConstantWithInstruction(GO, *Load, Builder);
     }
   }
 }
@@ -556,8 +546,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
       ReplaceGlobal(StubModule, NewName, StubInStubModule);
       LinkageMap[StubInStubModule] = GlobalValue::ExternalLinkage;
       StubInStubModule->setLinkage(GlobalValue::ExternalLinkage);
-      cast<Function>(StubInStubModule)->deleteBody();
-      cast<Function>(StubInStubModule)->setComdat(nullptr);
+      convertToDeclaration(*StubInStubModule);
 #if LLVM_VERSION_MAJOR >= 7
       StubInStubModule->setDSOLocal(false);
 #endif
@@ -628,6 +617,10 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
         // stub module can use them.
         GlobalValue *GV = M->getNamedValue(GI->NewName);
         GV->setLinkage(GlobalValue::ExternalLinkage);
+        GV->setVisibility(GlobalValue::DefaultVisibility);
+#if LLVM_VERSION_MAJOR >= 7
+        GV->setDSOLocal(false);
+#endif
       }
 
       // Make the stub module's version available_externally.
@@ -638,7 +631,8 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
           assert(!M->getNamedValue(GI->NewName)->hasLocalLinkage());
           MakeAvailableExternally(NewGV);
         } else {
-          NewGV = ReplaceWithDeclaration(NewGV);
+          if (!convertToDeclaration(*NewGV))
+            NewGV = nullptr;
         }
       }
 
@@ -770,16 +764,14 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       continue;
 
     if (GlobalVariable *Var = dyn_cast<GlobalVariable>(&GO)) {
-      Var->setInitializer(nullptr);
-      Var->setComdat(nullptr);
+      convertToDeclaration(*Var);
       Var->setLinkage(GlobalValue::ExternalWeakLinkage);
       Var->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7
       Var->setDSOLocal(false);
 #endif
     } else if (Function *F = dyn_cast<Function>(&GO)) {
-      F->deleteBody();
-      F->setComdat(nullptr);
+      convertToDeclaration(*F);
       F->setLinkage(GlobalValue::ExternalWeakLinkage);
       F->setVisibility(GlobalValue::DefaultVisibility);
 #if LLVM_VERSION_MAJOR >= 7

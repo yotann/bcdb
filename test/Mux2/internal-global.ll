@@ -18,6 +18,6 @@ define i8* @get_internal() {
 ; PROG: @pointer = constant i8* @__bcdb_merged_internal
 ; PROG: @__bcdb_merged_internal = available_externally global i8 11
 ; MUXED: @pointer = extern_weak constant i8*
-; MUXED: @__bcdb_merged_internal = dso_local global i8 11
+; MUXED: @__bcdb_merged_internal = global i8 11
 ; MUXED: ret i8** @pointer
 ; MUXED: ret i8* @__bcdb_merged_internal

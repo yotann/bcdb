@@ -23,6 +23,7 @@ in stdenv.mkDerivation {
 
   cmakeBuildType = "Debug";
   doCheck = true;
+  dontStrip = true;
 
   enableParallelBuilding = true;
 }
