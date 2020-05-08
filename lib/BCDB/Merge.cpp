@@ -170,6 +170,7 @@ GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI, Module *M) {
     Decl->copyAttributesFrom(Def);
     Def->replaceAllUsesWith(Decl);
   }
+  FixupPartDefinition(GI, *Def);
 
   // Move the definition into the main module.
   if (M == MergedModule.get())

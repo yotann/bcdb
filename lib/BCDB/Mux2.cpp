@@ -18,6 +18,7 @@
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <map>
 #include <set>
 
@@ -91,6 +92,34 @@ static std::unique_ptr<MemoryBuffer> LoadDefaultSymbolList() {
   return MemoryBuffer::getMemBuffer(Buffer, "mux2_default_symbol_list.txt");
 }
 
+static GlobalObject *CreateDeclarationFor(GlobalValue *GV, Module &M) {
+  Type *Type = GV->getValueType();
+  GlobalObject *Decl;
+  if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
+    Decl = Function::Create(FType, GlobalValue::ExternalLinkage, "", &M);
+  } else {
+    GlobalVariable *Base;
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
+      Base = cast<GlobalVariable>(GA->getBaseObject());
+    else
+      Base = cast<GlobalVariable>(GV);
+    Decl = new GlobalVariable(M, Type, Base->isConstant(),
+                              GlobalValue::ExternalLinkage, nullptr);
+    Decl->setThreadLocalMode(Base->getThreadLocalMode());
+  }
+  return Decl;
+}
+
+static GlobalObject *ReplaceWithDeclaration(GlobalValue *GV) {
+  GlobalObject *Decl = CreateDeclarationFor(GV, *GV->getParent());
+  std::string Name = GV->getName();
+  GV->replaceAllUsesWith(Decl);
+  GV->eraseFromParent();
+  Decl->setName(Name);
+  assert(Decl->getName() == Name);
+  return Decl;
+}
+
 // Handling references from the muxed library to the stub libraries:
 // - The muxed library will refer to various symbols that are defined in the
 //   stub libraries, but for any given execution, only a subset of the stub
@@ -129,6 +158,7 @@ protected:
   GlobalValue *LoadPartDefinition(GlobalItem &GI, Module *M = nullptr) override;
   void LoadRemainder(std::unique_ptr<Module> M,
                      std::vector<GlobalItem *> &GIs) override;
+  void FixupPartDefinition(GlobalItem &GI, Function &Body) override;
 
 private:
   bool symbolInSection(StringRef Section, StringRef ModuleName, StringRef Name,
@@ -143,6 +173,7 @@ private:
   std::unique_ptr<SpecialCaseList> DefaultSymbolList, SymbolList;
   StringMap<GlobalItem *> GlobalDefinitions;
   std::set<GlobalItem *> DirectlyReferenced;
+  StringMap<StringMap<std::string>> RTLDLocalImportVariables;
 };
 
 Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module)
@@ -202,6 +233,8 @@ bool Mux2Merger::mayBeUsedDynamically(StringRef ModuleName, StringRef Name) {
 bool Mux2Merger::mayBeRTLDLocal(StringRef ModuleName, StringRef Name) {
   if (symbolInSection("mux-not-rtld-local", ModuleName, Name))
     return false;
+  if (symbolInSection("mux-always-defined-elsewhere", ModuleName, Name))
+    return false;
   if (!KnownRTLDLocal)
     return true;
   return symbolInSection("mux-rtld-local", ModuleName, Name);
@@ -255,6 +288,30 @@ void Mux2Merger::PrepareToRename() {
         // Res.Name in the muxed module, just as if we had multiple definitions
         // of it.
         ExportedCount[Res.Name] = 2;
+
+        // Some declarations can only be resolved correctly from the stub
+        // module. Check whether the GI refers to such a declaration.
+        if (mayBeRTLDLocal(GI.ModuleName, Ref.first)) {
+          GI.RefersToRTLDLocal = true;
+          if (!GI.PartID.empty()) {
+            if (!RTLDLocalImportVariables[GI.ModuleName].count(Ref.first)) {
+              GlobalValue *Decl =
+                  StubModules[GI.ModuleName]->getNamedValue(Ref.first);
+              std::string Name = ReserveName("__bcdb_import_" + Ref.first +
+                                             "_" + GI.ModuleName);
+              RTLDLocalImportVariables[GI.ModuleName][Ref.first] = Name;
+              GlobalVariable *MergedVar = new GlobalVariable(
+                  *MergedModule, Decl->getType(), false,
+                  GlobalValue::ExternalLinkage,
+                  Constant::getNullValue(Decl->getType()), Name);
+              assert(MergedVar->getName() == Name);
+              GlobalObject *StubVar = new GlobalVariable(
+                  *StubModules[GI.ModuleName], Decl->getType(), false,
+                  GlobalValue::ExternalLinkage, nullptr, Name);
+              assert(StubVar->getName() == Name);
+            }
+          }
+        }
       }
     }
   }
@@ -265,6 +322,8 @@ void Mux2Merger::PrepareToRename() {
     GlobalItem &GI = Item.second;
 
     if (symbolInSection("mux-unmovable", GI)) {
+      GI.DefineInMergedModule = false;
+    } else if (GI.RefersToRTLDLocal && GI.PartID.empty()) {
       GI.DefineInMergedModule = false;
     } else if (GV->hasLocalLinkage()) {
       GI.DefineInMergedModule = true;
@@ -277,27 +336,6 @@ void Mux2Merger::PrepareToRename() {
         GI.DefineInMergedModule = false;
     } else {
       GI.DefineInMergedModule = false;
-    }
-  }
-
-  // Some declarations can only be resolved correctly from the stub module.
-  // If the GI refers to such a declaration, keep it in the stub module.
-  for (auto &Item : GlobalItems) {
-    GlobalItem &GI = Item.second;
-    for (auto &Ref : GI.Refs) {
-      if (!mayBeRTLDLocal(GI.ModuleName, Ref.first))
-        continue;
-      // If we can statically resolve the reference, we don't need to worry
-      // about RTLD_LOCAL.
-      auto Res = Resolve(GI.ModuleName, Ref.first);
-      if (Res.GI)
-        continue;
-      // Move the definition to the stub module.
-      GI.DefineInMergedModule = false;
-      GI.BodyInStubModule = true;
-      GlobalValue *GV = ModRemainders[GI.ModuleName]->getNamedValue(Ref.first);
-      if (GV && !GV->isDeclaration() && GlobalItems.count(GV))
-        GlobalItems[GV].DefineInMergedModule = false;
     }
   }
 
@@ -470,28 +508,20 @@ void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
   }
 }
 
-static GlobalObject *ReplaceWithDeclaration(GlobalValue *GV) {
-  Type *Type = GV->getValueType();
-  GlobalObject *Decl;
-  if (FunctionType *FType = dyn_cast<FunctionType>(Type)) {
-    Decl = Function::Create(FType, GlobalValue::ExternalLinkage, "",
-                            GV->getParent());
-  } else {
-    GlobalVariable *Base;
-    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      Base = cast<GlobalVariable>(GA->getBaseObject());
-    else
-      Base = cast<GlobalVariable>(GV);
-    Decl = new GlobalVariable(*GV->getParent(), Type, Base->isConstant(),
-                              GlobalValue::ExternalLinkage, nullptr);
-    Decl->setThreadLocalMode(Base->getThreadLocalMode());
+void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
+  if (GI.BodyInStubModule || !GI.RefersToRTLDLocal)
+    return;
+  StringMap<std::string> &ImportVars = RTLDLocalImportVariables[GI.ModuleName];
+  IRBuilder<> Builder(&*Body.getEntryBlock().getFirstInsertionPt());
+  for (GlobalObject &GO : Body.getParent()->global_objects()) {
+    if (ImportVars.count(GO.getName())) {
+      GlobalVariable *Var = new GlobalVariable(
+          *Body.getParent(), GO.getType(), false, GlobalValue::ExternalLinkage,
+          nullptr, ImportVars[GO.getName()]);
+      LoadInst *Load = Builder.CreateLoad(Var);
+      GO.replaceAllUsesWith(Load);
+    }
   }
-  std::string Name = GV->getName();
-  GV->replaceAllUsesWith(Decl);
-  GV->eraseFromParent();
-  Decl->setName(Name);
-  assert(Decl->getName() == Name);
-  return Decl;
 }
 
 GlobalValue *Mux2Merger::LoadPartDefinition(GlobalItem &GI, Module *M) {
@@ -598,7 +628,6 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
         // stub module can use them.
         GlobalValue *GV = M->getNamedValue(GI->NewName);
         GV->setLinkage(GlobalValue::ExternalLinkage);
-        GV->setVisibility(GlobalValue::ProtectedVisibility);
       }
 
       // Make the stub module's version available_externally.
@@ -697,6 +726,22 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
   for (auto &Item : StubModules) {
     Module &StubModule = *Item.second;
 
+    StringMap<std::string> &ImportVars = RTLDLocalImportVariables[Item.first()];
+    if (!ImportVars.empty()) {
+      Function *F = Function::Create(
+          FunctionType::get(Type::getVoidTy(StubModule.getContext()), false),
+          GlobalValue::InternalLinkage, "__bcdb_ctor", &StubModule);
+      BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
+      IRBuilder<> Builder(BB);
+      for (auto &ImportVar : ImportVars) {
+        GlobalValue *Val = StubModule.getNamedValue(ImportVar.first());
+        GlobalValue *Ptr = StubModule.getNamedValue(ImportVar.second);
+        Builder.CreateStore(Val, Ptr);
+      }
+      Builder.CreateRetVoid();
+      appendToGlobalCtors(StubModule, F, 0);
+    }
+
     // Prevent deletion of linkonce globals--they may be needed by the muxed
     // module.
     for (GlobalValue &GV :
@@ -777,7 +822,8 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       if (!mayBeDefinedDynamically(GI.ModuleName, GI.NewName)) {
         if (!GO->isDefinitionExact())
           GO->setLinkage(GlobalValue::ExternalLinkage);
-        if (!GO->hasLocalLinkage() && GO->hasDefaultVisibility())
+        if (!GO->hasLocalLinkage() && GO->hasDefaultVisibility() &&
+            isa<Function>(GO))
           GO->setVisibility(GlobalValue::ProtectedVisibility);
       }
 

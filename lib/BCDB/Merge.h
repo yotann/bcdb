@@ -93,10 +93,14 @@ public:
 
     // For mux2 only, whether the body needs to be defined in the stub module.
     bool BodyInStubModule = false;
+
+    // For mux2 only, whether the body refers to RTLD_LOCAL declarations.
+    bool RefersToRTLDLocal = false;
   };
 
 protected:
   StringSet<> LoadPartRefs(StringRef ID, StringRef SelfName);
+  virtual void FixupPartDefinition(GlobalItem &GI, Function &Body) {}
   virtual GlobalValue *LoadPartDefinition(GlobalItem &GI, Module *M = nullptr);
   virtual void AddPartStub(Module &MergedModule, GlobalItem &GI,
                            GlobalValue *Def, GlobalValue *Decl,

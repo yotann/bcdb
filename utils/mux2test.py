@@ -5,6 +5,17 @@ import re
 import subprocess
 import sys
 
+try:
+    from shlex import quote
+except ImportError:
+    _find_unsafe = re.compile(r'[^\w@%+=:,./-]').search
+    def quote(s):
+        if s and _find_unsafe(s) is None:
+            return s
+        return "'" + s.replace("'", "'\\''") + "'"
+def trace_args(args):
+    print(' '.join(quote(a) for a in args))
+
 optlist, args = getopt.gnu_getopt(sys.argv[1:], 'O:', [
     'allow-spurious-exports',
     'known-dynamic-defs',
@@ -17,6 +28,8 @@ filename, out = args
 
 source = open(filename).read()
 weak_library = False
+
+subprocess.check_call(('clang++', '--version'))
 
 bcdb_uri = 'sqlite:' + out + '.bcdb'
 subprocess.check_call(('bcdb', 'init', '-uri', bcdb_uri))
@@ -41,6 +54,7 @@ for o, a in optlist:
     else:
         args.append(o)
 args.extend([module.lower() for module in modules])
+trace_args(args)
 subprocess.check_call(args)
 
 if not os.path.exists(out+'.elf'):
@@ -59,6 +73,7 @@ args.extend(clang_args)
 args += ['-fuse-ld=gold']
 if weak_library:
     args += [weak_library]
+trace_args(args)
 subprocess.check_call(args)
 
 for module in modules:
@@ -72,4 +87,5 @@ for module in modules:
     args.extend(clang_args)
     if weak_library:
         args += [weak_library]
+    trace_args(args)
     subprocess.check_call(args)

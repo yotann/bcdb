@@ -99,7 +99,7 @@
 
 @global = global i32 1
 
-declare void @extern()
+declare extern_weak void @extern()
 
 define void @extern_caller() {
   call void @_nc_render()
