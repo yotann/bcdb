@@ -12,14 +12,14 @@ define %struct.object* @object_new() {
 
 declare void @object_copy(%struct.object*, %struct.object*)
 
-define internal i32 @artifact_power(i32 %0, i8* %1, i1 zeroext %2) {
+define internal i32 @artifact_power(i32, i8*, i1 zeroext) {
   %4 = call %struct.object* @object_new()
   call void @object_copy(%struct.object* undef, %struct.object* undef)
   %5 = getelementptr inbounds %struct.object, %struct.object* undef, i32 0, i32 5
   ret i32 undef
 }
 
-define internal void @wr_monster(%struct.monster* %0) {
+define internal void @wr_monster(%struct.monster*) {
   %2 = call %struct.object* @object_new()
   %3 = getelementptr inbounds %struct.monster_race, %struct.monster_race* undef, i32 0, i32 2
   %4 = getelementptr inbounds %struct.object, %struct.object* undef, i32 0, i32 4
