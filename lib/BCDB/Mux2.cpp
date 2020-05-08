@@ -296,7 +296,7 @@ void Mux2Merger::PrepareToRename() {
       GI.DefineInMergedModule = false;
       GI.BodyInStubModule = true;
       GlobalValue *GV = ModRemainders[GI.ModuleName]->getNamedValue(Ref.first);
-      if (GV && !GV->isDeclaration())
+      if (GV && !GV->isDeclaration() && GlobalItems.count(GV))
         GlobalItems[GV].DefineInMergedModule = false;
     }
   }
@@ -312,6 +312,7 @@ void Mux2Merger::PrepareToRename() {
       SmallPtrSet<GlobalValue *, 8> ForcedSameModule;
       FindGlobalReferences(GV, &ForcedSameModule);
       for (GlobalValue *TargetGV : ForcedSameModule) {
+        assert(GlobalItems.count(TargetGV));
         GlobalItem &Target = GlobalItems[TargetGV];
         if (GI.DefineInMergedModule != Target.DefineInMergedModule) {
           Target.DefineInMergedModule = false;
@@ -360,11 +361,13 @@ void Mux2Merger::PrepareToRename() {
         continue;
       }
       for (GlobalValue *TargetGV : Refs) {
-        GlobalItem &Target = GlobalItems[TargetGV];
-        if (!Target.AvailableExternallyInStubModule) {
-          GI.AvailableExternallyInStubModule = false;
-          Changed = true;
-          break;
+        if (GlobalItems.count(TargetGV)) {
+          GlobalItem &Target = GlobalItems[TargetGV];
+          if (!Target.AvailableExternallyInStubModule) {
+            GI.AvailableExternallyInStubModule = false;
+            Changed = true;
+            break;
+          }
         }
       }
     }
