@@ -71,6 +71,10 @@ static cl::opt<bool>
                 cl::desc("Disable optimizations that use available_externally"),
                 cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
 
+static cl::opt<bool> Debug("debug-mux2", cl::desc("Debugging output for mux2"),
+                           cl::cat(MergeCategory),
+                           cl::sub(*cl::AllSubCommands));
+
 static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
   ExitOnError Err("LoadMuxLibrary: ");
   StringRef Buffer(reinterpret_cast<char *>(mux2_library_bc),
@@ -377,20 +381,23 @@ void Mux2Merger::PrepareToRename() {
       // handle it.
     }
 
-    errs() << GI.ModuleName << " " << GI.Name << "\n";
-    errs() << "  define in " << (GI.DefineInMergedModule ? "merged" : "stub")
-           << "\n";
-    errs() << "  body in " << (GI.BodyInStubModule ? "stub" : "merged") << "\n";
-    if (GV->hasLocalLinkage())
-      errs() << "  local\n";
-    if (GI.NeededInStubModule)
-      errs() << "  needed in stub\n";
-    if (GI.NeededInMergedModule)
-      errs() << "  needed in merged\n";
-    if (GI.AvailableExternallyInMergedModule)
-      errs() << "  available externally in merged module\n";
-    errs() << "  export count: " << ExportedCount[GI.Name] << "\n";
-    errs() << "  new name: " << GI.NewName << "\n";
+    if (Debug) {
+      errs() << GI.ModuleName << " " << GI.Name << "\n";
+      errs() << "  define in " << (GI.DefineInMergedModule ? "merged" : "stub")
+             << "\n";
+      errs() << "  body in " << (GI.BodyInStubModule ? "stub" : "merged")
+             << "\n";
+      if (GV->hasLocalLinkage())
+        errs() << "  local\n";
+      if (GI.NeededInStubModule)
+        errs() << "  needed in stub\n";
+      if (GI.NeededInMergedModule)
+        errs() << "  needed in merged\n";
+      if (GI.AvailableExternallyInMergedModule)
+        errs() << "  available externally in merged module\n";
+      errs() << "  export count: " << ExportedCount[GI.Name] << "\n";
+      errs() << "  new name: " << GI.NewName << "\n";
+    }
   }
 }
 
