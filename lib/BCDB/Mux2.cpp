@@ -499,6 +499,9 @@ static void replaceConstantWithInstruction(Constant &C, Value &V,
   V.setName(C.getName());
   C.replaceUsesWithIf(&V, [](Use &U) { return !isa<Constant>(U.getUser()); });
   for (Use &U : C.uses()) {
+    if (!isa<ConstantExpr>(U.getUser())) {
+      errs() << *Builder.GetInsertBlock()->getParent()->getParent();
+    }
     ConstantExpr *CE = cast<ConstantExpr>(U.getUser());
     Instruction *NewInst = Builder.Insert(CE->getAsInstruction());
     NewInst->replaceUsesOfWith(&C, &V);
