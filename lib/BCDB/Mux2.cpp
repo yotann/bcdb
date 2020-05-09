@@ -498,14 +498,43 @@ static void replaceConstantWithInstruction(Constant &C, Value &V,
                                            IRBuilder<> &Builder) {
   V.setName(C.getName());
   C.replaceUsesWithIf(&V, [](Use &U) { return !isa<Constant>(U.getUser()); });
-  for (Use &U : C.uses()) {
-    if (!isa<ConstantExpr>(U.getUser())) {
-      errs() << *Builder.GetInsertBlock()->getParent()->getParent();
+  for (Value::use_iterator UI = C.use_begin(), E = C.use_end(); UI != E;) {
+    Use &U = *UI;
+    ++UI;
+    if (U.getUser()->use_empty())
+      continue;
+
+    Value *NewInst;
+
+    if (ConstantExpr *CE = dyn_cast<ConstantExpr>(U.getUser())) {
+      NewInst = Builder.Insert(CE->getAsInstruction());
+      cast<User>(NewInst)->replaceUsesOfWith(&C, &V);
+
+    } else if (ConstantAggregate *CA = cast<ConstantAggregate>(U.getUser())) {
+      SmallVector<Constant *, 8> Vs;
+      for (Value *Op : CA->operand_values())
+        Vs.push_back(Op == &C ? Constant::getNullValue(Op->getType())
+                              : cast<Constant>(Op));
+
+      if (isa<ConstantStruct>(CA))
+        NewInst = ConstantStruct::get(cast<ConstantStruct>(CA)->getType(), Vs);
+      else if (isa<ConstantArray>(CA))
+        NewInst = ConstantArray::get(cast<ConstantArray>(CA)->getType(), Vs);
+      else
+        NewInst = ConstantVector::get(Vs);
+
+      for (unsigned I = 0, E = CA->getNumOperands(); I != E; ++I)
+        if (CA->getOperand(I) == &C)
+          NewInst = isa<ConstantVector>(CA)
+                        ? Builder.CreateInsertElement(NewInst, &V, I)
+                        : Builder.CreateInsertValue(NewInst, &V, {I});
+
+    } else {
+      errs() << *U.getUser() << "\n";
+      report_fatal_error("Invalid constant user!");
     }
-    ConstantExpr *CE = cast<ConstantExpr>(U.getUser());
-    Instruction *NewInst = Builder.Insert(CE->getAsInstruction());
-    NewInst->replaceUsesOfWith(&C, &V);
-    replaceConstantWithInstruction(*CE, *NewInst, Builder);
+    replaceConstantWithInstruction(*cast<Constant>(U.getUser()), *NewInst,
+                                   Builder);
   }
 }
 
@@ -514,7 +543,6 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
     return;
   StringMap<GlobalVariable *> &ImportVars =
       RTLDLocalImportVariables[GI.ModuleName];
-  IRBuilder<> Builder(&Body.getEntryBlock().front());
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
     if (ImportVars.count(GO.getName())) {
       // It would probably work fine now to use GO.getType() here. There were
@@ -526,6 +554,7 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
       GlobalVariable *Var = new GlobalVariable(
           *Body.getParent(), T, false, GlobalValue::ExternalLinkage, nullptr,
           ImportVars[GO.getName()]->getName());
+      IRBuilder<> Builder(&Body.getEntryBlock().front());
       Value *Load = Builder.CreateLoad(Var);
       Load = Builder.CreatePointerBitCastOrAddrSpaceCast(Load, GO.getType());
       replaceConstantWithInstruction(GO, *Load, Builder);
@@ -770,7 +799,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
                                           Callee->getName(), &StubModule);
         Constant *Value = ConstantStruct::get(SType, Values);
         GlobalVariable *StubVar = new GlobalVariable(
-            StubModule, SType, false, GlobalValue::ExternalLinkage, Value,
+            StubModule, SType, true, GlobalValue::ExternalLinkage, Value,
             ("__bcdb_imports_" + ModuleName).str());
         Function *F = Function::Create(
             FunctionType::get(Type::getVoidTy(StubModule.getContext()), false),
