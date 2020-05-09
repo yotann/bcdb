@@ -405,6 +405,11 @@ void Merger::RenameEverything() {
         return true;
       }
     }
+    if ((a->RefersToRTLDLocal && !a->PartID.empty()) ||
+        (b->RefersToRTLDLocal && !b->PartID.empty())) {
+      // can't merge, they need to be rewritten to use different variables
+      return true;
+    }
     return false;
   };
   auto GroupComp = [&](const Group &a, const Group &b) {
