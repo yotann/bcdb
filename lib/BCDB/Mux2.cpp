@@ -888,6 +888,16 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       if (!GV.hasLocalLinkage())
         GV.setDSOLocal(false);
     }
+    for (auto &Item : StubModules) {
+      Module &StubModule = *Item.second;
+      for (GlobalValue &GV :
+           concat<GlobalValue>(StubModule.global_objects(),
+                               StubModule.aliases(), StubModule.ifuncs())) {
+        GV.setVisibility(GlobalValue::DefaultVisibility);
+        if (!GV.hasLocalLinkage())
+          GV.setDSOLocal(false);
+      }
+    }
   }
 
   return M;
