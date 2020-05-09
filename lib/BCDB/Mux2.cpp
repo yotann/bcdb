@@ -77,6 +77,11 @@ static cl::opt<bool> Debug("debug-mux2", cl::desc("Debugging output for mux2"),
                            cl::cat(MergeCategory),
                            cl::sub(*cl::AllSubCommands));
 
+static cl::opt<bool>
+    DisableDSOLocal("disable-dso-local",
+                    cl::desc("Disable protected visibility and dso_local"),
+                    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+
 static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
   ExitOnError Err("LoadMuxLibrary: ");
   StringRef Buffer(reinterpret_cast<char *>(mux2_library_bc),
@@ -873,6 +878,15 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     for (auto &Item : StubModules) {
       Module &StubModule = *Item.second;
       DiagnoseUnreachableFunctions(StubModule, UndefFuncType);
+    }
+  }
+
+  if (DisableDSOLocal) {
+    for (GlobalValue &GV :
+         concat<GlobalValue>(M->global_objects(), M->aliases(), M->ifuncs())) {
+      GV.setVisibility(GlobalValue::DefaultVisibility);
+      if (!GV.hasLocalLinkage())
+        GV.setDSOLocal(false);
     }
   }
 
