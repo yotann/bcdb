@@ -222,7 +222,15 @@ void Mux2Merger::PrepareToRename() {
   // Make stub modules.
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
-    std::unique_ptr<Module> M = CloneModuleCorrectly(*Item.second);
+
+    // In theory we could just call CloneModuleCorrectly(*Item.second) to get
+    // the stub module. But it seems like that might cause problems with
+    // IRMover and type completion, because CloneModuleCorrectly doesn't create
+    // copies of opaque types:
+    // https://lists.llvm.org/pipermail/llvm-dev/2018-March/122151.html
+    ExitOnError Err("Mux2Merger::PrepareToRename: ");
+    std::map<std::string, std::string> PartIDs;
+    std::unique_ptr<Module> M = Err(bcdb.LoadParts(Item.first(), PartIDs));
     // Make all definitions external by default, so LoadPartDefinition will
     // work correctly. That will be changed in LoadRemainder if necessary.
     for (GlobalValue &GV :
@@ -506,9 +514,11 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
   IRBuilder<> Builder(&*Body.getEntryBlock().getFirstInsertionPt());
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
     if (ImportVars.count(GO.getName())) {
-      // You might think you could use GO.getType() here, but you would be
-      // wrong. If GO.getType() is a recursive structure type, and we use that
-      // type, it confuses IRMover somehow.
+      // It would probably work fine now to use GO.getType() here. There were
+      // problems before when I was using CloneModule to create stub modules;
+      // the cloned module would share the same types as the original module,
+      // and when recursive structure types were involved, IRMover could get
+      // screwed up.
       Type *T = Type::getInt8PtrTy(Body.getContext());
       GlobalVariable *Var = new GlobalVariable(
           *Body.getParent(), T, false, GlobalValue::ExternalLinkage, nullptr,
