@@ -514,7 +514,7 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
     return;
   StringMap<GlobalVariable *> &ImportVars =
       RTLDLocalImportVariables[GI.ModuleName];
-  IRBuilder<> Builder(&*Body.getEntryBlock().getFirstInsertionPt());
+  IRBuilder<> Builder(&Body.getEntryBlock().front());
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
     if (ImportVars.count(GO.getName())) {
       // It would probably work fine now to use GO.getType() here. There were
