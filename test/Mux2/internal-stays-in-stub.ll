@@ -17,5 +17,5 @@ define internal fastcc i32 @pymain_main() {
 
 ; PROG: @Py_DebugFlag = weak global i32 0, align 4
 ; PROG-NOT: pymain_main
-; PROG: define internal void @__bcdb_ctor()
-; PROG-NEXT: store i32* @Py_DebugFlag, i32** @__bcdb_import_Py_DebugFlag_prog
+; PROG: define internal void @__bcdb_init_imports()
+; PROG-NEXT: call void @__bcdb_set_imports_prog

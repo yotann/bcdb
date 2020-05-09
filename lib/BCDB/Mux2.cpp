@@ -146,7 +146,7 @@ private:
   std::unique_ptr<SpecialCaseList> DefaultSymbolList, SymbolList;
   StringMap<GlobalItem *> GlobalDefinitions;
   std::set<GlobalItem *> DirectlyReferenced;
-  StringMap<StringMap<std::string>> RTLDLocalImportVariables;
+  StringMap<StringMap<GlobalVariable *>> RTLDLocalImportVariables;
 };
 
 Mux2Merger::Mux2Merger(BCDB &bcdb, bool enable_weak_module)
@@ -270,18 +270,18 @@ void Mux2Merger::PrepareToRename() {
             if (!RTLDLocalImportVariables[GI.ModuleName].count(Ref.first)) {
               GlobalValue *Decl =
                   StubModules[GI.ModuleName]->getNamedValue(Ref.first);
-              std::string Name = ReserveName("__bcdb_import_" + Ref.first +
-                                             "_" + GI.ModuleName);
-              RTLDLocalImportVariables[GI.ModuleName][Ref.first] = Name;
+              StringRef ModuleShortName =
+                  StringRef(GI.ModuleName).rsplit('/').second;
+              if (ModuleShortName.empty())
+                ModuleShortName = GI.ModuleName;
+              std::string Name = ReserveName(
+                  ("__bcdb_import_" + Ref.first + "_" + ModuleShortName).str());
               GlobalVariable *MergedVar = new GlobalVariable(
                   *MergedModule, Decl->getType(), false,
                   GlobalValue::ExternalLinkage,
                   Constant::getNullValue(Decl->getType()), Name);
               assert(MergedVar->getName() == Name);
-              GlobalObject *StubVar = new GlobalVariable(
-                  *StubModules[GI.ModuleName], Decl->getType(), false,
-                  GlobalValue::ExternalLinkage, nullptr, Name);
-              assert(StubVar->getName() == Name);
+              RTLDLocalImportVariables[GI.ModuleName][Ref.first] = MergedVar;
             }
           }
         }
@@ -496,7 +496,8 @@ static void replaceConstantWithInstruction(Constant &C, Value &V,
 void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
   if (GI.BodyInStubModule || !GI.RefersToRTLDLocal)
     return;
-  StringMap<std::string> &ImportVars = RTLDLocalImportVariables[GI.ModuleName];
+  StringMap<GlobalVariable *> &ImportVars =
+      RTLDLocalImportVariables[GI.ModuleName];
   IRBuilder<> Builder(&*Body.getEntryBlock().getFirstInsertionPt());
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
     if (ImportVars.count(GO.getName())) {
@@ -506,7 +507,7 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
       Type *T = Type::getInt8PtrTy(Body.getContext());
       GlobalVariable *Var = new GlobalVariable(
           *Body.getParent(), T, false, GlobalValue::ExternalLinkage, nullptr,
-          ImportVars[GO.getName()]);
+          ImportVars[GO.getName()]->getName());
       Value *Load = Builder.CreateLoad(Var);
       Load = Builder.CreatePointerBitCastOrAddrSpaceCast(Load, GO.getType());
       replaceConstantWithInstruction(GO, *Load, Builder);
@@ -718,22 +719,61 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
                          "__bcdb_weak_definition_called", WeakModule.get());
 
   for (auto &Item : StubModules) {
+    StringRef ModuleName = Item.first();
     Module &StubModule = *Item.second;
 
-    StringMap<std::string> &ImportVars = RTLDLocalImportVariables[Item.first()];
+    StringMap<GlobalVariable *> &ImportVars =
+        RTLDLocalImportVariables[Item.first()];
     if (!ImportVars.empty()) {
-      Function *F = Function::Create(
-          FunctionType::get(Type::getVoidTy(StubModule.getContext()), false),
-          GlobalValue::InternalLinkage, "__bcdb_ctor", &StubModule);
-      BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
-      IRBuilder<> Builder(BB);
+      std::vector<Type *> Types;
+      std::vector<Constant *> Values;
+      std::vector<GlobalVariable *> Vars;
       for (auto &ImportVar : ImportVars) {
-        GlobalValue *Val = StubModule.getNamedValue(ImportVar.first());
-        GlobalValue *Ptr = StubModule.getNamedValue(ImportVar.second);
-        Builder.CreateStore(Val, Ptr);
+        StringRef Name = ImportVar.first();
+        GlobalVariable *Var = ImportVar.second;
+        Vars.push_back(Var);
+        Types.push_back(Var->getValueType());
+        Values.push_back(ConstantExpr::getPointerBitCastOrAddrSpaceCast(
+            StubModule.getNamedValue(Name), Types.back()));
+      }
+      StructType *SType =
+          StructType::create(Types, ("__bcdb_imports_" + ModuleName).str());
+      PointerType *PType = SType->getPointerTo();
+
+      Function *Callee = Function::Create(
+          FunctionType::get(Type::getVoidTy(StubModule.getContext()), {PType},
+                            false),
+          GlobalValue::ExternalLinkage, "__bcdb_set_imports_" + ModuleName,
+          M.get());
+
+      {
+        Function *Decl = Function::Create(Callee->getFunctionType(),
+                                          GlobalValue::ExternalLinkage,
+                                          Callee->getName(), &StubModule);
+        Constant *Value = ConstantStruct::get(SType, Values);
+        GlobalVariable *StubVar = new GlobalVariable(
+            StubModule, SType, false, GlobalValue::ExternalLinkage, Value,
+            ("__bcdb_imports_" + ModuleName).str());
+        Function *F = Function::Create(
+            FunctionType::get(Type::getVoidTy(StubModule.getContext()), false),
+            GlobalValue::InternalLinkage, "__bcdb_init_imports", &StubModule);
+        BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
+        IRBuilder<> Builder(BB);
+        Builder.CreateCall(Decl, {StubVar});
+        Builder.CreateRetVoid();
+        appendToGlobalCtors(StubModule, F, 0);
+      }
+
+      BasicBlock *BB = BasicBlock::Create(Callee->getContext(), "", Callee);
+      IRBuilder<> Builder(BB);
+      for (size_t i = 0; i < Vars.size(); i++) {
+        GlobalVariable *Var = Vars[i];
+        Value *Ptr = Builder.CreateStructGEP(Callee->getArg(0), i);
+        Value *Val = Builder.CreateLoad(Ptr);
+        Builder.CreateStore(Val, Var);
+        Var->setLinkage(GlobalValue::InternalLinkage);
       }
       Builder.CreateRetVoid();
-      appendToGlobalCtors(StubModule, F, 0);
     }
 
     // Prevent deletion of linkonce globals--they may be needed by the muxed
