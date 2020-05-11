@@ -10,6 +10,7 @@
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/NoFolder.h>
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/SpecialCaseList.h>
@@ -511,48 +512,32 @@ void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
   }
 }
 
-static void replaceConstantWithInstruction(Constant &C, Value &V,
-                                           IRBuilder<> &Builder) {
-  V.setName(C.getName());
-  C.replaceUsesWithIf(&V, [](Use &U) { return !isa<Constant>(U.getUser()); });
-  for (Value::use_iterator UI = C.use_begin(), E = C.use_end(); UI != E;) {
-    Use &U = *UI;
-    ++UI;
-    if (U.getUser()->use_empty())
-      continue;
+static void expandConstant(Constant *C, Function *F) {
+  // Based on:
+  // https://chromium.googlesource.com/native_client/pnacl-llvm/+/mseaborn/merge-34-squashed/lib/Transforms/NaCl/ExpandTlsConstantExpr.cpp
+  // but with support for ConstantAggregate.
+  for (Value::use_iterator UI = C->use_begin(); UI != C->use_end(); ++UI)
+    if (Constant *User = dyn_cast<Constant>(UI->getUser()))
+      expandConstant(User, F);
+  C->removeDeadConstantUsers();
+  if (C->use_empty())
+    return;
 
-    Value *NewInst;
-
-    if (ConstantExpr *CE = dyn_cast<ConstantExpr>(U.getUser())) {
-      NewInst = Builder.Insert(CE->getAsInstruction());
-      cast<User>(NewInst)->replaceUsesOfWith(&C, &V);
-
-    } else if (ConstantAggregate *CA = cast<ConstantAggregate>(U.getUser())) {
-      SmallVector<Constant *, 8> Vs;
-      for (Value *Op : CA->operand_values())
-        Vs.push_back(Op == &C ? Constant::getNullValue(Op->getType())
-                              : cast<Constant>(Op));
-
-      if (isa<ConstantStruct>(CA))
-        NewInst = ConstantStruct::get(cast<ConstantStruct>(CA)->getType(), Vs);
-      else if (isa<ConstantArray>(CA))
-        NewInst = ConstantArray::get(cast<ConstantArray>(CA)->getType(), Vs);
-      else
-        NewInst = ConstantVector::get(Vs);
-
-      for (unsigned I = 0, E = CA->getNumOperands(); I != E; ++I)
-        if (CA->getOperand(I) == &C)
-          NewInst = isa<ConstantVector>(CA)
-                        ? Builder.CreateInsertElement(NewInst, &V, I)
-                        : Builder.CreateInsertValue(NewInst, &V, {I});
-
-    } else {
-      errs() << *U.getUser() << "\n";
-      report_fatal_error("Invalid constant user!");
-    }
-    replaceConstantWithInstruction(*cast<Constant>(U.getUser()), *NewInst,
-                                   Builder);
+  IRBuilder<NoFolder> Builder(&F->getEntryBlock().front());
+  Value *NewInst;
+  if (ConstantExpr *CE = dyn_cast<ConstantExpr>(C)) {
+    NewInst = Builder.Insert(CE->getAsInstruction());
+  } else if (ConstantAggregate *CA = dyn_cast<ConstantAggregate>(C)) {
+    NewInst = UndefValue::get(CA->getType());
+    for (unsigned I = 0, E = CA->getNumOperands(); I != E; ++I)
+      NewInst =
+          isa<ConstantVector>(CA)
+              ? Builder.CreateInsertElement(NewInst, CA->getOperand(I), I)
+              : Builder.CreateInsertValue(NewInst, CA->getOperand(I), {I});
+  } else {
+    return;
   }
+  C->replaceAllUsesWith(NewInst);
 }
 
 void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
@@ -562,6 +547,7 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
       RTLDLocalImportVariables[GI.ModuleName];
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
     if (ImportVars.count(GO.getName())) {
+      expandConstant(&GO, &Body);
       // It would probably work fine now to use GO.getType() here. There were
       // problems before when I was using CloneModule to create stub modules;
       // the cloned module would share the same types as the original module,
@@ -574,7 +560,7 @@ void Mux2Merger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
       IRBuilder<> Builder(&Body.getEntryBlock().front());
       Value *Load = Builder.CreateLoad(Var);
       Load = Builder.CreatePointerBitCastOrAddrSpaceCast(Load, GO.getType());
-      replaceConstantWithInstruction(GO, *Load, Builder);
+      GO.replaceAllUsesWith(Load);
     }
   }
 }
