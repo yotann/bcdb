@@ -274,30 +274,6 @@ void Mux2Merger::PrepareToRename() {
         // Res.Name in the muxed module, just as if we had multiple definitions
         // of it.
         ExportedCount[Res.Name] = 2;
-
-        // Some declarations can only be resolved correctly from the stub
-        // module. Check whether the GI refers to such a declaration.
-        if (mayBeRTLDLocal(GI.ModuleName, Ref.first)) {
-          GI.RefersToRTLDLocal = true;
-          if (!GI.PartID.empty()) {
-            if (!RTLDLocalImportVariables[GI.ModuleName].count(Ref.first)) {
-              GlobalValue *Decl =
-                  StubModules[GI.ModuleName]->getNamedValue(Ref.first);
-              StringRef ModuleShortName =
-                  StringRef(GI.ModuleName).rsplit('/').second;
-              if (ModuleShortName.empty())
-                ModuleShortName = GI.ModuleName;
-              std::string Name = ReserveName(
-                  ("__bcdb_import_" + Ref.first + "_" + ModuleShortName).str());
-              GlobalVariable *MergedVar = new GlobalVariable(
-                  *MergedModule, Decl->getType(), false,
-                  GlobalValue::ExternalLinkage,
-                  Constant::getNullValue(Decl->getType()), Name);
-              assert(MergedVar->getName() == Name);
-              RTLDLocalImportVariables[GI.ModuleName][Ref.first] = MergedVar;
-            }
-          }
-        }
       }
     }
   }
@@ -308,8 +284,6 @@ void Mux2Merger::PrepareToRename() {
     GlobalItem &GI = Item.second;
 
     if (symbolInSection("mux-unmovable", GI)) {
-      GI.DefineInMergedModule = false;
-    } else if (GI.RefersToRTLDLocal && GI.PartID.empty()) {
       GI.DefineInMergedModule = false;
     } else if (GV->hasLocalLinkage()) {
       GI.DefineInMergedModule = true;
@@ -333,6 +307,13 @@ void Mux2Merger::PrepareToRename() {
     for (auto &Item : GlobalItems) {
       GlobalValue *GV = Item.first;
       GlobalItem &GI = Item.second;
+
+      if (GI.RefersToRTLDLocal && GI.PartID.empty() &&
+          GI.DefineInMergedModule) {
+        GI.DefineInMergedModule = false;
+        Changed = true;
+      }
+
       SmallPtrSet<GlobalValue *, 8> ForcedSameModule;
       FindGlobalReferences(GV, &ForcedSameModule);
       for (GlobalValue *TargetGV : ForcedSameModule) {
@@ -342,6 +323,39 @@ void Mux2Merger::PrepareToRename() {
           Target.DefineInMergedModule = false;
           GI.DefineInMergedModule = false;
           Changed = true;
+        }
+      }
+
+      // Some declarations can only be resolved correctly from the stub
+      // module. Check whether the GI refers to such a declaration.
+      for (auto &Ref : GI.Refs) {
+        auto Res = Resolve(GI.ModuleName, Ref.first);
+        if (Res.GI && Res.GI->DefineInMergedModule)
+          continue;
+        if (!mayBeRTLDLocal(GI.ModuleName, Ref.first))
+          continue;
+        if (!GI.RefersToRTLDLocal) {
+          Changed = true;
+          GI.RefersToRTLDLocal = true;
+        }
+        if (!GI.PartID.empty()) {
+          if (!RTLDLocalImportVariables[GI.ModuleName].count(Ref.first)) {
+            Changed = true;
+            GlobalValue *Decl =
+                StubModules[GI.ModuleName]->getNamedValue(Ref.first);
+            StringRef ModuleShortName =
+                StringRef(GI.ModuleName).rsplit('/').second;
+            if (ModuleShortName.empty())
+              ModuleShortName = GI.ModuleName;
+            std::string Name = ReserveName(
+                ("__bcdb_import_" + Ref.first + "_" + ModuleShortName).str());
+            GlobalVariable *MergedVar = new GlobalVariable(
+                *MergedModule, Decl->getType(), false,
+                GlobalValue::ExternalLinkage,
+                Constant::getNullValue(Decl->getType()), Name);
+            assert(MergedVar->getName() == Name);
+            RTLDLocalImportVariables[GI.ModuleName][Ref.first] = MergedVar;
+          }
         }
       }
     }

@@ -1,7 +1,7 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name rogue
 ; RUN: bcdb add -uri sqlite:%t.bcdb %p/Inputs/name_conflict.ll -name angband
-; RUN: bcdb mux2 -uri sqlite:%t.bcdb rogue angband -o %t --muxed-name=libmuxed.so --weak-name=libweak.so
+; RUN: bcdb mux2 -uri sqlite:%t.bcdb rogue angband -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --known-rtld-local
 ; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
 ; RUN: opt -verify -S < %t/rogue       | FileCheck --check-prefix=ROGUE %s
 ; RUN: opt -verify -S < %t/angband     | FileCheck --check-prefix=ANGBAND %s
