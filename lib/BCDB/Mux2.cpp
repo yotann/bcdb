@@ -372,6 +372,9 @@ void Mux2Merger::PrepareToRename() {
         GI.DefineInMergedModule || (!GI.PartID.empty() && !GI.BodyInStubModule);
     for (auto &Ref : GI.Refs) {
       auto Res = Resolve(GI.ModuleName, Ref.first);
+      if (RefFromMerged && GI.RefersToRTLDLocal)
+        if (RTLDLocalImportVariables[GI.ModuleName].count(Ref.first))
+          continue;
       if (Res.GI && RefFromMerged)
         Res.GI->NeededInMergedModule = true;
       if (Res.GI && !RefFromMerged)
