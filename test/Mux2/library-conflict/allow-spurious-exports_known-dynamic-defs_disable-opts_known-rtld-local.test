@@ -1,0 +1,3 @@
+RUN: %mux2test %p/library-conflict.ll %t --allow-spurious-exports --known-dynamic-defs --disable-opts --known-rtld-local
+RUN: %t.elf/module2
+RUN: %t.elf/module3
