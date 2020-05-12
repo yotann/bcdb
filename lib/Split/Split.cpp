@@ -284,7 +284,8 @@ AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
 
       // LLVM bug: byval doesn't work properly with unnamed types.
       if (StructType *ST = dyn_cast<StructType>(TypeMap.get(Ty)))
-        ST->setName("s");
+        if (!ST->isLiteral())
+          ST->setName("s");
 
       Attrs = Attrs.removeAttribute(DM.getContext(), i, Attribute::ByVal);
       Attrs = Attrs.addAttribute(
