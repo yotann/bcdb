@@ -1,20 +1,15 @@
 # NOTE: when updating this file, run utils/cache-deps.sh to upload dependencies
 # to Cachix so CI builds can use them.
 
+{ nixpkgs ? fetchTarball "https://github.com/NixOS/nixpkgs/archive/d44a752b91e896c499e37036eb8f58236eeac750.tar.gz" }:
+
 let
-  default_nixpkgs = (import <nixpkgs> {}).fetchFromGitHub {
-    owner = "NixOS";
-    repo = "nixpkgs";
-    rev = "d44a752b91e896c499e37036eb8f58236eeac750";
-    sha256 = "075xzn25jza3g82gii340223s6j0z36dvwsygssaq32s7f3h8wj5";
-  };
   debugLLVM = llvmPackages: (llvmPackages.llvm.override {
     debugVersion = true;
   }).overrideAttrs (o: {
     doCheck = false;
   });
 in
-{ nixpkgs ? default_nixpkgs }:
 
 with import nixpkgs {};
 rec {
