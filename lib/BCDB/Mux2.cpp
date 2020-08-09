@@ -818,7 +818,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       IRBuilder<> Builder(BB);
       for (size_t i = 0; i < Vars.size(); i++) {
         GlobalVariable *Var = Vars[i];
-        Value *Ptr = Builder.CreateStructGEP(Callee->getArg(0), i);
+        Value *Ptr = Builder.CreateStructGEP(nullptr, Callee->arg_begin(), i);
         Value *Val = Builder.CreateLoad(Ptr);
         Builder.CreateStore(Val, Var);
         Var->setLinkage(GlobalValue::InternalLinkage);

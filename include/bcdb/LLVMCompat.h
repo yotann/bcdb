@@ -22,6 +22,38 @@ static const FormattingFlags AlwaysPrefix = Prefix;
 } // end namespace llvm
 #endif
 
+#if defined(LLVM_TRANSFORMS_IPO_FUNCTIONIMPORT_H) && LLVM_VERSION_MAJOR <= 6
+namespace llvm {
+static inline bool convertToDeclaration(GlobalValue &GV) {
+  if (Function *F = dyn_cast<Function>(&GV)) {
+    F->deleteBody();
+    F->clearMetadata();
+    F->setComdat(nullptr);
+  } else if (GlobalVariable *V = dyn_cast<GlobalVariable>(&GV)) {
+    V->setInitializer(nullptr);
+    V->setLinkage(GlobalValue::ExternalLinkage);
+    V->clearMetadata();
+    V->setComdat(nullptr);
+  } else {
+    GlobalValue *NewGV;
+    if (GV.getValueType()->isFunctionTy())
+      NewGV =
+          Function::Create(cast<FunctionType>(GV.getValueType()),
+                           GlobalValue::ExternalLinkage, "", GV.getParent());
+    else
+      NewGV = new GlobalVariable(*GV.getParent(), GV.getValueType(), false,
+                                 GlobalValue::ExternalLinkage, nullptr, "",
+                                 nullptr, GV.getThreadLocalMode(),
+                                 GV.getType()->getAddressSpace());
+    NewGV->takeName(&GV);
+    GV.replaceAllUsesWith(NewGV);
+    return false;
+  }
+  return true;
+}
+} // end namespace llvm
+#endif
+
 #if defined(LLVM_SUPPORT_COMMANDLINE_H)
 namespace bcdb {
 static inline bool OptionHasCategory(llvm::cl::Option &O,
