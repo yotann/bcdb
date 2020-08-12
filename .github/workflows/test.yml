@@ -15,15 +15,17 @@ jobs:
         - bcdb-clang
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
-    - uses: cachix/install-nix-action@v6
-    - uses: cachix/cachix-action@v2
+    - uses: actions/checkout@v2
+    - uses: cachix/install-nix-action@v10
+      with:
+        skip_adding_nixpkgs_channel: true
+    - uses: cachix/cachix-action@v6
       with:
         name: bcdb
-        attributes: '${{ matrix.variant }}'
+    - run: nix-build -A ${{ matrix.variant }}
     - name: Slack Notification
       if: failure()
-      uses: homoluctus/slatify@master
+      uses: homoluctus/slatify@v2.1.2
       with:
         job_name: '*Test*'
         commit: true
