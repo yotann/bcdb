@@ -9,13 +9,14 @@ in stdenv.mkDerivation {
   version = "0.0.1";
 
   src = builtins.path {
-    path = ./.;
+    path = ../..;
     name = "bcdb-source";
     filter = gitFilter [''
       .*
       *.nix
+      /flake.lock
       /nix/
-    ''] ./.;
+    ''] ../..;
   };
 
   nativeBuildInputs = [ clang cmake pkgconfig python2 xxd ];

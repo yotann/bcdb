@@ -1,0 +1,22 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "narHash": "sha256-RXIEhztaDKy0fl7z3cz4QBo9hABkxPgEekN9WYT9vRw=",
+        "type": "tarball",
+        "url": "https://github.com/NixOS/nixpkgs/archive/d44a752b91e896c499e37036eb8f58236eeac750.tar.gz"
+      },
+      "original": {
+        "id": "nixpkgs",
+        "type": "indirect"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
