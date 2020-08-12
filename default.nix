@@ -1,4 +1,4 @@
-{ pkgs ? import (builtins.fetchTarball ((builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.nixpkgs.locked.url)) {}
+{ pkgs ? import nix/import-flake-lock.nix
 }:
 
 let
@@ -6,6 +6,7 @@ let
     debugVersion = true;
   }).overrideAttrs (o: {
     doCheck = false;
+    # TODO: also prevent building test files
   });
 
 in rec {
