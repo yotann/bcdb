@@ -1,3 +1,6 @@
-args @ { ... }:
+args @ { pkgs ? import nix/import-flake-lock.nix, ...
+}:
 
-(import ./. args).bcdb
+pkgs.mkShell {
+  inputsFrom = [ (import ./. args).bcdb ];
+}
