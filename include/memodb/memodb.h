@@ -6,6 +6,8 @@
 #include <memory>
 #include <stddef.h>
 #include <string>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 #include <llvm/ADT/ArrayRef.h>
@@ -14,6 +16,10 @@
 namespace llvm {
 class raw_ostream;
 } // end namespace llvm
+
+// https://en.cppreference.com/w/cpp/utility/variant/visit
+template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 class memodb_ref {
 private:
@@ -52,6 +58,8 @@ public:
   using const_pointer = const value_type *;
   // TODO: iterators
 
+  struct undefined_t : std::monostate {};
+  struct null_t : std::monostate {};
   using bool_t = bool;
   using integer_t = std::int64_t;
   using float_t = double;
@@ -62,54 +70,70 @@ public:
   using map_t = std::map<memodb_value, memodb_value>;
 
 private:
-  value_t type_;
+  using variant_type =
+      std::variant<undefined_t, null_t, bool_t, integer_t, float_t, bytes_t,
+                   string_t, ref_t, array_t, map_t>;
 
-  // TODO: use union
-  bool_t bool_;
-  integer_t integer_;
-  float_t float_;
-  bytes_t bytes_;
-  string_t string_;
-  ref_t ref_;
-  array_t array_;
-  map_t map_;
+  variant_type variant_;
+
+  template <typename T> T &as() {
+    T *x = std::get_if<T>(&variant_);
+    if (!x)
+      llvm::report_fatal_error("invalid memodb_value type");
+    return *x;
+  }
+
+  template <typename T> const T &as() const {
+    return const_cast<memodb_value *>(this)->as<T>();
+  }
 
 public:
-  memodb_value() : type_(UNDEFINED) {}
-  memodb_value(std::nullptr_t) : type_(NULL_TYPE) {}
+  memodb_value() : variant_() {}
+  memodb_value(std::nullptr_t) : variant_(null_t()) {}
 
-  memodb_value(bool_t val) : type_(BOOL), bool_(val) {}
+  memodb_value(undefined_t val) : variant_(val) {}
+  memodb_value(null_t val) : variant_(val) {}
+  memodb_value(bool_t val) : variant_(val) {}
+  memodb_value(integer_t val) : variant_(integer_t(val)) {}
+  memodb_value(float_t val) : variant_(val) {}
 
-  memodb_value(int val) : type_(INTEGER), integer_(val) {}
-  memodb_value(integer_t val) : type_(INTEGER), integer_(val) {}
-  memodb_value(std::uint64_t val) : type_(INTEGER), integer_(val) {}
-  memodb_value(long long int val) : type_(INTEGER), integer_(val) {}
+  memodb_value(const bytes_t &val) : variant_(val) {}
+  memodb_value(const string_t &val) : variant_(val) {}
+  memodb_value(const ref_t &val) : variant_(val) {}
+  memodb_value(const array_t &val) : variant_(val) {}
+  memodb_value(const map_t &val) : variant_(val) {}
 
-  memodb_value(float_t val) : type_(FLOAT), float_(val) {}
+  memodb_value(bytes_t &&val) : variant_(std::move(val)) {}
+  memodb_value(string_t &&val) : variant_(std::move(val)) {}
+  memodb_value(ref_t &&val) : variant_(std::move(val)) {}
+  memodb_value(array_t &&val) : variant_(std::move(val)) {}
+  memodb_value(map_t &&val) : variant_(std::move(val)) {}
 
-  memodb_value(llvm::ArrayRef<std::uint8_t> val) : type_(BYTES), bytes_(val) {}
+  template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
+  memodb_value(T val) : variant_(integer_t(val)) {}
+  template <typename T,
+            std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
+  memodb_value(T val) : variant_(float_t(val)) {}
+
+  memodb_value(llvm::ArrayRef<std::uint8_t> val) : variant_(bytes_t(val)) {}
   static memodb_value bytes(llvm::StringRef val) {
     return memodb_value(
         llvm::ArrayRef<unsigned char>(val.bytes_begin(), val.bytes_end()));
   }
 
   // TODO: verify that value is valid UTF-8.
-  memodb_value(const char *val) : type_(STRING), string_(val) {}
+  memodb_value(const char *val) : variant_(string_t(val)) {}
   // Explicit because strings are often not valid UTF-8.
   static memodb_value string(llvm::StringRef val) {
     memodb_value result;
-    result.type_ = STRING;
-    result.string_ = val;
+    result.variant_ = string_t(val);
     return result;
   }
-
-  memodb_value(const memodb_ref &val) : type_(REF), ref_(val) {}
 
   static memodb_value
   array(std::initializer_list<array_t::value_type> init = {}) {
     memodb_value result;
-    result.type_ = ARRAY;
-    result.array_ = array_t(init);
+    result.variant_ = array_t(init);
     return result;
   }
   template <class InputIT>
@@ -117,50 +141,45 @@ public:
 
   static memodb_value map(std::initializer_list<map_t::value_type> init = {}) {
     memodb_value result;
-    result.type_ = MAP;
-    result.map_ = map_t(init);
+    result.variant_ = map_t(init);
     return result;
   }
   template <class InputIT> static memodb_value map(InputIT first, InputIT last);
 
-  float_t as_float() const {
-    require_type(FLOAT);
-    return float_;
-  }
-  const ref_t &as_ref() const {
-    require_type(REF);
-    return ref_;
-  }
-  const string_t &as_string() const {
-    require_type(STRING);
-    return string_;
-  }
-  const llvm::ArrayRef<std::uint8_t> as_bytes() const {
-    require_type(BYTES);
-    return bytes_;
-  }
+  integer_t as_integer() const { return as<integer_t>(); }
+  float_t as_float() const { return as<float_t>(); }
+  const ref_t &as_ref() const { return as<ref_t>(); }
+  const string_t &as_string() const { return as<string_t>(); }
+  const llvm::ArrayRef<std::uint8_t> as_bytes() const { return as<bytes_t>(); }
   const llvm::StringRef as_bytestring() const {
-    require_type(BYTES);
-    return llvm::StringRef(reinterpret_cast<const char *>(bytes_.data()),
-                           bytes_.size());
+    const bytes_t &bytes = as<bytes_t>();
+    return llvm::StringRef(reinterpret_cast<const char *>(bytes.data()),
+                           bytes.size());
   }
 
-  const array_t &array_items() const {
-    require_type(ARRAY);
-    return array_;
-  }
+  const array_t &array_items() const { return as<array_t>(); }
 
-  const map_t &map_items() const {
-    require_type(MAP);
-    return map_;
-  }
+  array_t &array_items() { return as<array_t>(); }
 
-  map_t &map_items() {
-    require_type(MAP);
-    return map_;
-  }
+  const map_t &map_items() const { return as<map_t>(); }
 
-  constexpr value_t type() const noexcept { return type_; }
+  map_t &map_items() { return as<map_t>(); }
+
+  constexpr value_t type() const noexcept {
+    return std::visit(overloaded{
+                          [](const undefined_t &) { return UNDEFINED; },
+                          [](const null_t &) { return NULL_TYPE; },
+                          [](const bool_t &) { return BOOL; },
+                          [](const integer_t &) { return INTEGER; },
+                          [](const float_t &) { return FLOAT; },
+                          [](const bytes_t &) { return BYTES; },
+                          [](const string_t &) { return STRING; },
+                          [](const ref_t &) { return REF; },
+                          [](const array_t &) { return ARRAY; },
+                          [](const map_t &) { return MAP; },
+                      },
+                      variant_);
+  }
 
   static memodb_value load_cbor(llvm::ArrayRef<std::uint8_t> in) {
     return load_cbor_ref(in);
@@ -171,105 +190,53 @@ private:
   static memodb_value load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in);
 
   void require_type(value_t type) const {
-    if (type != type_) {
+    if (type != this->type()) {
       llvm::report_fatal_error("invalid memodb_value type");
     }
   }
 
 public:
   reference at(const value_type &idx) {
-    if (type_ == ARRAY) {
-      idx.require_type(INTEGER);
-      return array_.at(idx.integer_);
+    if (type() == ARRAY) {
+      return array_items().at(idx.as_integer());
     } else {
-      require_type(MAP);
-      return map_.at(idx);
+      return map_items().at(idx);
     }
   }
 
   const_reference at(const value_type &idx) const {
-    if (type_ == ARRAY) {
-      idx.require_type(INTEGER);
-      return array_.at(idx.integer_);
+    if (type() == ARRAY) {
+      return array_items().at(idx.as_integer());
     } else {
-      require_type(MAP);
-      return map_.at(idx);
+      return map_items().at(idx);
     }
   }
 
   reference operator[](const value_type &idx) {
-    if (type_ == ARRAY) {
+    if (type() == ARRAY) {
       return at(idx);
     } else {
-      require_type(MAP);
-      return map_[idx];
+      return map_items()[idx];
     }
   }
 
   const_reference operator[](const value_type &idx) const {
-    if (type_ == ARRAY) {
+    if (type() == ARRAY) {
       return at(idx);
     } else {
-      assert(map_.find(idx) != map_.end());
-      return map_.find(idx)->second;
+      const map_t &map = map_items();
+      const auto iter = map.find(idx);
+      assert(iter != map.end());
+      return iter->second;
     }
   }
 
   bool operator<(const memodb_value &other) const {
-    if (type_ < other.type_)
-      return true;
-    if (type_ > other.type_)
-      return false;
-    switch (type_) {
-    case UNDEFINED:
-      return false;
-    case NULL_TYPE:
-      return false;
-    case BOOL:
-      return bool_ < other.bool_;
-    case INTEGER:
-      return integer_ < other.integer_;
-    case FLOAT:
-      return float_ < other.float_;
-    case BYTES:
-      return bytes_ < other.bytes_;
-    case STRING:
-      return string_ < other.string_;
-    case REF:
-      return ref_ < other.ref_;
-    case ARRAY:
-      return array_ < other.array_;
-    case MAP:
-      return map_ < other.map_;
-    }
-    llvm_unreachable("missing switch case");
+    return variant_ < other.variant_;
   }
 
   bool operator==(const memodb_value &other) const {
-    if (type_ != other.type_)
-      return false;
-    switch (type_) {
-    case UNDEFINED:
-    case NULL_TYPE:
-      return true;
-    case BOOL:
-      return bool_ == other.bool_;
-    case INTEGER:
-      return integer_ == other.integer_;
-    case FLOAT:
-      return float_ == other.float_;
-    case BYTES:
-      return bytes_ == other.bytes_;
-    case STRING:
-      return string_ == other.string_;
-    case REF:
-      return ref_ == other.ref_;
-    case ARRAY:
-      return array_ == other.array_;
-    case MAP:
-      return map_ == other.map_;
-    }
-    llvm_unreachable("missing switch case");
+    return variant_ == other.variant_;
   }
 
   friend std::ostream &operator<<(std::ostream &, const memodb_value &);

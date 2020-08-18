@@ -31,68 +31,74 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
     }
   };
 
-  bool first = true;
-  switch (value.type_) {
-  case memodb_value::UNDEFINED:
-    return os << "undefined";
-  case memodb_value::NULL_TYPE:
-    return os << "null";
-  case memodb_value::BOOL:
-    return os << (value.bool_ ? "true" : "false");
-  case memodb_value::INTEGER:
-    return os << value.integer_;
-  case memodb_value::FLOAT:
-    if (std::isnan(value.float_))
-      return os << "NaN";
-    if (std::isinf(value.float_))
-      return os << (value.float_ < 0 ? "-Infinity" : "Infinity");
-    return os << value.float_;
-  case memodb_value::BYTES:
-    if (std::all_of(
-            value.bytes_.begin(), value.bytes_.end(), [](std::uint8_t b) {
-              return b >= 33 && b <= 126 && b != '\'' && b != '"' && b != '\\';
-            })) {
-      os << "'";
-      for (std::uint8_t b : value.bytes_)
-        os << static_cast<char>(b);
-      return os << "'";
-    } else {
-      os << "h'";
-      for (std::uint8_t b : value.bytes_) {
-        char buf[3];
-        std::snprintf(buf, sizeof(buf), "%02x", b);
-        os << buf;
-      }
-      return os << "'";
-    }
-  case memodb_value::STRING:
-    os << '"';
-    print_escaped(value.string_);
-    return os << '"';
-  case memodb_value::REF:
-    os << "39(\"";
-    print_escaped(value.ref_);
-    return os << "\")";
-  case memodb_value::ARRAY:
-    os << '[';
-    for (const auto &item : value.array_) {
-      if (!first)
-        os << ", ";
-      first = false;
-      os << item;
-    }
-    return os << ']';
-  case memodb_value::MAP:
-    os << '{';
-    for (const auto &item : value.map_) {
-      if (!first)
-        os << ", ";
-      first = false;
-      os << item.first << ": " << item.second;
-    }
-    return os << '}';
-  }
-  return os << "UNKNOWN";
+  std::visit(
+      overloaded{
+          [&](const memodb_value::undefined_t &) { os << "undefined"; },
+          [&](const memodb_value::null_t &) { os << "null"; },
+          [&](const memodb_value::bool_t &x) { os << (x ? "true" : "false"); },
+          [&](const memodb_value::integer_t &x) { os << x; },
+          [&](const memodb_value::float_t &x) {
+            if (std::isnan(x))
+              os << "NaN";
+            else if (std::isinf(x))
+              os << (x < 0 ? "-Infinity" : "Infinity");
+            else
+              os << x;
+          },
+          [&](const memodb_value::bytes_t &x) {
+            if (std::all_of(x.begin(), x.end(), [](std::uint8_t b) {
+                  return b >= 33 && b <= 126 && b != '\'' && b != '"' &&
+                         b != '\\';
+                })) {
+              os << "'";
+              for (std::uint8_t b : x)
+                os << static_cast<char>(b);
+              os << "'";
+            } else {
+              os << "h'";
+              for (std::uint8_t b : x) {
+                char buf[3];
+                std::snprintf(buf, sizeof(buf), "%02x", b);
+                os << buf;
+              }
+              os << "'";
+            }
+          },
+          [&](const memodb_value::string_t &x) {
+            os << '"';
+            print_escaped(x);
+            os << '"';
+          },
+          [&](const memodb_value::ref_t &x) {
+            os << "39(\"";
+            print_escaped(x);
+            os << "\")";
+          },
+          [&](const memodb_value::array_t &x) {
+            bool first = true;
+            os << '[';
+            for (const auto &item : x) {
+              if (!first)
+                os << ", ";
+              first = false;
+              os << item;
+            }
+            os << ']';
+          },
+          [&](const memodb_value::map_t &x) {
+            bool first = true;
+            os << '{';
+            for (const auto &item : x) {
+              if (!first)
+                os << ", ";
+              first = false;
+              os << item.first << ": " << item.second;
+            }
+            os << '}';
+          },
+      },
+      value.variant_);
+  return os;
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
@@ -232,60 +238,54 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
   if (is_ref)
     assert(major_type == 3);
 
-  memodb_value result;
   switch (major_type) {
   case 0:
     assert(!indefinite);
-    return memodb_value(additional);
+    return additional;
   case 1:
     assert(!indefinite);
-    return memodb_value(-std::int64_t(additional) - 1);
-  case 2:
-    result.type_ = BYTES;
+    return -std::int64_t(additional) - 1;
+  case 2: {
+    bytes_t result;
     while (next_string()) {
-      result.bytes_.insert(result.bytes_.end(), in.data(),
-                           in.data() + additional);
+      result.insert(result.end(), in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
-    return result;
-  case 3:
-    result.type_ = STRING;
+    return memodb_value(result);
+  }
+  case 3: {
+    string_t result;
     while (next_string()) {
-      result.string_.append(in.data(), in.data() + additional);
+      result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
-    if (is_ref) {
-      result.type_ = REF;
-      result.ref_ = memodb_ref(std::move(result.string_));
-    }
-    return result;
-  case 4:
-    result.type_ = ARRAY;
+    if (is_ref)
+      return memodb_ref(std::move(result));
+    return memodb_value::string(result);
+  }
+  case 4: {
+    array_t result;
     while (next_item())
-      result.array_.emplace_back(load_cbor_ref(in));
+      result.emplace_back(load_cbor_ref(in));
     return result;
-  case 5:
-    result.type_ = MAP;
+  }
+  case 5: {
+    map_t result;
     while (next_item()) {
-      memodb_value first = load_cbor_ref(in);
-      memodb_value second = load_cbor_ref(in);
-      result.map_[first] = second;
+      memodb_value key = load_cbor_ref(in);
+      result[key] = load_cbor_ref(in);
     }
     return result;
+  }
   case 7:
     assert(!indefinite);
     switch (minor_type) {
     case 20:
-      result.type_ = BOOL;
-      result.bool_ = false;
-      return result;
+      return false;
     case 21:
-      result.type_ = BOOL;
-      result.bool_ = true;
-      return result;
+      return true;
     case 22:
-      result.type_ = NULL_TYPE;
-      return result;
+      return nullptr;
     case 23: // undefined
       return {};
     case 25:
@@ -325,75 +325,66 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
       out.push_back((additional >> 8 * (num_bytes - i - 1)) & 0xff);
   };
 
-  switch (type_) {
-  case UNDEFINED:
-    start(7, 23);
-    break;
-  case NULL_TYPE:
-    start(7, 22);
-    break;
-  case BOOL:
-    start(7, bool_ ? 21 : 20);
-    break;
-  case INTEGER:
-    if (integer_ < 0)
-      start(1, -integer_ - 1);
-    else
-      start(0, integer_);
-    break;
-  case FLOAT:
-    std::uint64_t additional;
-    if (encode_float(additional, float_, 16, 10, 15))
-      start(7, additional, 25);
-    else if (encode_float(additional, float_, 32, 23, 127))
-      start(7, additional, 26);
-    else {
-      encode_float(additional, float_, 64, 52, 1023);
-      start(7, additional, 27);
-    }
-    break;
-  case BYTES:
-    start(2, bytes_.size());
-    out.insert(out.end(), bytes_.begin(), bytes_.end());
-    break;
-  case STRING:
-    start(3, string_.size());
-    out.insert(out.end(), string_.begin(), string_.end());
-    break;
-  case REF:
-    start(6, 39); // "identifier" tag
-    start(3, llvm::StringRef(ref_).size());
-    out.insert(out.end(), llvm::StringRef(ref_).begin(),
-               llvm::StringRef(ref_).end());
-    break;
-  case ARRAY:
-    start(4, array_.size());
-    for (const memodb_value &item : array_)
-      item.save_cbor(out);
-    break;
-  case MAP:
-    // use canonical CBOR order
-    {
-      std::vector<std::pair<bytes_t, const memodb_value *>> items;
-      for (const auto &item : map_) {
-        items.emplace_back(bytes_t(), &item.second);
-        item.first.save_cbor(items.back().first);
-      }
-      std::sort(items.begin(), items.end(), [](auto &a, auto &b) {
-        return a.first.size() != b.first.size()
-                   ? a.first.size() < b.first.size()
-                   : a.first < b.first;
-      });
-      start(5, items.size());
-      for (const auto &item : items) {
-        out.insert(out.end(), item.first.begin(), item.first.end());
-        item.second->save_cbor(out);
-      }
-    }
-    break;
-  default:
-    llvm_unreachable("missing switch case");
-  }
+  std::visit(overloaded{
+                 [&](const undefined_t &) { start(7, 23); },
+                 [&](const null_t &) { start(7, 22); },
+                 [&](const bool_t &x) { start(7, x ? 21 : 20); },
+                 [&](const integer_t &x) {
+                   if (x < 0)
+                     start(1, -(x + 1));
+                   else
+                     start(0, x);
+                 },
+                 [&](const float_t &x) {
+                   std::uint64_t additional;
+                   if (encode_float(additional, x, 16, 10, 15))
+                     start(7, additional, 25);
+                   else if (encode_float(additional, x, 32, 23, 127))
+                     start(7, additional, 26);
+                   else {
+                     encode_float(additional, x, 64, 52, 1023);
+                     start(7, additional, 27);
+                   }
+                 },
+                 [&](const bytes_t &x) {
+                   start(2, x.size());
+                   out.insert(out.end(), x.begin(), x.end());
+                 },
+                 [&](const string_t &x) {
+                   start(3, x.size());
+                   out.insert(out.end(), x.begin(), x.end());
+                 },
+                 [&](const ref_t &x) {
+                   start(6, 39); // "identifier" tag
+                   start(3, llvm::StringRef(x).size());
+                   out.insert(out.end(), llvm::StringRef(x).begin(),
+                              llvm::StringRef(x).end());
+                 },
+                 [&](const array_t &x) {
+                   start(4, x.size());
+                   for (const memodb_value &item : x)
+                     item.save_cbor(out);
+                 },
+                 [&](const map_t &x) {
+                   std::vector<std::pair<bytes_t, const memodb_value *>> items;
+                   for (const auto &item : x) {
+                     items.emplace_back(bytes_t(), &item.second);
+                     item.first.save_cbor(items.back().first);
+                   }
+                   std::sort(items.begin(), items.end(), [](auto &a, auto &b) {
+                     return a.first.size() != b.first.size()
+                                ? a.first.size() < b.first.size()
+                                : a.first < b.first;
+                   });
+                   start(5, items.size());
+                   for (const auto &item : items) {
+                     out.insert(out.end(), item.first.begin(),
+                                item.first.end());
+                     item.second->save_cbor(out);
+                   }
+                 },
+             },
+             variant_);
 }
 
 std::vector<memodb_path> memodb_db::list_paths_to(const memodb_ref &ref) {
