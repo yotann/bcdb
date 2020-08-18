@@ -136,15 +136,11 @@ int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
   sys::PrintStackTraceOnErrorSignal(argv[0]);
 
-  for (auto &I : cl::TopLevelSubCommand->OptionsMap) {
-    if (OptionHasCategory(*I.second, cl::GeneralCategory)) {
-      // Hide LLVM's options, since they're mostly irrelevant.
-      I.second->setHiddenFlag(cl::Hidden);
-      I.second->addSubCommand(*cl::AllSubCommands);
-    } else {
-      // no change (--help, --version, etc.)
-    }
-  }
+  ReorganizeOptions([](cl::Option *O) {
+    // Hide LLVM's options, since they're mostly irrelevant.
+    O->setHiddenFlag(cl::Hidden);
+    O->addSubCommand(*cl::AllSubCommands);
+  });
   cl::ParseCommandLineOptions(argc, argv, "Imitate the native linker");
 
   if (AnnotateCommand) {

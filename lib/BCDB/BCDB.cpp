@@ -27,12 +27,12 @@ cl::OptionCategory bcdb::BCDBCategory("BCDB options");
 static cl::opt<bool> NoRenameConstants(
     "no-rename-constants",
     cl::desc("Don't improve deduplication by renaming anonymous constants"),
-    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(BCDBCategory));
 
 static cl::opt<bool> RenameGlobals(
     "rename-globals",
     cl::desc("When adding a module, rename referenced globals based on IDs"),
-    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(BCDBCategory));
 
 Error BCDB::Init(StringRef uri) {
   Expected<std::unique_ptr<memodb_db>> db =

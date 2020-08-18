@@ -39,49 +39,47 @@ using namespace llvm;
 static cl::list<std::string> SpecialCaseFilename(
     "mux-symbol-list",
     cl::desc("Special case symbol list (sanitizer blacklist format)"),
-    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(MergeCategory));
 
 static cl::opt<bool> AllowSpuriousExports(
     "allow-spurious-exports",
     cl::desc("Allow the muxed module to export extra symbols that the original "
              "modules didn't export"),
-    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(MergeCategory));
 
 static cl::opt<bool> KnownDynamicDefs(
     "known-dynamic-defs",
     cl::desc("All dynamic definitions are listed with --mux-symbol-list"),
-    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(MergeCategory));
 
 static cl::opt<bool> KnownDynamicUses(
     "known-dynamic-uses",
     cl::desc("All dynamic uses are listed with --mux-symbol-list"),
-    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(MergeCategory));
 
 static cl::opt<bool> KnownRTLDLocal(
     "known-rtld-local",
     cl::desc("All RTLD_LOCAL declarations are listed with --mux-symbol-list"),
-    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+    cl::cat(MergeCategory));
 
 static cl::opt<bool>
     TrapUnreachableFunctions("trap-unreachable-functions",
                              cl::desc("Print an error message at run time if "
                                       "an unreachable function is called"),
-                             cl::cat(MergeCategory),
-                             cl::sub(*cl::AllSubCommands));
+                             cl::cat(MergeCategory));
 
 static cl::opt<bool>
     DisableOpts("disable-opts",
                 cl::desc("Disable optimizations that use available_externally"),
-                cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+                cl::cat(MergeCategory));
 
 static cl::opt<bool> Debug("debug-mux2", cl::desc("Debugging output for mux2"),
-                           cl::cat(MergeCategory),
-                           cl::sub(*cl::AllSubCommands));
+                           cl::cat(MergeCategory));
 
 static cl::opt<bool>
     DisableDSOLocal("disable-dso-local",
                     cl::desc("Disable protected visibility and dso_local"),
-                    cl::cat(MergeCategory), cl::sub(*cl::AllSubCommands));
+                    cl::cat(MergeCategory));
 
 static std::unique_ptr<Module> LoadMuxLibrary(LLVMContext &Context) {
   ExitOnError Err("LoadMuxLibrary: ");

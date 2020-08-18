@@ -25,16 +25,19 @@
 using namespace bcdb;
 using namespace llvm;
 
+static cl::OptionCategory Category("Joining options");
+
 static cl::opt<std::string> InputDirectory(cl::Positional, cl::Required,
                                            cl::desc("<input directory>"),
-                                           cl::value_desc("directory"));
+                                           cl::value_desc("directory"),
+                                           cl::cat(Category));
 
-static cl::opt<std::string> OutputFilename("o",
-                                           cl::desc("<output bitcode file>"),
-                                           cl::init("-"),
-                                           cl::value_desc("filename"));
+static cl::opt<std::string>
+    OutputFilename("o", cl::desc("<output bitcode file>"), cl::init("-"),
+                   cl::value_desc("filename"), cl::cat(Category));
 
-static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"));
+static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"),
+                           cl::cat(Category));
 
 static std::unique_ptr<llvm::Module> loadModule(LLVMContext &Context,
                                                 StringRef Filename) {
@@ -51,6 +54,7 @@ int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
   sys::PrintStackTraceOnErrorSignal(argv[0]);
 
+  HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "Module joining");
 
   LLVMContext Context;

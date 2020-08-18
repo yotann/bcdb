@@ -21,14 +21,16 @@
 using namespace bcdb;
 using namespace llvm;
 
-static cl::opt<std::string> InputFilename(cl::Positional,
-                                          cl::desc("<input bitcode file>"),
-                                          cl::init("-"),
-                                          cl::value_desc("filename"));
+static cl::OptionCategory Category("Splitting options");
+
+static cl::opt<std::string>
+    InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
+                  cl::init("-"), cl::value_desc("filename"), cl::cat(Category));
 
 static cl::opt<std::string> OutputDirectory("o", cl::Required,
                                             cl::desc("<output directory>"),
-                                            cl::value_desc("directory"));
+                                            cl::value_desc("directory"),
+                                            cl::cat(Category));
 
 static Error saveModule(StringRef Dir, StringRef File, Module &MPart) {
   std::error_code EC;
@@ -55,6 +57,7 @@ int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
   sys::PrintStackTraceOnErrorSignal(argv[0]);
 
+  cl::HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "Module splitting");
 
   LLVMContext Context;

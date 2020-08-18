@@ -18,14 +18,19 @@
 using namespace bcdb;
 using namespace llvm;
 
-static cl::opt<std::string>
-    InputFilename(cl::Positional, cl::desc("<input bitcode>"), cl::init("-"));
+static cl::OptionCategory Category("Alignment options");
+
+static cl::opt<std::string> InputFilename(cl::Positional,
+                                          cl::desc("<input bitcode>"),
+                                          cl::init("-"), cl::cat(Category));
 
 static cl::opt<std::string> OutputFilename("o",
                                            cl::desc("Override output filename"),
-                                           cl::value_desc("filename"));
+                                           cl::value_desc("filename"),
+                                           cl::cat(Category));
 
-static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"));
+static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"),
+                           cl::cat(Category));
 
 static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
   // Infer the output filename if needed.
@@ -58,6 +63,7 @@ int main(int argc, const char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
   sys::PrintStackTraceOnErrorSignal(argv[0]);
 
+  cl::HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "bitcode aligner");
 
   ErrorOr<std::unique_ptr<MemoryBuffer>> MemBufOrErr =

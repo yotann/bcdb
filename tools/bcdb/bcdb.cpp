@@ -439,21 +439,20 @@ int main(int argc, char **argv) {
   PrettyStackTraceProgram StackPrinter(argc, argv);
   sys::PrintStackTraceOnErrorSignal(argv[0]);
 
-  for (auto &I : cl::TopLevelSubCommand->OptionsMap) {
-    if (OptionHasCategory(*I.second, cl::GeneralCategory)) {
-      // Hide LLVM's options, since they're mostly irrelevant.
-      I.second->setHiddenFlag(cl::Hidden);
-      I.second->addSubCommand(*cl::AllSubCommands);
-    } else if (OptionHasCategory(*I.second, BCDBCategory)) {
-      I.second->addSubCommand(*cl::AllSubCommands);
-    } else if (OptionHasCategory(*I.second, MergeCategory)) {
-      I.second->addSubCommand(MergeCommand);
-      I.second->addSubCommand(MuxCommand);
-      I.second->addSubCommand(Mux2Command);
+  // Reorganize options into subcommands.
+  ReorganizeOptions([](cl::Option *O) {
+    if (OptionHasCategory(*O, BCDBCategory)) {
+      O->addSubCommand(*cl::AllSubCommands);
+    } else if (OptionHasCategory(*O, MergeCategory)) {
+      O->addSubCommand(MergeCommand);
+      O->addSubCommand(MuxCommand);
+      O->addSubCommand(Mux2Command);
     } else {
-      // no change (--help, --version, etc.)
+      // Hide LLVM's options, since they're mostly irrelevant.
+      O->setHiddenFlag(cl::Hidden);
+      O->addSubCommand(*cl::AllSubCommands);
     }
-  }
+  });
   cl::ParseCommandLineOptions(argc, argv, "BCDB Tools");
 
   if (AddCommand) {
