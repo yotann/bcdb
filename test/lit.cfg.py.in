@@ -13,7 +13,7 @@ for i in range(3, 1 + @LLVM_VERSION_MAJOR@):
 
 config.substitutions.append(("%shlibdir", "@LLVM_SHLIB_OUTPUT_INTDIR@"))
 config.substitutions.append(("%shlibext", "@SHLIBEXT@"))
-config.substitutions.append(("%mux2test", "python @CMAKE_SOURCE_DIR@/utils/mux2test.py"))
+config.substitutions.append(("%gltest", "python @CMAKE_SOURCE_DIR@/utils/gl-test.py"))
 
 # Add our newly-built tools to the path
 newpath = "@LLVM_RUNTIME_OUTPUT_INTDIR@"

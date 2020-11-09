@@ -114,7 +114,7 @@ static cl::SubCommand MeltCommand("melt",
                                   "Load all functions into a single module");
 static cl::SubCommand MergeCommand("merge", "Merge modules");
 static cl::SubCommand MuxCommand("mux", "Mux modules");
-static cl::SubCommand Mux2Command("mux2", "Mux modules (separate-ELF version)");
+static cl::SubCommand Mux2Command("gl", "Perform guided linking");
 
 static cl::opt<bool> DisableVerify("disable-verify",
                                    cl::desc("Don't verify the output module"),
@@ -319,7 +319,7 @@ static cl::opt<std::string>
                    cl::value_desc("directory"), cl::sub(Mux2Command));
 
 static int Mux2() {
-  ExitOnError Err("bcdb mux2: ");
+  ExitOnError Err("bcdb gl: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)

@@ -1,0 +1,51 @@
+# Force these symbols to go in the actual executable, not the muxed library.
+[gl-unmovable]
+global:llvm\.used
+global:llvm\.compiler\.used
+global:llvm\.global_ctors
+global:llvm\.global_dtors
+
+[gl-use]
+fun:__bcdb_unreachable_function_called
+fun:__bcdb_weak_definition_called
+fun:main
+global:llvm\.used
+global:llvm\.compiler\.used
+global:llvm\.global_ctors
+global:llvm\.global_dtors
+
+# llvm intrinsics
+[gl-always-defined-externally]
+fun:llvm\.*
+[gl-noplugin]
+fun:llvm\.*
+
+# functions defined in libc that we use in gl_library.c
+[gl-always-defined-externally]
+fun:abort
+fun:fprintf
+fun:__fprintf_chk
+
+# glibc defines these functions in libc_nonshared.a
+[gl-always-defined-externally]
+fun:atexit
+fun:at_quick_exit
+fun:__fstat
+fun:fstat
+fun:fstat64
+fun:fstatat
+fun:fstatat64
+fun:__libc_csu_fini
+fun:__libc_csu_init
+fun:__lstat
+fun:lstat
+fun:lstat64
+fun:__mknod
+fun:mknod
+fun:mknodat
+fun:__pthread_atfork
+fun:pthread_atfork
+fun:__stack_chk_fail_local
+fun:__stat
+fun:stat
+fun:stat64

@@ -1,0 +1,3 @@
+RUN: %gltest %p/library-conflict.ll %t --noweak --nouse --noplugin
+RUN: %t.elf/module2
+RUN: %t.elf/module3
