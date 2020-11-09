@@ -302,6 +302,9 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
 }
 
 void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
+  // Save the value in canonical CBOR format.
+  // https://tools.ietf.org/html/rfc7049#section-3.9
+
   auto start = [&](int major_type, std::uint64_t additional,
                    int force_minor = 0) {
     int num_bytes;
