@@ -747,7 +747,7 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
     // Run some optimizations to make use of the available_externally functions
     // we created.
     legacy::PassManager PM;
-    PM.add(createInstructionCombiningPass(/*ExpensiveCombines*/ false));
+    PM.add(createInstructionCombiningPass(/*ExpensiveCombines*/ true));
     PM.add(createConstantPropagationPass());
     PM.add(createAlwaysInlinerLegacyPass());
     PM.add(createGlobalDCEPass());

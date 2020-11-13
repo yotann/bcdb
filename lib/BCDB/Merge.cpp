@@ -48,7 +48,7 @@ void Merger::AddModule(StringRef ModuleName) {
     GlobalValue &GV = *Remainder->getNamedValue(item.first);
     GlobalItems[&GV].PartID = item.second;
     for (const auto &ref : LoadPartRefs(item.second, item.first))
-      GlobalItems[&GV].Refs[ref.first()] = ResolvedReference();
+      GlobalItems[&GV].Refs[std::string(ref.first())] = ResolvedReference();
   }
   for (GlobalValue &GV :
        concat<GlobalValue>(Remainder->global_objects(), Remainder->aliases(),
@@ -57,7 +57,8 @@ void Merger::AddModule(StringRef ModuleName) {
       continue;
     if (!GlobalItems.count(&GV))
       for (const auto &Ref : FindGlobalReferences(&GV))
-        GlobalItems[&GV].Refs[Ref->getName()] = ResolvedReference();
+        GlobalItems[&GV].Refs[std::string(Ref->getName())] =
+            ResolvedReference();
     GlobalItems[&GV].ModuleName = ModuleName;
     GlobalItems[&GV].Name = GV.getName();
   }
@@ -108,8 +109,8 @@ void Merger::ApplyNewNames(
   StringMap<const ResolvedReference *> NewReferences;
   for (GlobalValue &GV :
        concat<GlobalValue>(M.global_objects(), M.aliases(), M.ifuncs())) {
-    if (GV.hasName() && Refs.count(GV.getName())) {
-      auto &Ref = Refs.at(GV.getName());
+    if (GV.hasName() && Refs.count(std::string(GV.getName()))) {
+      auto &Ref = Refs.at(std::string(GV.getName()));
       auto NewName = GetNewName(Ref);
       NewNames[&GV] = NewName;
       if (NewReferences.count(NewName)) {
@@ -490,7 +491,7 @@ std::unique_ptr<Module> Merger::Finish() {
         } else {
           // FIXME: what if refs to a definition in the remainder are resolved
           // to something else?
-          Refs[GV.getName()] = ResolvedReference(&GI);
+          Refs[std::string(GV.getName())] = ResolvedReference(&GI);
           GIs.push_back(&GI);
           for (auto &Item : GI.Refs)
             Refs[Item.first] = Item.second;
@@ -532,7 +533,7 @@ std::unique_ptr<Module> Merger::Finish() {
 
 std::string Merger::ReserveName(StringRef Prefix) {
   int i = 0;
-  std::string Result = Prefix;
+  std::string Result = std::string(Prefix);
   while (ReservedNames.count(Result)) {
     Result = (Prefix + "." + to_string(i++)).str();
   }

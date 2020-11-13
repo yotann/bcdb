@@ -19,7 +19,7 @@ attributes #0 = { nounwind }
 
 ; MUXED: @func = internal alias void (), void ()* @__bcdb_body_func
 ; MUXED: define protected void @__bcdb_body_func()
-; MUXED-NEXT: call void @func()
+; MUXED: call void @func()
 
 ; PROG: define void @func()
 ; PROG-NEXT: call void @__bcdb_body_func()

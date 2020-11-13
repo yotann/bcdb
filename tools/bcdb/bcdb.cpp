@@ -6,6 +6,8 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Errc.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
@@ -25,10 +27,10 @@
 using namespace bcdb;
 using namespace llvm;
 
-static cl::opt<std::string>
-    UriOrEmpty("uri", cl::Optional, cl::desc("URI of the database"),
-               cl::init(StringRef::withNullAsEmpty(std::getenv("BCDB_URI"))),
-               cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string> UriOrEmpty(
+    "uri", cl::Optional, cl::desc("URI of the database"),
+    cl::init(std::string(StringRef::withNullAsEmpty(std::getenv("BCDB_URI")))),
+    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
 
 static StringRef GetUri() {
   if (UriOrEmpty.empty()) {
@@ -153,7 +155,7 @@ static Expected<bool> ShouldWriteModule() {
       std::make_unique<ToolOutputFile>(GetOutputFilename, EC, sys::fs::F_None);
   if (EC)
     return errorCodeToError(EC);
-  if (GetForce || !CheckBitcodeOutputToConsole(OutputFile->os(), true))
+  if (GetForce || !CheckBitcodeOutputToConsole(OutputFile->os()))
     return true;
   OutputFile.reset();
   return false;
@@ -395,7 +397,8 @@ static int Evaluate() {
 
   memodb_ref result = db->get_db().call_get(FuncName, args);
   if (!result) {
-    report_fatal_error("Can't evaluate function " + FuncName);
+    Err(make_error<StringError>("Can't evaluate function " + FuncName,
+                                errc::invalid_argument));
   }
 
   outs() << llvm::StringRef(result) << "\n";

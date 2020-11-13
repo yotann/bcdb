@@ -7,9 +7,7 @@ configure_lit_site_cfg(
   ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.cfg.py
 )
 
-set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/third_party/lit/lit.py)
-# LIT_COMMAND is needed until LLVM 6
-set(LIT_COMMAND ${PYTHON_EXECUTABLE} ${LLVM_EXTERNAL_LIT})
+set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/third_party/lit/lit.py CACHE STRING "Command used to spawn lit")
 
 # Check we have the FileCheck utility.
 find_program(FILECHECK_PATH FileCheck HINTS ${LLVM_TOOLS_BINARY_DIR})

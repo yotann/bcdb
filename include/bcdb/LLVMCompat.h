@@ -22,6 +22,11 @@ static const FormattingFlags AlwaysPrefix = Prefix;
 } // end namespace llvm
 #endif
 
+#if LLVM_VERSION_MAJOR < 11
+#define hasPassPointeeByValueAttr hasByValOrInAllocaAttr
+#define isPassPointeeByValueArgument isByValOrInAllocaArgument
+#endif
+
 #if defined(LLVM_TRANSFORMS_IPO_FUNCTIONIMPORT_H) && LLVM_VERSION_MAJOR <= 6
 namespace llvm {
 static inline bool convertToDeclaration(GlobalValue &GV) {

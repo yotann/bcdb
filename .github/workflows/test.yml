@@ -12,6 +12,7 @@ jobs:
         - bcdb-llvm8
         - bcdb-llvm9
         - bcdb-llvm10
+        - bcdb-llvm11
         - bcdb-clang
     runs-on: ubuntu-latest
     steps:

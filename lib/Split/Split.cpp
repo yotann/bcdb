@@ -5,7 +5,9 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Attributes.h>
+#if LLVM_VERSION_MAJOR < 8
 #include <llvm/IR/CallSite.h>
+#endif
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -129,9 +131,18 @@ Type *NeededTypeMap::getMember(Type *Ty) {
   case Type::ArrayTyID:
     return *Entry = ArrayType::get(ElementTypes[0],
                                    cast<ArrayType>(Ty)->getNumElements());
+#if LLVM_VERSION_MAJOR >= 11
+  case Type::FixedVectorTyID:
+    return *Entry =
+               FixedVectorType::get(ElementTypes[0], cast<FixedVectorType>(Ty));
+  case Type::ScalableVectorTyID:
+    return *Entry = ScalableVectorType::get(ElementTypes[0],
+                                            cast<ScalableVectorType>(Ty));
+#else
   case Type::VectorTyID:
     return *Entry = VectorType::get(ElementTypes[0],
                                     cast<VectorType>(Ty)->getNumElements());
+#endif
   case Type::PointerTyID:
     return *Entry = PointerType::get(ElementTypes[0],
                                      cast<PointerType>(Ty)->getAddressSpace());
@@ -196,7 +207,7 @@ void NeededTypeMap::VisitValue(const Value *V) {
 
     if (auto *F = dyn_cast<Function>(C)) {
       for (auto &Arg : F->args())
-        if (Arg.hasByValOrInAllocaAttr())
+        if (Arg.hasPassPointeeByValueAttr())
           VisitType(Arg.getType()->getPointerElementType());
     }
   }
@@ -234,13 +245,17 @@ void NeededTypeMap::VisitInstruction(Instruction *I) {
   if (auto *GEP = dyn_cast<GetElementPtrInst>(I))
     VisitType(GEP->getSourceElementType());
 
-  if (auto CS = CallSite(I)) {
-    for (unsigned i = 0; i != CS.getNumArgOperands(); ++i) {
-      if (CS.isByValOrInAllocaArgument(i)) {
+#if LLVM_VERSION_MAJOR >= 8
+  if (CallBase *CB = dyn_cast<CallBase>(I))
+    for (unsigned i = 0; i != CB->getNumArgOperands(); ++i)
+      if (CB->isPassPointeeByValueArgument(i))
+        VisitType(CB->getArgOperand(i)->getType()->getPointerElementType());
+#else
+  if (auto CS = CallSite(I))
+    for (unsigned i = 0; i != CS.getNumArgOperands(); ++i)
+      if (CS.isByValOrInAllocaArgument(i))
         VisitType(CS.getArgument(i)->getType()->getPointerElementType());
-      }
-    }
-  }
+#endif
 }
 
 void NeededTypeMap::VisitFunction(Function &F) {
@@ -310,7 +325,11 @@ Value *DeclMaterializer::materialize(Value *V) {
         GlobalValue::ExternalLinkage, /*init*/ nullptr, SGVar->getName(),
         /*insertbefore*/ nullptr, SGVar->getThreadLocalMode(),
         SGVar->getType()->getAddressSpace());
+#if LLVM_VERSION_MAJOR >= 11
+    DGVar->setAlignment(SGVar->getAlign());
+#else
     DGVar->setAlignment(SGVar->getAlignment());
+#endif
     DGVar->copyAttributesFrom(SGVar);
     NewGV = DGVar;
   } else if (auto *SF = dyn_cast<Function>(SGV)) {

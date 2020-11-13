@@ -64,7 +64,7 @@ Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
   memodb_value head = db->get(ref);
   std::vector<std::string> result;
   for (auto &item : head["functions"].map_items()) {
-    result.push_back(llvm::StringRef(item.second.as_ref()));
+    result.push_back(std::string(llvm::StringRef(item.second.as_ref())));
   }
   return result;
 }
@@ -199,7 +199,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
   for (auto &Item : head["functions"].map_items()) {
     auto Name = Item.first.as_bytestring();
     memodb_ref ref = Item.second.as_ref();
-    PartIDs[Name] = llvm::StringRef(ref);
+    PartIDs[std::string(Name)] = llvm::StringRef(ref);
   }
 
   return Remainder;

@@ -22,6 +22,9 @@ in stdenv.mkDerivation {
   nativeBuildInputs = [ clang cmake pkgconfig python2 xxd ];
   buildInputs = [ libsodium llvm sqlite ];
 
+  preConfigure = ''
+    patchShebangs third_party/lit/lit.py
+  '';
   cmakeBuildType = "Debug";
   doCheck = true;
   dontStrip = true;

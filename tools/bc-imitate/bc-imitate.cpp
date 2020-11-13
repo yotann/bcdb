@@ -88,7 +88,7 @@ static int Annotate() {
   if (verifyModule(*M, &errs())) {
     return 1;
   }
-  if (Force || !CheckBitcodeOutputToConsole(Out.os(), true)) {
+  if (Force || !CheckBitcodeOutputToConsole(Out.os())) {
     WriteBitcodeToFile(*M, Out.os());
     Out.keep();
   }

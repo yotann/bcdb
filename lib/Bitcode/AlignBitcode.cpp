@@ -306,11 +306,13 @@ void bcdb::WriteUnalignedModule(const Module &M,
 }
 
 void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
+  ExitOnError Err("WriteAlignedModule: ");
+
   SmallVector<char, 0> TmpBuffer;
   WriteUnalignedModule(M, TmpBuffer);
-  AlignBitcode(
+  Err(AlignBitcode(
       MemoryBufferRef(StringRef(TmpBuffer.data(), TmpBuffer.size()), ""),
-      Buffer);
+      Buffer));
 }
 
 size_t bcdb::GetBitcodeSize(MemoryBufferRef Buffer) {

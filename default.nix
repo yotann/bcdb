@@ -30,11 +30,15 @@ in rec {
     llvm = debugLLVM pkgs.llvmPackages_10.llvm;
     clang = pkgs.clang_10;
   };
+  bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
+    llvm = debugLLVM pkgs.llvmPackages_11.llvm;
+    clang = pkgs.clang_11;
+  };
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
   bcdb-clang = pkgs.callPackage ./nix/bcdb {
-    inherit (pkgs.llvmPackages_10) stdenv llvm clang;
+    inherit (pkgs.llvmPackages_11) stdenv llvm clang;
   };
 
-  bcdb = bcdb-llvm10;
+  bcdb = bcdb-llvm11;
 }

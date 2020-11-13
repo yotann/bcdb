@@ -52,7 +52,7 @@ static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
     exit(1);
   }
 
-  if (Force || !CheckBitcodeOutputToConsole(Out->os(), true))
+  if (Force || !CheckBitcodeOutputToConsole(Out->os()))
     Out->os().write(Buffer.data(), Buffer.size());
 
   // Declare success.

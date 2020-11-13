@@ -58,7 +58,7 @@ Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
 
   // List all the function stubs and declarations.
   for (Function &F : *M)
-    GlobalNames.push_back(F.getName());
+    GlobalNames.push_back(std::string(F.getName()));
 }
 
 static AttributeList copyByValAttributes(LLVMContext &C, AttributeList Source,
