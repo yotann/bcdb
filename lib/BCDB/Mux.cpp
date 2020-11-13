@@ -10,11 +10,11 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <map>
 
-#include "bcdb/LLVMCompat.h"
 #include "Merge.h"
+#include "bcdb/LLVMCompat.h"
 
 namespace {
-#include "data/mux_main.inc"
+#include "mux_main.inc"
 }
 
 using namespace bcdb;

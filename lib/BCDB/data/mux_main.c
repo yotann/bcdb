@@ -1,7 +1,5 @@
-// This file provides the implementation of main() used by bcdb mux.
-// If this file is changed, you must regenerate the mux_main.inc file:
-//   clang-4.0 -emit-llvm -Os -c mux_main.c
-//   xxd -i mux_main.bc > mux_main.inc
+// This file provides the implementation of main() that bcdb mux links into its
+// output programs.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,9 +7,7 @@
 
 static const char *basename(const char *name) {
   const char *p = strrchr(name, '/');
-  if (p)
-    return p + 1;
-  return name;
+  return p ? p + 1 : name;
 }
 
 struct Main {
@@ -27,10 +23,8 @@ static void (**fini)(void);
 
 static void do_fini(void) {
   void (**ptr)(void);
-  ptr = fini;
-  while (*ptr) {
-    (*ptr++)();
-  }
+  for (ptr = fini; *ptr; ptr++)
+    (*ptr)();
 }
 
 static void try_main(int argc, char *argv[], char *envp[]) {

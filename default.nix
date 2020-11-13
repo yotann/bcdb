@@ -26,33 +26,39 @@ with import nixpkgs {};
 rec {
   bcdb-llvm4 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_4;
+    clang = clang_4;
   };
   bcdb-llvm5 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_5;
+    clang = clang_5;
   };
   bcdb-llvm6 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_6;
+    clang = clang_6;
   };
   bcdb-llvm7 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_7;
+    clang = clang_7;
   };
   bcdb-llvm8 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_8;
+    clang = clang_8;
   };
   bcdb-llvm9 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_9;
+    clang = clang_9;
   };
   bcdb-llvm10 = callPackage ./build.nix {
     llvm = debugLLVM llvmPackages_10;
+    clang = clang_10;
   };
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
   bcdb-clang = callPackage ./build.nix {
-    inherit (llvmPackages_10) stdenv;
-    llvm = llvmPackages_10.llvm;
+    inherit (llvmPackages_10) stdenv llvm clang;
   };
 
   bcdb = bcdb-llvm10;
 
-  inherit (import nixpkgs_llvm4 {}) llvmPackages_4;
+  inherit (import nixpkgs_llvm4 {}) llvmPackages_4 clang_4;
 }

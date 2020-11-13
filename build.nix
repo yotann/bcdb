@@ -1,4 +1,4 @@
-{ stdenv, cmake, libsodium, llvm, pkgconfig, python2, sqlite }:
+{ stdenv, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd }:
 
 let
   inherit (stdenv) lib;
@@ -15,7 +15,7 @@ stdenv.mkDerivation {
 
   src = builtins.filterSource sourceFilter ./.;
 
-  nativeBuildInputs = [ cmake pkgconfig python2 ];
+  nativeBuildInputs = [ clang cmake pkgconfig python2 xxd ];
   buildInputs = [ libsodium llvm sqlite ];
 
   cmakeBuildType = "Debug";

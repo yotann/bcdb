@@ -45,9 +45,11 @@ You will need the following dependencies:
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
 - [Python](https://www.python.org/), at least 2.7.
-- [LLVM](https://llvm.org/) version 4 through 9 (development versions up to 10 may
-  work, but this is not guaranteed). When working on the BCDB code, you should
-  make sure LLVM is built with assertions enabled.
+- [LLVM](https://llvm.org/) version 4 through 10 (development versions up to 11
+  may work, but this is not guaranteed). When working on the BCDB code, you
+  should make sure LLVM is built with assertions enabled.
+- [Clang](https://clang.llvm.org/), same version as LLVM.
+- `xxd`, which is usually included with [Vim](https://www.vim.org/)
 
 You should then be able to build normally with CMake, like this:
 
