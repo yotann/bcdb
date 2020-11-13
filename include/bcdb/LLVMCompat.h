@@ -59,4 +59,16 @@ template <> struct std::iterator_traits<llvm::BitVector::set_iterator> {
 };
 #endif
 
+#if defined(LLVM_IR_VALUE_H)
+namespace bcdb {
+static inline llvm::Value *stripPointerCastsAndAliases(llvm::Value *V) {
+#if LLVM_VERSION_MAJOR < 10
+  return V->stripPointerCasts();
+#else
+  return V->stripPointerCastsAndAliases();
+#endif
+}
+} // end namespace bcdb
+#endif
+
 #endif // BCDB_LLVMCOMPAT_H

@@ -8,9 +8,9 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
-
 #include <map>
 
+#include "bcdb/LLVMCompat.h"
 #include "Merge.h"
 
 namespace {
@@ -136,7 +136,8 @@ Constant *MuxMerger::HandleInitFini(Module &M, GlobalItem *GI) {
       continue;
     ConstantInt *CI = cast<ConstantInt>(CS->getOperand(0));
     assert(CI->getZExtValue() == 65535);
-    Constant *F = CS->getOperand(1)->stripPointerCasts();
+    Constant *F =
+        cast<Constant>(stripPointerCastsAndAliases(CS->getOperand(1)));
     assert(isa<Function>(F));
     if (F->getType() != InitType)
       F = ConstantExpr::getPointerCast(F, InitType);
