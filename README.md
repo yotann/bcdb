@@ -1,17 +1,24 @@
 # BCDB
 
 [![Github Workflows](https://github.com/yotann/bcdb/workflows/Test/badge.svg)](https://github.com/yotann/bcdb/actions?query=workflow%3ATest)
-[![Semaphore](https://bcdb.semaphoreci.com/badges/bcdb.svg?key=93e3989a-c2bb-49ac-96a0-3d92601b9fed)](https://bcdb.semaphoreci.com/projects/bcdb)
 [![ALLVM ALL THE THINGS!](https://img.shields.io/badge/ALLVM-ALL%20THE%20THINGS-brightgreen.svg)](https://github.com/allvm/allvm-tools)
 [![Cachix cache](https://img.shields.io/badge/cachix-bcdb-blue.svg)](https://bcdb.cachix.org)
+
+The Bitcode Database (BCDB) is a research tool developed as part of the ALLVM
+Project at UIUC. Features:
+
+- Stores huge amounts of LLVM bitcode in an SQLite database.
+- Automatically deduplicates bitcode at the function level.
+- Stores results of analyzing and processing bitcode (WIP).
+- Performs guided linking, which optimizes dynamically linked code.
 
 ## Building
 
 ### Build automatically with Nix
 
-If you have [Nix](https://nixos.org/nix/) installed, it can automatically build
-BCDB along with its dependencies. See `default.nix` for the list of attributes
-you can build. For example:
+If you have [Nix](https://nixos.org/guides/install-nix.html) installed, it can
+automatically build BCDB along with its dependencies. See `default.nix` for the
+list of attributes you can build. For example:
 
 ```shell
 nix-build -A bcdb
@@ -30,7 +37,8 @@ make
 ```
 
 You need to make sure you're in the `nix-shell` shell every time you want to
-build BCDB this way.
+build BCDB this way. The [direnv](https://direnv.net/) tool can help set this
+up automatically.
 
 In any case, you can speed up Nix by using our [Cachix](https://cachix.org)
 cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
