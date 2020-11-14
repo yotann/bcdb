@@ -10,10 +10,6 @@ let
   });
 
 in rec {
-  bcdb-llvm6 = pkgs.callPackage ./nix/bcdb {
-    llvm = debugLLVM pkgs.llvmPackages_6.llvm;
-    clang = pkgs.clang_6;
-  };
   bcdb-llvm7 = pkgs.callPackage ./nix/bcdb {
     llvm = debugLLVM pkgs.llvmPackages_7.llvm;
     clang = pkgs.clang_7;

@@ -7,6 +7,6 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_tool(bc-imitate
   bc-imitate.cpp
 )
-tool_link_libraries(bc-imitate
+target_link_libraries(bc-imitate PRIVATE
   BCDBWholeProgram
 )

@@ -5,6 +5,6 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_tool(bcdb
   bcdb.cpp
 )
-tool_link_libraries(bcdb
+target_link_libraries(bcdb PRIVATE
   BCDB
 )

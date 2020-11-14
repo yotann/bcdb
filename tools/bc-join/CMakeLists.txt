@@ -5,6 +5,6 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_tool(bc-join
   bc-join.cpp
 )
-tool_link_libraries(bc-join
+target_link_libraries(bc-join PRIVATE
   BCDBSplit
 )

@@ -14,7 +14,7 @@ BCDB along with its dependencies. See `default.nix` for the list of attributes
 you can build. For example:
 
 ```shell
-nix-build -A bcdb-llvm10
+nix-build -A bcdb
 result/bin/bcdb -help
 ```
 
@@ -22,7 +22,7 @@ If you want to modify the BCDB code, you can also have Nix build just the
 dependencies and enter a shell with them installed:
 
 ```shell
-nix-shell -A bcdb-llvm10
+nix-shell -A bcdb
 mkdir build
 cd build
 cmake ..
@@ -45,7 +45,7 @@ You will need the following dependencies:
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
 - [Python](https://www.python.org/), at least 2.7.
-- [LLVM](https://llvm.org/) version 6 through 10 (development versions up to 11
+- [LLVM](https://llvm.org/) version 7 through 11 (development versions up to 12
   may work, but this is not guaranteed). When working on the BCDB code, you
   should make sure LLVM is built with assertions enabled.
 - [Clang](https://clang.llvm.org/), same version as LLVM.

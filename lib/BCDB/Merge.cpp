@@ -270,9 +270,7 @@ void Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
 
   ReplaceGlobal(MergedModule, NewName, StubGV);
   LinkageMap[StubGV] = Decl->getLinkage();
-#if LLVM_VERSION_MAJOR >= 7
   StubGV->setDSOLocal(Decl->isDSOLocal());
-#endif
 }
 
 void Merger::LoadRemainder(std::unique_ptr<Module> M,

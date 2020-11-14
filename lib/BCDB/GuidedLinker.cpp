@@ -495,15 +495,11 @@ void Mux2Merger::MakeAvailableExternally(GlobalValue *GV) {
     GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
     GO->setComdat(nullptr);
     GV->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
     GV->setDSOLocal(false);
-#endif
   } else if (isa<GlobalAlias>(GV)) {
     GV->setLinkage(GlobalValue::InternalLinkage);
     GV->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
     GV->setDSOLocal(true);
-#endif
   }
 }
 
@@ -593,9 +589,7 @@ void Mux2Merger::AddPartStub(Module &MergedModule, GlobalItem &GI,
       LinkageMap[StubInStubModule] = GlobalValue::ExternalLinkage;
       StubInStubModule->setLinkage(GlobalValue::ExternalLinkage);
       convertToDeclaration(*StubInStubModule);
-#if LLVM_VERSION_MAJOR >= 7
       StubInStubModule->setDSOLocal(false);
-#endif
     }
   } else {
     if (!GI.BodyInStubModule) {
@@ -664,9 +658,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
         GlobalValue *GV = M->getNamedValue(GI->NewName);
         GV->setLinkage(GlobalValue::ExternalLinkage);
         GV->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
         GV->setDSOLocal(false);
-#endif
       }
 
       // Make the stub module's version available_externally.
@@ -688,9 +680,7 @@ void Mux2Merger::LoadRemainder(std::unique_ptr<Module> M,
       GlobalValue *NewGV = StubModule.getNamedValue(GI->Name);
       LinkageMap.erase(NewGV);
       NewGV->setLinkage(GV->getLinkage());
-#if LLVM_VERSION_MAJOR >= 7
       NewGV->setDSOLocal(GV->isDSOLocal());
-#endif
 
       if (NewGV->hasLocalLinkage() && GI->NeededInMergedModule) {
         ReplaceGlobal(StubModule, GI->NewName, NewGV);
@@ -852,16 +842,12 @@ std::unique_ptr<Module> Mux2Merger::Finish() {
       convertToDeclaration(*Var);
       Var->setLinkage(GlobalValue::ExternalWeakLinkage);
       Var->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
       Var->setDSOLocal(false);
-#endif
     } else if (Function *F = dyn_cast<Function>(&GO)) {
       convertToDeclaration(*F);
       F->setLinkage(GlobalValue::ExternalWeakLinkage);
       F->setVisibility(GlobalValue::DefaultVisibility);
-#if LLVM_VERSION_MAJOR >= 7
       F->setDSOLocal(false);
-#endif
       if (WeakModule) {
         F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
 #if LLVM_VERSION_MAJOR >= 8

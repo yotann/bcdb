@@ -4,6 +4,6 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_tool(bc-align
   bc-align.cpp
 )
-tool_link_libraries(bc-align
+target_link_libraries(bc-align PRIVATE
   BCDBBitcode
 )

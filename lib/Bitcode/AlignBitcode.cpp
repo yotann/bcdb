@@ -296,11 +296,7 @@ Error bcdb::AlignBitcode(MemoryBufferRef InBuffer,
 void bcdb::WriteUnalignedModule(const Module &M,
                                 SmallVectorImpl<char> &Buffer) {
   BitcodeWriter Writer(Buffer);
-#if LLVM_VERSION_MAJOR >= 7
   Writer.writeModule(M);
-#else
-  Writer.writeModule(&M);
-#endif
   Writer.writeSymtab();
   Writer.writeStrtab();
 }

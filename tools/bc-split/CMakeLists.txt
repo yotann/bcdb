@@ -5,6 +5,6 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_tool(bc-split
   bc-split.cpp
 )
-tool_link_libraries(bc-split
+target_link_libraries(bc-split PRIVATE
   BCDBSplit
 )

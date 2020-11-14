@@ -357,9 +357,7 @@ Value *DeclMaterializer::materialize(Value *V) {
   NewGV->setVisibility(GlobalValue::DefaultVisibility);
   NewGV->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
   NewGV->setDLLStorageClass(GlobalValue::DefaultStorageClass);
-#if LLVM_VERSION_MAJOR >= 7
   NewGV->setDSOLocal(false);
-#endif
   if (SGV->hasExternalWeakLinkage())
     NewGV->setLinkage(GlobalValue::ExternalWeakLinkage);
 
@@ -419,9 +417,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   DF->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
   DF->setDLLStorageClass(GlobalValue::DefaultStorageClass);
   DF->setSection("");
-#if LLVM_VERSION_MAJOR >= 7
   DF->setDSOLocal(false);
-#endif
 
   // Remap all values used within the function.
   ValueToValueMapTy VMap;

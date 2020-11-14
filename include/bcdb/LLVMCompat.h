@@ -5,15 +5,6 @@
 
 #include <llvm/Config/llvm-config.h>
 
-#if LLVM_VERSION_MAJOR < 7 && defined(LLVM_BITCODE_BITCODEWRITER_H)
-namespace llvm {
-static void LLVM_ATTRIBUTE_UNUSED WriteBitcodeToFile(const Module &M,
-                                                     raw_ostream &Out) {
-  WriteBitcodeToFile(&M, Out);
-}
-} // end namespace llvm
-#endif
-
 #if LLVM_VERSION_MAJOR < 8 && defined(LLVM_SUPPORT_COMMANDLINE_H)
 namespace llvm {
 namespace cl {
@@ -25,38 +16,6 @@ static const FormattingFlags AlwaysPrefix = Prefix;
 #if LLVM_VERSION_MAJOR < 11
 #define hasPassPointeeByValueAttr hasByValOrInAllocaAttr
 #define isPassPointeeByValueArgument isByValOrInAllocaArgument
-#endif
-
-#if defined(LLVM_TRANSFORMS_IPO_FUNCTIONIMPORT_H) && LLVM_VERSION_MAJOR <= 6
-namespace llvm {
-static inline bool convertToDeclaration(GlobalValue &GV) {
-  if (Function *F = dyn_cast<Function>(&GV)) {
-    F->deleteBody();
-    F->clearMetadata();
-    F->setComdat(nullptr);
-  } else if (GlobalVariable *V = dyn_cast<GlobalVariable>(&GV)) {
-    V->setInitializer(nullptr);
-    V->setLinkage(GlobalValue::ExternalLinkage);
-    V->clearMetadata();
-    V->setComdat(nullptr);
-  } else {
-    GlobalValue *NewGV;
-    if (GV.getValueType()->isFunctionTy())
-      NewGV =
-          Function::Create(cast<FunctionType>(GV.getValueType()),
-                           GlobalValue::ExternalLinkage, "", GV.getParent());
-    else
-      NewGV = new GlobalVariable(*GV.getParent(), GV.getValueType(), false,
-                                 GlobalValue::ExternalLinkage, nullptr, "",
-                                 nullptr, GV.getThreadLocalMode(),
-                                 GV.getType()->getAddressSpace());
-    NewGV->takeName(&GV);
-    GV.replaceAllUsesWith(NewGV);
-    return false;
-  }
-  return true;
-}
-} // end namespace llvm
 #endif
 
 #if defined(LLVM_SUPPORT_COMMANDLINE_H)

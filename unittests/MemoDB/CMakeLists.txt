@@ -4,6 +4,6 @@ add_llvm_unittest(MemoDBTests
   ValuePrintTest.cpp
 )
 
-tool_link_libraries(MemoDBTests
+target_link_libraries(MemoDBTests PRIVATE
   MemoDB
 )
