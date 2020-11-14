@@ -16,16 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: cachix/install-nix-action@v10
-      with:
-        skip_adding_nixpkgs_channel: true
-    - uses: cachix/cachix-action@v6
+    - uses: cachix/install-nix-action@v12
+    - uses: cachix/cachix-action@v8
       with:
         name: bcdb
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
     - run: nix-build -A ${{ matrix.variant }}
     - name: Slack Notification
       if: failure()
-      uses: homoluctus/slatify@v2.1.2
+      uses: lazy-actions/slatify@v3.0.0
       with:
         job_name: '*Test*'
         commit: true
