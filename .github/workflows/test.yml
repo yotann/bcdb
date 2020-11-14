@@ -21,6 +21,7 @@ jobs:
       with:
         name: bcdb
         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
     - run: nix-build -A ${{ matrix.variant }}
     - name: Slack Notification
       if: failure()
