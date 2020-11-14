@@ -2,8 +2,8 @@
 
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --noplugin
-; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --noplugin
+; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=PROG  %s
 
 define void @func() unnamed_addr {
@@ -17,9 +17,9 @@ declare void @llvm.assume(i1) #0
 
 attributes #0 = { nounwind }
 
-; MUXED: @func = internal alias void (), void ()* @__bcdb_body_func
-; MUXED: define protected void @__bcdb_body_func()
-; MUXED: call void @func()
+; MERGED: @func = internal alias void (), void ()* @__bcdb_body_func
+; MERGED: define protected void @__bcdb_body_func()
+; MERGED: call void @func()
 
 ; PROG: define void @func()
 ; PROG-NEXT: call void @__bcdb_body_func()

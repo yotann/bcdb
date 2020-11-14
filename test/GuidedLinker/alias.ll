@@ -1,7 +1,7 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --noplugin
-; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so --noplugin
+; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=PROG  %s
 ; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s
 
@@ -12,9 +12,9 @@ define void @target() {
   ret void
 }
 
-; MUXED: define protected void @__bcdb_body_target()
-; MUXED-NEXT: call void @alias()
-; MUXED: declare extern_weak void @alias()
+; MERGED: define protected void @__bcdb_body_target()
+; MERGED-NEXT: call void @alias()
+; MERGED: declare extern_weak void @alias()
 
 ; PROG: @alias = alias void (), void ()* @target
 ; PROG: declare void @__bcdb_body_target()

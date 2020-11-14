@@ -404,8 +404,8 @@ void Merger::RenameEverything() {
         return true;
       }
     }
-    if ((a->RefersToRTLDLocal && !a->PartID.empty()) ||
-        (b->RefersToRTLDLocal && !b->PartID.empty())) {
+    if ((a->RefersToPluginScope && !a->PartID.empty()) ||
+        (b->RefersToPluginScope && !b->PartID.empty())) {
       // can't merge, they need to be rewritten to use different variables
       return true;
     }

@@ -81,21 +81,21 @@ public:
     // For GL only, whether we should put an available_externally NewName
     // definition in the stub module. Applies only if DefineInMergedModule is
     // true.
-    bool AvailableExternallyInStubModule = false;
+    bool AvailableExternallyInWrapperModule = false;
 
     // For GL only, whether we need a declaration of NewName in the stub
     // module. Applies only if DefineInMergedModule is true.
-    bool NeededInStubModule = false;
+    bool NeededInWrapperModule = false;
 
     // For GL only, whether we need a declaration of NewName in the merged
     // module. Applies only if DefineInMergedModule is false.
     bool NeededInMergedModule = false;
 
     // For GL only, whether the body needs to be defined in the stub module.
-    bool BodyInStubModule = false;
+    bool BodyInWrapperModule = false;
 
-    // For GL only, whether the body refers to RTLD_LOCAL declarations.
-    bool RefersToRTLDLocal = false;
+    // For GL only, whether the body refers to declarations in local scope.
+    bool RefersToPluginScope = false;
   };
 
 protected:

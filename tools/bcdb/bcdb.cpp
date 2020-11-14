@@ -112,18 +112,18 @@ static int Delete() {
 
 static cl::SubCommand GetCommand("get", "Retrieve a module");
 static cl::SubCommand GetFunctionCommand("get-function", "Retrieve a function");
+static cl::SubCommand GLCommand("gl", "Perform guided linking");
 static cl::SubCommand MeltCommand("melt",
                                   "Load all functions into a single module");
 static cl::SubCommand MergeCommand("merge", "Merge modules");
 static cl::SubCommand MuxCommand("mux", "Mux modules");
-static cl::SubCommand Mux2Command("gl", "Perform guided linking");
 
 static cl::opt<bool> DisableVerify("disable-verify",
                                    cl::desc("Don't verify the output module"),
                                    cl::sub(GetCommand),
                                    cl::sub(GetFunctionCommand),
-                                   cl::sub(MeltCommand), cl::sub(MergeCommand),
-                                   cl::sub(MuxCommand), cl::sub(Mux2Command));
+                                   cl::sub(GLCommand), cl::sub(MeltCommand),
+                                   cl::sub(MergeCommand), cl::sub(MuxCommand));
 
 static cl::opt<std::string> GetName("name", cl::Required,
                                     cl::desc("Name of the head to get"),
@@ -276,11 +276,9 @@ static int ListModules() {
 
 // bcdb merge
 
-static cl::list<std::string> MergeNames(cl::Positional, cl::OneOrMore,
-                                        cl::desc("<module names>"),
-                                        cl::sub(MergeCommand),
-                                        cl::sub(MuxCommand),
-                                        cl::sub(Mux2Command));
+static cl::list<std::string>
+    MergeNames(cl::Positional, cl::OneOrMore, cl::desc("<module names>"),
+               cl::sub(GLCommand), cl::sub(MergeCommand), cl::sub(MuxCommand));
 
 static int Merge() {
   ExitOnError Err("bcdb merge: ");
@@ -306,35 +304,33 @@ static int Mux() {
   return WriteModule(*M);
 }
 
-static cl::opt<std::string> Mux2LibraryName("muxed-name",
-                                            cl::desc("<name of muxed library>"),
-                                            cl::Required,
-                                            cl::value_desc("filename"),
-                                            cl::sub(Mux2Command));
+static cl::opt<std::string>
+    GLLibraryName("merged-name", cl::desc("<name of merged library>"),
+                  cl::Required, cl::value_desc("filename"), cl::sub(GLCommand));
 
 static cl::opt<std::string>
-    Mux2WeakName("weak-name", cl::desc("<name of weak definitions library>"),
-                 cl::value_desc("filename"), cl::sub(Mux2Command));
+    GLWeakName("weak-name", cl::desc("<name of weak definitions library>"),
+               cl::value_desc("filename"), cl::sub(GLCommand));
 
 static cl::opt<std::string>
-    Mux2OutputName("o", cl::desc("<output root directory>"), cl::Required,
-                   cl::value_desc("directory"), cl::sub(Mux2Command));
+    GLOutputName("o", cl::desc("<output root directory>"), cl::Required,
+                 cl::value_desc("directory"), cl::sub(GLCommand));
 
-static int Mux2() {
+static int GL() {
   ExitOnError Err("bcdb gl: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
-  StringMap<std::unique_ptr<Module>> Stubs;
+  StringMap<std::unique_ptr<Module>> WrapperModules;
   std::unique_ptr<Module> WeakM;
-  std::unique_ptr<Module> M =
-      db->Mux2(Names, Stubs, Mux2WeakName.empty() ? nullptr : &WeakM);
+  std::unique_ptr<Module> M = db->GuidedLinker(
+      Names, WrapperModules, GLWeakName.empty() ? nullptr : &WeakM);
 
   auto SaveModule = [&](StringRef Path, Module &M) {
     if (!DisableVerify && verifyModule(M, &errs()))
       exit(1);
-    auto OutPath = (Mux2OutputName + "/" + Path).str();
+    auto OutPath = (GLOutputName + "/" + Path).str();
 
     std::error_code EC;
     EC = sys::fs::create_directories(sys::path::parent_path(OutPath));
@@ -345,11 +341,11 @@ static int Mux2() {
     OutputFile.keep();
   };
 
-  SaveModule(Mux2LibraryName, *M);
-  if (!Mux2WeakName.empty())
-    SaveModule(Mux2WeakName, *WeakM);
-  for (auto &Stub : Stubs)
-    SaveModule(Stub.first(), *Stub.second);
+  SaveModule(GLLibraryName, *M);
+  if (!GLWeakName.empty())
+    SaveModule(GLWeakName, *WeakM);
+  for (auto &WrapperModule : WrapperModules)
+    SaveModule(WrapperModule.first(), *WrapperModule.second);
 
   return 0;
 }
@@ -447,9 +443,9 @@ int main(int argc, char **argv) {
     if (OptionHasCategory(*O, BCDBCategory)) {
       O->addSubCommand(*cl::AllSubCommands);
     } else if (OptionHasCategory(*O, MergeCategory)) {
+      O->addSubCommand(GLCommand);
       O->addSubCommand(MergeCommand);
       O->addSubCommand(MuxCommand);
-      O->addSubCommand(Mux2Command);
     } else {
       // Hide LLVM's options, since they're mostly irrelevant.
       O->setHiddenFlag(cl::Hidden);
@@ -472,6 +468,8 @@ int main(int argc, char **argv) {
     return Get();
   } else if (GetFunctionCommand) {
     return GetFunction();
+  } else if (GLCommand) {
+    return GL();
   } else if (HeadGetCommand) {
     return HeadGet();
   } else if (InitCommand) {
@@ -488,8 +486,6 @@ int main(int argc, char **argv) {
     return Merge();
   } else if (MuxCommand) {
     return Mux();
-  } else if (Mux2Command) {
-    return Mux2();
   } else if (RefsCommand) {
     return Refs();
   } else {

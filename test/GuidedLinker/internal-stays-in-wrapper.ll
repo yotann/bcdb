@@ -1,6 +1,6 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so
 ; RUN: opt -verify -S < %t/prog | FileCheck --check-prefix=PROG %s
 
 @Py_DebugFlag = weak global i32 0, align 4

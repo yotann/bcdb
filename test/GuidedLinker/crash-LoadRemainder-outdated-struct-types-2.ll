@@ -1,6 +1,6 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so
 
 %struct.object = type { i8*, i8*, i8*, %struct.object*, %struct.object*, %struct.object*, %struct.monster_race* }
 %struct.monster_race = type { %struct.monster_race*, i32, i8* }

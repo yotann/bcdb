@@ -2,8 +2,8 @@
 
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --noweak --nooverride --nouse
-; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so --noweak --nooverride --nouse
+; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=PROG  %s
 ; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s
 
@@ -19,16 +19,16 @@ define weak_odr void @target2() {
   ret void
 }
 
-; MUXED: @alias1 = weak_odr alias void (), void ()* @target1
-; MUXED: @alias2 = weak_odr alias void (), void ()* @target2
-; MUXED: define internal void @__bcdb_body_target1()
-; MUXED-NEXT: call void @alias1()
-; MUXED: define internal void @__bcdb_body_target2()
-; MUXED-NEXT: ret void
-; MUXED: define internal void @target1()
-; MUXED-NEXT: call void @__bcdb_body_target1()
-; MUXED: define internal void @target2()
-; MUXED-NEXT: call void @__bcdb_body_target2()
+; MERGED: @alias1 = weak_odr alias void (), void ()* @target1
+; MERGED: @alias2 = weak_odr alias void (), void ()* @target2
+; MERGED: define internal void @__bcdb_body_target1()
+; MERGED-NEXT: call void @alias1()
+; MERGED: define internal void @__bcdb_body_target2()
+; MERGED-NEXT: ret void
+; MERGED: define internal void @target1()
+; MERGED-NEXT: call void @__bcdb_body_target1()
+; MERGED: define internal void @target2()
+; MERGED-NEXT: call void @__bcdb_body_target2()
 
 ; PROG-NOT: @alias1
 ; PROG-NOT: @target1

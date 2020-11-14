@@ -1,4 +1,4 @@
-# Force these symbols to go in the actual executable, not the muxed library.
+# Force these symbols to go in the actual executable, not the merged library.
 [gl-unmovable]
 global:llvm\.used
 global:llvm\.compiler\.used

@@ -1,7 +1,7 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --noplugin
-; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so --noplugin
+; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=STUB  %s
 
 @global = global void ()* @func
@@ -22,10 +22,10 @@ define i32 @main(i32, i8**) {
   ret i32 1
 }
 
-; MUXED: @global = extern_weak global void ()*
-; MUXED: @global2 = internal global void ()* @__bcdb_merged_func
-; MUXED: define protected void @__bcdb_merged_func()
-; MUXED-NEXT: call void @__bcdb_body_func()
+; MERGED: @global = extern_weak global void ()*
+; MERGED: @global2 = internal global void ()* @__bcdb_merged_func
+; MERGED: define protected void @__bcdb_merged_func()
+; MERGED-NEXT: call void @__bcdb_body_func()
 
 ; STUB-NOT: @global2
 ; STUB-NOT: @__bcdb_merged_global2

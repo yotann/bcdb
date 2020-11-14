@@ -2,7 +2,7 @@
 
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name x
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name y
-; RUN: bcdb gl -uri sqlite:%t.bcdb x y -o %t --muxed-name=libmuxed.so
+; RUN: bcdb gl -uri sqlite:%t.bcdb x y -o %t --merged-name=libmerged.so
 
 @global = global void ()* @func
 @global2 = internal global void ()* @func
@@ -22,10 +22,10 @@ define i32 @main(i32, i8**) {
   ret i32 1
 }
 
-; MUXED: @global = external global void ()*
-; MUXED: @global2 = internal global void ()* @func
-; MUXED: define internal void @func()
-; MUXED-NEXT: call void @__bcdb_id_{{.*}}()
+; MERGED: @global = external global void ()*
+; MERGED: @global2 = internal global void ()* @func
+; MERGED: define internal void @func()
+; MERGED-NEXT: call void @__bcdb_id_{{.*}}()
 
 ; STUB: @global = global void ()* @func
 ; STUB-NOT: @global2

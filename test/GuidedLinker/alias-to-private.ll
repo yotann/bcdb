@@ -2,8 +2,8 @@
 
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so
-; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so
+; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=STUB  %s
 ; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s
 

@@ -44,7 +44,7 @@ for module in modules:
 
 clang_args = []
 args = ['bcdb', 'gl', '-uri', bcdb_uri, '-o', out+'.bc']
-args.extend(['--muxed-name=muxed.so'])
+args.extend(['--merged-name=merged.so'])
 for o, a in optlist:
     if o == '--weak-library':
         args.append('--weak-name=weak.so')
@@ -66,9 +66,9 @@ if weak_library:
         subprocess.check_call(('clang', '-shared', weak_library, '-o', '%s.elf/weak%d.so'%(out,i)))
         weak_library = '%s.elf/weak%d.so'%(out,i)
 
-args = subprocess.check_output(('bc-imitate', 'clang-args', out+'.bc/muxed.so'), universal_newlines = True)
+args = subprocess.check_output(('bc-imitate', 'clang-args', out+'.bc/merged.so'), universal_newlines = True)
 args = args.strip().split('\n')
-args = ['clang++', '-xir', out+'.bc/muxed.so', '-xnone', '-O0', '-o', out+'.elf/muxed.so', '-w'] + args
+args = ['clang++', '-xir', out+'.bc/merged.so', '-xnone', '-O0', '-o', out+'.elf/merged.so', '-w'] + args
 args.extend(clang_args)
 args += ['-fuse-ld=gold']
 if weak_library:
@@ -83,7 +83,7 @@ for module in modules:
     args = ['clang++', '-xir', '%s.bc/%s'%(out,module), '-xnone', '-O0', '-o', '%s.elf/%s'%(out,module), '-w'] + args
     args += ['-L', out+'.elf', '-Xlinker', '-rpath='+out+'.elf']
     args += ['-Xlinker', '--allow-shlib-undefined']
-    args += [out+'.elf/muxed.so']
+    args += [out+'.elf/merged.so']
     args.extend(clang_args)
     if weak_library:
         args += [weak_library]

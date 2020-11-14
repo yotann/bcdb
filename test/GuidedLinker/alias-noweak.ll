@@ -1,7 +1,7 @@
 ; RUN: bcdb init -uri sqlite:%t.bcdb
 ; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --muxed-name=libmuxed.so --weak-name=libweak.so --noweak --noplugin
-; RUN: opt -verify -S < %t/libmuxed.so | FileCheck --check-prefix=MUXED %s
+; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so --noweak --noplugin
+; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=PROG  %s
 ; RUN: opt -verify -S < %t/libweak.so  | FileCheck --check-prefix=WEAK  %s
 
@@ -17,11 +17,11 @@ define weak_odr void @target2() {
   ret void
 }
 
-; MUXED: define protected void @__bcdb_body_target1()
-; MUXED-NEXT: call void @alias1()
-; MUXED: declare extern_weak void @alias1()
-; MUXED: define protected void @__bcdb_body_target2()
-; MUXED-NEXT: ret void
+; MERGED: define protected void @__bcdb_body_target1()
+; MERGED-NEXT: call void @alias1()
+; MERGED: declare extern_weak void @alias1()
+; MERGED: define protected void @__bcdb_body_target2()
+; MERGED-NEXT: ret void
 
 ; PROG: @alias1 = weak_odr alias void (), void ()* @target1
 ; PROG: @alias2 = weak_odr alias void (), void ()* @target2
