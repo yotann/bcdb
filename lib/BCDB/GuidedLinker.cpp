@@ -91,7 +91,8 @@ static std::unique_ptr<Module> LoadGLLibrary(LLVMContext &Context) {
 static std::unique_ptr<MemoryBuffer> LoadDefaultSymbolList() {
   StringRef Buffer(reinterpret_cast<char *>(gl_default_symbol_list_txt),
                    gl_default_symbol_list_txt_len);
-  return MemoryBuffer::getMemBuffer(Buffer, "gl_default_symbol_list.txt");
+  return MemoryBuffer::getMemBuffer(Buffer, "gl_default_symbol_list.txt",
+                                    /* RequiresNullTerminator */ false);
 }
 
 // Handling references from the merged library to the wrapper libraries:
