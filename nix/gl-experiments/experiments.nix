@@ -12,6 +12,9 @@
     configurations = {
       interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
     };
+    # Exclude icu library because we want to focus on reducing the size of Boost.
+    # XXX: results in the paper did *not* exclude icu64, so the results were
+    # different.
     exclude = [ pkgsBitcode.icu64 ];
   };
 
