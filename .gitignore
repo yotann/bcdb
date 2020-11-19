@@ -9,5 +9,6 @@ __pycache__/
 
 /build*/
 /install
+/nix/gl-experiments/result*
 /result
 /result-*
