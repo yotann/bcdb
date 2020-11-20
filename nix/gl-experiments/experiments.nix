@@ -247,17 +247,10 @@
 
   clang = {
     lto-flags = "-O3";
-    #profile-commands = ''
-    #  bin/clang -fPIC -shared -O3 ${./clang-input.c} -ldl -lpthread -o /dev/null \
-    #    -B${pkgs.llvmPackages_10.clang-unwrapped.lib} \
-    #    -resource-dir=${pkgs.llvmPackages_10.clang}/resource-root \
-    #    --gcc-toolchain=${pkgs.gcc-unwrapped.out} \
-    #    -B${pkgs.glibc.out}/lib/ \
-    #    -idirafter ${pkgs.glibc.dev}/include \
-    #    -B$PWD/bin \
-    #    -L${pkgs.glibc.out}/lib/ \
-    #    -v
-    #'';
+    profile-commands = ''
+      bin/clang -fPIC -shared -O3 ${./clang-input.c} -ldl -lpthread -o /dev/null \
+        ${(import ./clang-cmdline.nix { exepath = "."; }).args}
+    '';
     packages = with pkgsBitcode.llvmPackages_10; [ bintools clang clang-unwrapped llvm ];
     exclude = with pkgsBitcode; [
       # needs assembly files
