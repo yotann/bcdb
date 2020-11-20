@@ -80,7 +80,7 @@ def run_benchmarks(generate_args_env, exe_paths, benchmarks, output_dir, cpus_pe
                 f.write(shlex.join(args) + '\n')
 
             with open(f'{out}/stderr.txt', 'ab') as stderr:
-                r = subprocess.run(args, env=env)
+                r = subprocess.run(args, env=env, stderr=stderr)
 
         except Exception as e:
             print(e)

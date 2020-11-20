@@ -229,26 +229,26 @@
 
     lto-flags = "-O3";
 
-    #profile-commands = ''
-    #  export PATH=$PWD/bin:$PATH
-    #  export PYTHONHOME=$PWD
-    #  export PYTHONPATH=$PWD/lib/python*/site-packages
-    #  cat ${./python-benchmarks.txt} | while read BENCH; do
-    #    BENCH=''${BENCH#* }
-    #    bin/python3 \
-    #      ${pyperformance/pyperformance/benchmarks}/$BENCH \
-    #      --no-locale \
-    #      --processes 1 \
-    #      --values 1 \
-    #      --inherit-environ PYTHONHOME,PYTHONPATH,LLVM_PROFILE_FILE
-    #  done
-    #'';
+    profile-commands = ''
+      export PATH=$PWD/bin:$PATH
+      export PYTHONHOME=$PWD
+      export PYTHONPATH=$PWD/lib/python*/site-packages
+      cat ${./python-benchmarks.txt} | while read BENCH; do
+        BENCH=''${BENCH#* }
+        bin/python3 \
+          ${../../third_party/pyperformance/pyperformance/benchmarks}/$BENCH \
+          --no-locale \
+          --processes 1 \
+          --values 1 \
+          --inherit-environ PYTHONHOME,PYTHONPATH,LLVM_PROFILE_FILE
+      done
+    '';
   };
 
   clang = {
     lto-flags = "-O3";
     profile-commands = ''
-      bin/clang -fPIC -shared -O3 ${./clang-input.c} -ldl -lpthread -o /dev/null \
+      bin/clang -fPIC -shared -O3 ${./../../third_party/sqlite/sqlite-amalgamation-3320000.c} -ldl -lpthread -o /dev/null \
         ${(import ./clang-cmdline.nix { exepath = "."; }).args}
     '';
     packages = with pkgsBitcode.llvmPackages_10; [ bintools clang clang-unwrapped llvm ];

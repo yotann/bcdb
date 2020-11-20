@@ -24,7 +24,7 @@ def get_clang_cmdline(exe_path):
     return shlex.split(p.stdout)
 
 def generate_args_env(exe_path, benchmark, out, affinity):
-    args = [f'{exe_path}/bin/clang', '-fPIC', '-shared', '-O3', 'clang-input.c', '-ldl', '-lpthread', '-o', '/dev/null']
+    args = [f'{exe_path}/bin/clang', '-fPIC', '-shared', '-O3', '../../third_party/sqlite/sqlite-amalgamation-3320000.c', '-ldl', '-lpthread', '-o', '/dev/null']
     args.extend(get_clang_cmdline(exe_path))
     args = ['pyperf', 'command', '-p20', '-n1', '-w1',
             '--no-locale', '--affinity', affinity,

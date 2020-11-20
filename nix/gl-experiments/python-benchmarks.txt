@@ -1,0 +1,48 @@
+mdp bm_mdp.py -p 5
+sympy bm_sympy.py
+scimark bm_scimark.py
+pyflate bm_pyflate.py
+raytrace bm_raytrace.py
+xml_etree bm_xml_etree.py
+2to3 bm_2to3.py
+Chameleon bm_chameleon.py
+Tornado_Http bm_tornado_http.py -p 100
+Django_Template bm_django_template.py
+Float bm_float.py
+mako bm_mako.py
+pathlib bm_pathlib.py
+pickle bm_pickle.py pickle
+unpickle bm_pickle.py unpickle
+pickle_list bm_pickle.py pickle_list
+pickle_dict bm_pickle.py pickle_dict
+unpickle_list bm_pickle.py unpickle_list -p 100
+pickle_pure_python bm_pickle.py --pure-python pickle
+unpickle_pure_python bm_pickle.py --pure-python unpickle
+json_loads bm_json_loads.py
+json_dumps bm_json_dumps.py
+NQueens bm_nqueens.py
+Chaos bm_chaos.py
+Fannkuch bm_fannkuch.py
+Go bm_go.py
+Meteor_Contest bm_meteor_contest.py
+Spectral_Norm bm_spectral_norm.py
+Telco bm_telco.py
+hexiom bm_hexiom.py
+logging bm_logging.py -p 100
+python_startup bm_python_startup.py
+python_startup_no_site bm_python_startup.py --no-site
+regex_v8 bm_regex_v8.py
+regex_effbot bm_regex_effbot.py
+regex_compile bm_regex_compile.py
+regex_dna bm_regex_dna.py
+unpack_sequence bm_unpack_sequence.py
+nbody bm_nbody.py
+richards bm_richards.py
+pidigits bm_pidigits.py
+crypto_pyaes bm_crypto_pyaes.py
+deltablue bm_deltablue.py
+dulwich_log bm_dulwich_log.py
+sqlite_synth bm_sqlite_synth.py
+genshi bm_genshi.py
+sqlalchemy_declarative bm_sqlalchemy_declarative.py
+sqlalchemy_imperative bm_sqlalchemy_imperative.py

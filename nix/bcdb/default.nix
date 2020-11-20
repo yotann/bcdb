@@ -13,9 +13,13 @@ in stdenv.mkDerivation {
     name = "bcdb-source";
     filter = gitFilter [''
       .*
+      *.md
       *.nix
+      /docs/
       /flake.lock
       /nix/
+      /third_party/pyperformance/
+      /third_party/sqlite/
     ''] ../..;
   };
 
