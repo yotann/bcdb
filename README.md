@@ -10,8 +10,8 @@ Project at UIUC. Features:
 - Stores huge amounts of LLVM bitcode in an SQLite database.
 - Automatically deduplicates bitcode at the function level.
 - Stores results of analyzing and processing bitcode (WIP).
-- Performs [guided linking](docs/guided-linking/), which optimizes dynamically
-  linked code.
+- Performs Guided Linking, which optimizes dynamically linked code. See
+  [`docs/guided-linking`](docs/guided-linking/) for details and instructions.
 
 ## Building
 

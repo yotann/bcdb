@@ -1,11 +1,13 @@
 # Guided Linking: Dynamic Linking Without the Costs
 
-[Paper PDF](./paper.pdf), [Talk Video](https://youtu.be/QyNJKllZP4I), [Poster
-PDF](./poster.pdf), [Poster Video](https://youtu.be/GQR9W44N5W4).
-
 Sean Bartell, Will Dietz, and Vikram S. Adve. 2020. Guided Linking: Dynamic
 Linking without the Costs. *Proc. ACM Program. Lang.* 4, OOPSLA, Article 145
 (November 2020), 29 pages. https://doi.org/10.1145/3428213
+
+[Paper PDF](./paper.pdf), [Talk Video](https://youtu.be/QyNJKllZP4I), [Poster
+PDF](./poster.pdf), [Poster Video](https://youtu.be/GQR9W44N5W4).
+
+## About
 
 Guided linking is a technique to perform arbitrary optimizations on dynamically
 linked code. For example, a function from a shared library can be inlined into
@@ -20,9 +22,10 @@ modules together and handle symbol conflicts.
 ## Performing guided linking with Nix
 
 The recommended way to use the tool is to install [Nix](https://nixos.org/) and
-use our Nix expressions to automatically build Linux packages in bitcode form
-and apply guided linking. Simple builds can be set up with less than 10 lines
-of code. For more details, see [nix/gl-experiments](../../nix/gl-experiments).
+use our Nix expressions, which automatically build Linux packages in bitcode
+form and apply guided linking. Simple builds can be set up with less than 10
+lines of code. For more details, see
+[nix/gl-experiments](../../nix/gl-experiments).
 
 ## Performing guided linking manually
 
