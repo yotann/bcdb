@@ -1,5 +1,8 @@
 add_subdirectory(BCDB)
 add_subdirectory(Bitcode)
 add_subdirectory(MemoDB)
+if( ${LLVM_VERSION_MAJOR} GREATER 8 )
+add_subdirectory(Outlining)
+endif()
 add_subdirectory(Split)
 add_subdirectory(WholeProgram)
