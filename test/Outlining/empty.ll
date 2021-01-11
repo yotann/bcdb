@@ -1,8 +1,8 @@
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-dependence -analyze %s | FileCheck %s
 
-; WALK: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; WALK:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
+; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
 
 ; CHECK-LABEL: define void @f()
 define void @f() {

@@ -4,7 +4,9 @@ set(LLVM_LINK_COMPONENTS
   TransformUtils
 )
 add_llvm_loadable_module(BCDBOutliningPlugin
+  Candidates.cpp
   Dependence.cpp
+  Extractor.cpp
 
   PLUGIN_TOOL
   opt
