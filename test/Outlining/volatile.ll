@@ -1,5 +1,5 @@
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     --aa -outlining-dependence -analyze %s | FileCheck %s
+; RUN:     -outlining-dependence -analyze %s | FileCheck %s
 
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
