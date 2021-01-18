@@ -1,3 +1,4 @@
+; XFAIL: *
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
 
