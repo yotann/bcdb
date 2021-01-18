@@ -31,6 +31,9 @@ OutliningCandidates::OutliningCandidates(Function &F,
     BitVector BV(OutDep.Nodes.size());
     for (int i : OutlineOnly)
       BV.set(i);
+    if (!OutDep.isOutlinable(BV))
+      report_fatal_error("Specified nodes cannot be outlined",
+                         /* gen_crash_diag */ false);
     Candidates.push_back(std::move(BV));
     return;
   }
@@ -94,6 +97,7 @@ void OutliningCandidates::processCandidate(BitVector BV) {
         score += CB->arg_size();
     }
   }
+  assert(OutDep.isOutlinable(BV));
   if (OutlineUnprofitable || score > 0)
     Candidates.push_back(BV);
 

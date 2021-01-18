@@ -37,6 +37,8 @@ public:
 
   void print(raw_ostream &OS) const;
 
+  bool isOutlinable(const BitVector &BV) const;
+
   void getExternals(const BitVector &BV, BitVector &ArgInputs,
                     BitVector &ExternalInputs, BitVector &ExternalOutputs);
 

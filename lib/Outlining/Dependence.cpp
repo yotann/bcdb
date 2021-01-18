@@ -88,6 +88,25 @@ void OutliningDependenceResults::print(raw_ostream &OS) const {
   F.print(OS, &Writer);
 }
 
+bool OutliningDependenceResults::isOutlinable(const BitVector &BV) const {
+  if (BV.size() != Nodes.size())
+    return false;
+  int OP = BV.find_first();
+  if (OP < 0)
+    return false;
+  for (auto x : BV.set_bits()) {
+    if (!Dominators[x][OP])
+      return false;
+    for (auto y : ForcedDepends[x].set_bits())
+      if (!BV[y])
+        return false;
+    for (auto y : DominatingDepends[x].set_bits())
+      if (!BV[y] && !Dominators[OP][y])
+        return false;
+  }
+  return true;
+}
+
 ssize_t OutliningDependenceResults::lookupNode(Value *V) {
   auto It = NodeIndices.find(V);
   if (It != NodeIndices.end())
