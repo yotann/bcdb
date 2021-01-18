@@ -8,6 +8,7 @@ configure_lit_site_cfg(
 )
 
 set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/third_party/lit/lit.py CACHE STRING "Command used to spawn lit")
+set(LLVM_LIT_ARGS "-sv" CACHE STRING "Default options for lit")
 
 # Check we have the FileCheck utility.
 find_program(FILECHECK_PATH FileCheck HINTS ${LLVM_TOOLS_BINARY_DIR})
@@ -43,5 +44,4 @@ get_property(LLVM_LIT_DEPENDS GLOBAL PROPERTY LLVM_LIT_DEPENDS)
 add_lit_target(check "Running all tests"
   ${LLVM_LIT_TESTSUITES}
   DEPENDS ${LLVM_LIT_DEPENDS}
-  ARGS -v
 )
