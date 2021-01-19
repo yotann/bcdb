@@ -21,10 +21,14 @@ dead1:
   br i1 undef, label %dead0, label %dead1
 }
 
-; EXTRACT-LABEL: define {} @f.outlined.1() {
+; EXTRACT-LABEL: define {} @f.outlined.1.callee() {
 ; EXTRACT: outline_entry:
 ; EXTRACT: br label %0
 ; EXTRACT: outline_return:
 ; EXTRACT: ret {} undef
 ; EXTRACT: 0:
 ; EXTRACT: br label %outline_return
+
+; EXTRACT-LABEL: define void @f.outlined.1.caller() {
+; EXTRACT-NEXT: %1 = call {} @f.outlined.1.callee()
+; EXTRACT-NEXT: ret void

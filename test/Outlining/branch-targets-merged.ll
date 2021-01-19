@@ -19,7 +19,7 @@ false:
   ret i32 %result
 }
 
-; CHECK-LABEL: define { i32 } @f.outlined.1-2(i1 %cond, i32 %arg) {
+; CHECK-LABEL: define { i32 } @f.outlined.1-2.callee(i1 %cond, i32 %arg) {
 ; CHECK: outline_return:
 ; CHECK-NEXT: phi i32 [ %result, %entry ], [ %result, %entry ]
 ; CHECK: entry:

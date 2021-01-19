@@ -25,7 +25,7 @@ false:
   ret i32 0
 }
 
-; CHECK-LABEL: define { i32 } @f.outlined.1-5(i1 %cond, i32 %arg) {
+; CHECK-LABEL: define { i32 } @f.outlined.1-5.callee(i1 %cond, i32 %arg) {
 ; CHECK: outline_entry:
 ; CHECK: br label %2
 ; CHECK: outline_return:
@@ -39,7 +39,7 @@ false:
 ; CHECK: false:
 ; CHECK: br label %outline_return
 
-; PARTIAL-LABEL: define { i32 } @f.outlined.1.4-5(i1 %cond) {
+; PARTIAL-LABEL: define { i32 } @f.outlined.1.4-5.callee(i1 %cond) {
 ; PARTIAL: outline_entry:
 ; PARTIAL: br label %2
 ; PARTIAL: outline_return:

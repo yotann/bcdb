@@ -6,6 +6,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include "Candidates.h"
@@ -17,15 +18,12 @@ OutliningExtractor::OutliningExtractor(Function &F,
                                        OutliningDependenceResults &OutDep,
                                        BitVector &BV)
     : F(F), OutDep(OutDep), BV(BV) {
-  auto &PDT = OutDep.PDT;
   auto &Nodes = OutDep.Nodes;
   auto &NodeIndices = OutDep.NodeIndices;
 
-  BitVector ArgInputs, ExternalInputs, ExternalOutputs;
   OutDep.getExternals(BV, ArgInputs, ExternalInputs, ExternalOutputs);
 
-  bool OutliningReturn = false;
-  BitVector OutlinedBlocks(Nodes.size());
+  OutlinedBlocks = BitVector(Nodes.size());
   for (size_t i : BV.set_bits()) {
     if (isa<BasicBlock>(Nodes[i]))
       OutlinedBlocks.set(i);
@@ -51,8 +49,7 @@ OutliningExtractor::OutliningExtractor(Function &F,
   FunctionType *FuncType =
       FunctionType::get(ResultType, Types, /* isVarArg */ false);
 
-  // Create the new function.
-  std::string NewName;
+  // Create the new function declaration.
   raw_string_ostream NewNameOS(NewName);
   NewNameOS << F.getName() << ".outlined";
   for (int Start = BV.find_first(); Start >= 0; Start = BV.find_next(Start)) {
@@ -65,18 +62,26 @@ OutliningExtractor::OutliningExtractor(Function &F,
       NewNameOS << formatv(".{0}-{1}", Start, End - 1);
     Start = End - 1;
   }
-  NewF = Function::Create(FuncType, GlobalValue::ExternalLinkage,
-                          NewNameOS.str(), F.getParent());
+  NewCallee = Function::Create(FuncType, GlobalValue::ExternalLinkage,
+                               NewNameOS.str() + ".callee", F.getParent());
+}
+
+Function *OutliningExtractor::createNewCallee() {
+  auto &PDT = OutDep.PDT;
+  auto &Nodes = OutDep.Nodes;
+  auto &NodeIndices = OutDep.NodeIndices;
+  Type *ResultType = NewCallee->getFunctionType()->getReturnType();
+
   if (F.hasPersonalityFn())
-    NewF->setPersonalityFn(F.getPersonalityFn());
+    NewCallee->setPersonalityFn(F.getPersonalityFn());
 
   // Add entry and exit blocks. We need a new entry block because we might be
   // outlining a loop, and LLVM prohibits the entry block from being part of a
   // loop. We need a new exit block so we can set up the return value.
   BasicBlock *EntryBlock =
-      BasicBlock::Create(NewF->getContext(), "outline_entry", NewF);
+      BasicBlock::Create(NewCallee->getContext(), "outline_entry", NewCallee);
   BasicBlock *ExitBlock =
-      BasicBlock::Create(NewF->getContext(), "outline_return", NewF);
+      BasicBlock::Create(NewCallee->getContext(), "outline_return", NewCallee);
   PHINode *RetValuePhi = nullptr;
   if (OutliningReturn)
     RetValuePhi = PHINode::Create(F.getReturnType(), 0, "", ExitBlock);
@@ -93,12 +98,12 @@ OutliningExtractor::OutliningExtractor(Function &F,
   for (size_t i : ExternalOutputs.set_bits())
     ResultValue = InsertValueInst::Create(ResultValue, OutputPhis[i],
                                           {ResultI++}, "", ExitBlock);
-  ReturnInst::Create(NewF->getContext(), ResultValue, ExitBlock);
+  ReturnInst::Create(NewCallee->getContext(), ResultValue, ExitBlock);
 
   // Create the value map and fill in the input values.
   ValueToValueMapTy VMap;
   ValueMapper VM(VMap, RF_NoModuleLevelChanges);
-  Function::arg_iterator ArgI = NewF->arg_begin();
+  Function::arg_iterator ArgI = NewCallee->arg_begin();
   for (size_t i : ArgInputs.set_bits()) {
     Argument &Src = *(F.arg_begin() + i);
     Argument &Dst = *ArgI++;
@@ -111,7 +116,7 @@ OutliningExtractor::OutliningExtractor(Function &F,
     VMap[&Src] = &Dst;
     Dst.setName(Src.getName());
   }
-  assert(ArgI == NewF->arg_end());
+  assert(ArgI == NewCallee->arg_end());
 
   // Map blocks in the original function to blocks in the outlined function.
   DenseMap<BasicBlock *, BasicBlock *> BBMap;
@@ -132,8 +137,8 @@ OutliningExtractor::OutliningExtractor(Function &F,
       }
     }
     if (!BBMap.count(PDom))
-      BBMap[PDom] =
-          BasicBlock::Create(NewF->getContext(), PDom->getName(), NewF);
+      BBMap[PDom] = BasicBlock::Create(NewCallee->getContext(), PDom->getName(),
+                                       NewCallee);
     VMap[BB] = BBMap[PDom];
   };
   for (BasicBlock &BB : F)
@@ -241,6 +246,47 @@ OutliningExtractor::OutliningExtractor(Function &F,
   //   - getelementptr, ptrtoint, inttoptr, cast use
   //     TargetTransformInfo::getUserCost()
   //   - call cost is arg_size()*InstrCost + CallPenalty
+  return NewCallee;
+}
+
+Function *OutliningExtractor::createNewCaller() {
+  auto &Nodes = OutDep.Nodes;
+
+  ValueToValueMapTy VMap;
+  NewCaller = CloneFunction(&F, VMap, nullptr);
+  NewCaller->setName(NewName + ".caller");
+
+  // Identify outlining point.
+  if (!isa<Instruction>(VMap[Nodes[BV.find_first()]]))
+    return nullptr; // FIXME
+  Instruction *InsertionPoint = cast<Instruction>(VMap[Nodes[BV.find_first()]]);
+
+  // Construct the call.
+  SmallVector<Value *, 8> Args;
+  for (size_t i : ArgInputs.set_bits())
+    Args.push_back(NewCaller->arg_begin() + i);
+  for (size_t i : ExternalInputs.set_bits())
+    Args.push_back(VMap[Nodes[i]]);
+  CallInst *CI = CallInst::Create(NewCallee->getFunctionType(), NewCallee, Args,
+                                  "", InsertionPoint);
+
+  // Extract outputs.
+  DenseMap<size_t, Value *> OutputValues;
+  unsigned ResultI = 0;
+  Value *ReturnValue = nullptr;
+  if (OutliningReturn)
+    ReturnValue = ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
+  for (size_t i : ExternalOutputs.set_bits())
+    OutputValues[i] =
+        ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
+
+  // Replace uses of outlined instructions.
+  for (size_t i : ExternalOutputs.set_bits()) {
+    OutputValues[i]->takeName(VMap[Nodes[i]]);
+    VMap[Nodes[i]]->replaceAllUsesWith(OutputValues[i]);
+  }
+
+  return NewCaller;
 }
 
 OutliningExtractorWrapperPass::OutliningExtractorWrapperPass()
@@ -268,8 +314,11 @@ OutliningExtractorWrapperPass::runOnFunction(Function &F) {
   auto &OutCands = getAnalysis<OutliningCandidatesWrapperPass>(F).getOutCands();
   for (BitVector &BV : OutCands.Candidates) {
     OutliningExtractor Extractor(F, OutDep, BV);
-    if (Extractor.NewF)
-      Results.emplace_back(BV, Extractor.NewF);
+    Function *NewF = Extractor.createNewCallee();
+    if (NewF) {
+      Results.emplace_back(BV, NewF);
+      Extractor.createNewCaller();
+    }
   }
   return Results;
 }

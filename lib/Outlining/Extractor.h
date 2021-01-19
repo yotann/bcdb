@@ -26,15 +26,20 @@ public:
   OutliningExtractor(Function &F, OutliningDependenceResults &OutDep,
                      BitVector &BV);
 
-  void print(raw_ostream &OS) const;
+  Function *createNewCallee();
+  Function *createNewCaller();
 
   Function &F;
   OutliningDependenceResults &OutDep;
   BitVector &BV;
 
-  Function *NewF;
-
 private:
+  Function *NewCallee;
+  Function *NewCaller;
+  bool OutliningReturn = false;
+  BitVector OutlinedBlocks;
+  BitVector ArgInputs, ExternalInputs, ExternalOutputs;
+  std::string NewName;
 };
 
 struct OutliningExtractorWrapperPass : public ModulePass {
