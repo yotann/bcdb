@@ -1,3 +1,4 @@
+; UNSUPPORTED: llvm12
 ; RUN: llvm-as < %s | bc-split -o %t
 ; RUN: llvm-dis < %t/functions/f.bc | FileCheck --check-prefix=DEFINE %s
 

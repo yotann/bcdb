@@ -361,7 +361,10 @@ struct DOTGraphTraits<MergerGlobalGraph *> : public DefaultDOTGraphTraits {
   static std::string getGraphName(MergerGlobalGraph *G) {
     return "Global reference graph";
   }
-  static bool isNodeHidden(Merger::GlobalItem *Node) {
+  // isNodeHidden is called with 1 or 2 arguments depending on the version of
+  // LLVM.
+  static bool isNodeHidden(Merger::GlobalItem *Node,
+                           MergerGlobalGraph *G = nullptr) {
     return Node->Name.empty(); // hide the root node
   }
   std::string getNodeLabel(Merger::GlobalItem *Node, MergerGlobalGraph *G) {

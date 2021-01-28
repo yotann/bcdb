@@ -21,12 +21,17 @@ using namespace llvm::object;
 // TODO: detect additional symbols in the binary that came from assembly files
 
 template <class ELFT>
-static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
+static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELFOF) {
+#if LLVM_VERSION_MAJOR >= 12
+  const ELFFile<ELFT> &ELF = ELFOF.getELFFile();
+#else
+  const ELFFile<ELFT> &ELF = *ELFOF.getELFFile();
+#endif
   ExitOnError Err("AnnotateModuleWithELF: ");
 
-  auto DynamicEntries = Err(ELF.getELFFile()->dynamicEntries());
+  auto DynamicEntries = Err(ELF.dynamicEntries());
   auto toMappedAddr = [&](uint64_t VAddr) -> const uint8_t * {
-    return Err(ELF.getELFFile()->toMappedAddr(VAddr));
+    return Err(ELF.toMappedAddr(VAddr));
   };
 
   const char *StringTableBegin = nullptr;
@@ -40,7 +45,12 @@ static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELF) {
   }
 
   M.addModuleFlag(Module::Warning, "bcdb.elf.type",
-                  ELF.getELFFile()->getHeader()->e_type);
+#if LLVM_VERSION_MAJOR >= 12
+                  ELF.getHeader().e_type
+#else
+                  ELF.getHeader()->e_type
+#endif
+  );
 
   SmallVector<Metadata *, 8> Needed;
   for (auto &Dyn : DynamicEntries) {

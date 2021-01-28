@@ -207,8 +207,13 @@ void NeededTypeMap::VisitValue(const Value *V) {
 
     if (auto *F = dyn_cast<Function>(C)) {
       for (auto &Arg : F->args())
+#if LLVM_VERSION_MAJOR >= 12
+        if (Arg.hasPointeeInMemoryValueAttr())
+          VisitType(Arg.getPointeeInMemoryValueType());
+#else
         if (Arg.hasPassPointeeByValueAttr())
           VisitType(Arg.getType()->getPointerElementType());
+#endif
     }
   }
 }

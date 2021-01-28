@@ -740,7 +740,11 @@ std::unique_ptr<Module> GLMerger::Finish() {
     // we created.
     legacy::PassManager PM;
     PM.add(createInstructionCombiningPass(/*ExpensiveCombines*/ true));
+#if LLVM_VERSION_MAJOR >= 12
+    PM.add(createInstSimplifyLegacyPass());
+#else
     PM.add(createConstantPropagationPass());
+#endif
     PM.add(createAlwaysInlinerLegacyPass());
     PM.add(createGlobalDCEPass());
     PM.run(*M);

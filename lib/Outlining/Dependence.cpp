@@ -7,6 +7,7 @@
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/FormattedStream.h>
