@@ -11,3 +11,8 @@ add_llvm_loadable_module(BCDBOutliningPlugin
   PLUGIN_TOOL
   opt
 )
+add_llvm_library(BCDBOutlining
+  Candidates.cpp
+  Dependence.cpp
+  Extractor.cpp
+)

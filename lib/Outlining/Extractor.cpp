@@ -1,4 +1,4 @@
-#include "Extractor.h"
+#include "bcdb/Outlining/Extractor.h"
 
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Dominators.h>
@@ -9,7 +9,7 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
-#include "Candidates.h"
+#include "bcdb/Outlining/Candidates.h"
 
 using namespace bcdb;
 using namespace llvm;
