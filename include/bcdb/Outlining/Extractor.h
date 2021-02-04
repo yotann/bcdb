@@ -42,13 +42,14 @@ private:
   std::string NewName;
 };
 
+// Needs to be a ModulePass because it adds new functions.
 struct OutliningExtractorWrapperPass : public ModulePass {
   OutliningExtractorWrapperPass();
 
   static char ID;
 
   bool runOnModule(Module &M) override;
-  std::vector<std::pair<BitVector, Function *>> runOnFunction(Function &F);
+  bool runOnFunction(Function &F);
   void print(raw_ostream &OS, const Module *M = nullptr) const override;
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 

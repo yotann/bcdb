@@ -298,29 +298,56 @@ bool OutliningExtractorWrapperPass::runOnModule(Module &M) {
   for (Function &F : M)
     if (!F.isDeclaration())
       Functions.push_back(&F);
-  for (Function *F : Functions) {
-    auto NF = runOnFunction(*F);
-    if (!NF.empty())
-      NewFunctions[F] = std::move(NF);
-  }
-  return !NewFunctions.empty();
+  bool Changed = false;
+  for (Function *F : Functions)
+    Changed = runOnFunction(*F) || Changed;
+  return Changed;
 }
 
-std::vector<std::pair<BitVector, Function *>>
-OutliningExtractorWrapperPass::runOnFunction(Function &F) {
-  std::vector<std::pair<BitVector, Function *>> Results;
+bool OutliningExtractorWrapperPass::runOnFunction(Function &F) {
+  // We track outlined functions in the output module by adding metadata nodes.
+  // We can't add the metadata to the new functions because that would prevent
+  // the BCDB from deduplicating them, and it seems silly to modify the
+  // original function just to add one piece of metadata. So we use
+  // module-level named metadata.
+  bool Changed = false;
+  SmallVector<Metadata *, 8> MDNodes;
+
   OutliningDependenceResults &OutDep =
       getAnalysis<OutliningDependenceWrapperPass>(F).getOutDep();
   auto &OutCands = getAnalysis<OutliningCandidatesWrapperPass>(F).getOutCands();
   for (BitVector &BV : OutCands.Candidates) {
     OutliningExtractor Extractor(F, OutDep, BV);
-    Function *NewF = Extractor.createNewCallee();
-    if (NewF) {
-      Results.emplace_back(BV, NewF);
-      Extractor.createNewCaller();
+    Function *NewCallee = Extractor.createNewCallee();
+    if (NewCallee) {
+      Changed = true;
+
+      Constant *NewCaller = Extractor.createNewCaller();
+      if (!NewCaller)
+        NewCaller = ConstantPointerNull::get(F.getType());
+
+      SmallVector<unsigned, 8> Bits;
+      for (int i : BV.set_bits())
+        Bits.push_back(i);
+      Metadata *BVNode =
+          ConstantAsMetadata::get(ConstantDataArray::get(F.getContext(), Bits));
+      Metadata *CalleeNode = ConstantAsMetadata::get(NewCallee);
+      Metadata *CallerNode = ConstantAsMetadata::get(NewCaller);
+      MDNodes.push_back(
+          MDNode::get(F.getContext(), {BVNode, CalleeNode, CallerNode}));
     }
   }
-  return Results;
+
+  if (Changed) {
+    Metadata *OrigNode = ConstantAsMetadata::get(&F);
+    MDNode *ListNode = MDNode::get(F.getContext(), MDNodes);
+    MDNode *TopNode = MDNode::get(F.getContext(), {OrigNode, ListNode});
+    F.getParent()
+        ->getOrInsertNamedMetadata("smout.extracted.functions")
+        ->addOperand(TopNode);
+  }
+
+  return Changed;
 }
 
 void OutliningExtractorWrapperPass::print(raw_ostream &OS,
