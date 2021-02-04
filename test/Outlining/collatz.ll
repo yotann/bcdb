@@ -6,7 +6,7 @@ target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16
 target triple = "x86_64-unknown-linux-gnu"
 
 ; Function Attrs: norecurse nounwind readnone uwtable
-define dso_local i32 @collatz_len(i32 %0) local_unnamed_addr #0 {
+define dso_local i32 @collatz_len(i32) local_unnamed_addr #0 {
   %2 = icmp sgt i32 %0, 1
   br i1 %2, label %3, label %14
 
