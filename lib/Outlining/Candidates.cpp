@@ -97,7 +97,11 @@ void OutliningCandidates::processCandidate(BitVector BV) {
         score += CB->arg_size();
     }
   }
-  assert(OutDep.isOutlinable(BV));
+
+  if (!OutDep.isOutlinable(BV)) {
+    report_fatal_error(
+        formatv("invalid outlining candidate: [{0}]", BV.set_bits()).str());
+  }
   if (OutlineUnprofitable || score > 0)
     Candidates.push_back(BV);
 
@@ -118,7 +122,15 @@ void OutliningCandidates::processCandidate(BitVector BV) {
   if (NewI < 0)
     return;
   BV.set(NewI);
+
   BV |= OutDep.ForcedDepends[NewI];
+  // Forced depends may cause the outlining point to move before NewI, in which
+  // case we need to add any dominating depends that lie between the outlining
+  // point and NewI.
+  for (int i = Deps.find_next(BV.find_first()); i >= 0 && i < NewI;
+       i = Deps.find_next(i))
+    BV.set(i);
+
   queueBV(BV);
 }
 
