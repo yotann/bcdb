@@ -7,4 +7,5 @@ add_llvm_tool(smout
 )
 target_link_libraries(smout PRIVATE
   BCDB
+  BCDBOutlining
 )
