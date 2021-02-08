@@ -1,6 +1,7 @@
 #include "bcdb/Outlining/Candidates.h"
 
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/InitializePasses.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FormatVariadic.h>
 
@@ -160,6 +161,18 @@ void OutliningCandidatesWrapperPass::verifyAnalysis() const {
 }
 
 char OutliningCandidatesWrapperPass::ID = 0;
-static RegisterPass<OutliningCandidatesWrapperPass>
-    X("outlining-candidates", "Outlining Candidates Analysis Pass", false,
-      true);
+namespace {
+struct RegisterPassX : RegisterPass<OutliningCandidatesWrapperPass> {
+  RegisterPassX()
+      : RegisterPass("outlining-candidates",
+                     "Outlining Candidates Analysis Pass", false, true) {
+    // Ensure required passes are loaded, even if this pass used in a program
+    // that doesn't load all the standard LLVM passes.
+    initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
+    initializePostDominatorTreeWrapperPassPass(
+        *PassRegistry::getPassRegistry());
+    initializeMemorySSAWrapperPassPass(*PassRegistry::getPassRegistry());
+  }
+};
+} // end anonymous namespace
+static RegisterPassX X;
