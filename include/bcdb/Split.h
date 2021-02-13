@@ -18,6 +18,8 @@ class StringRef;
 
 namespace bcdb {
 
+llvm::Function &getSoleDefinition(llvm::Module &MPart);
+
 class Joiner {
 public:
   Joiner(llvm::Module &Remainder);

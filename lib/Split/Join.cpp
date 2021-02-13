@@ -27,22 +27,27 @@ static bool isStub(const Function &F) {
   return true;
 }
 
+Function &bcdb::getSoleDefinition(Module &MPart) {
+  Function *Def = nullptr;
+  for (Function &F : MPart) {
+    if (!F.isDeclaration()) {
+      if (Def)
+        report_fatal_error("multiple functions in function module");
+      Def = &F;
+    }
+  }
+  if (!Def)
+    report_fatal_error("missing function in function module");
+  return *Def;
+}
+
 bcdb::Melter::Melter(llvm::LLVMContext &Context)
     : M(std::make_unique<Module>("melted", Context)), Mover(*M) {}
 
 Error bcdb::Melter::Merge(std::unique_ptr<Module> MPart) {
-  Function *Def = nullptr;
-  for (Function &F : *MPart) {
-    if (!F.isDeclaration()) {
-      if (Def) {
-        return make_error<StringError>("multiple functions in function module",
-                                       errc::invalid_argument);
-      }
-      Def = &F;
-    }
-  }
+  Function &Def = getSoleDefinition(*MPart);
   return Mover.move(
-      std::move(MPart), {Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
+      std::move(MPart), {&Def}, [](GlobalValue &GV, IRMover::ValueAdder Add) {},
       /* IsPerformingImport */ false);
 }
 
@@ -80,17 +85,8 @@ void Joiner::JoinGlobal(llvm::StringRef Name,
   Function *Stub = M->getFunction(Name);
   assert(isStub(*Stub));
 
-  // Find the function definition.
-  Function *Def = nullptr;
-  for (Function &F : *MPart) {
-    if (!F.isDeclaration()) {
-      if (Def)
-        report_fatal_error("multiple functions in function module " + Name);
-      Def = &F;
-    }
-  }
-
   // Copy linker information from the stub.
+  Function *Def = &getSoleDefinition(*MPart);
   Def->setName(Name);
   assert(Def->getName() == Name && "name conflict");
   AttributeList OldAttrs = Def->getAttributes();

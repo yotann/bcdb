@@ -20,6 +20,7 @@
 
 #include "Util.h"
 #include "bcdb/BCDB.h"
+#include "bcdb/Split.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -72,18 +73,7 @@ StringSet<> Merger::LoadPartRefs(StringRef ID, StringRef SelfName) {
   ExitOnError Err("Merger::LoadPartRefs: ");
   auto MPart = Err(bcdb.GetFunctionById(ID));
   StringSet<> Result;
-
-  Function *Def = nullptr;
-  for (Function &F : *MPart) {
-    if (!F.isDeclaration()) {
-      if (Def) {
-        Err(make_error<StringError>("multiple functions in function module " +
-                                        ID,
-                                    errc::invalid_argument));
-      }
-      Def = &F;
-    }
-  }
+  Function *Def = &getSoleDefinition(*MPart);
 
   // If the function takes its own address, add a reference using its own name.
   if (!Def->use_empty()) {
@@ -147,18 +137,7 @@ GlobalValue *Merger::LoadPartDefinition(GlobalItem &GI, Module *M) {
   if (Result && !Result->isDeclaration())
     return Result;
   auto MPart = Err(bcdb.GetFunctionById(GI.PartID));
-
-  Function *Def = nullptr;
-  for (Function &F : *MPart) {
-    if (!F.isDeclaration()) {
-      if (Def) {
-        Err(make_error<StringError>("multiple functions in function module " +
-                                        GI.PartID,
-                                    errc::invalid_argument));
-      }
-      Def = &F;
-    }
-  }
+  Function *Def = &getSoleDefinition(*MPart);
 
   ApplyNewNames(*MPart, GI.Refs);
   Def->setName(GI.NewDefName);
