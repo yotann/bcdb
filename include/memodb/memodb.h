@@ -239,6 +239,10 @@ public:
     return variant_ == other.variant_;
   }
 
+  bool operator!=(const memodb_value &other) const {
+    return variant_ != other.variant_;
+  }
+
   friend std::ostream &operator<<(std::ostream &, const memodb_value &);
 };
 
