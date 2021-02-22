@@ -304,6 +304,9 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // TODO: relax these restrictions.
   if (BB->hasAddressTaken())
     PreventsOutlining.set(NodeIndices[BB]);
+
+  // TODO: add support for control flow (also modifying the extractor).
+  PreventsOutlining.set(NodeIndices[BB]);
 }
 
 void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {

@@ -264,12 +264,16 @@ static memodb_value GroupForType(Type *T) {
   } else if (T->isArrayTy()) {
     result.array_items().push_back(T->getArrayNumElements());
   } else if (T->isVectorTy()) {
+#if LLVM_VERSION_MAJOR >= 11
     result.array_items().push_back(isa<FixedVectorType>(T));
     if (FixedVectorType *FVT = dyn_cast<FixedVectorType>(T))
       result.array_items().push_back(FVT->getNumElements());
     else
       result.array_items().push_back(
           cast<ScalableVectorType>(T)->getMinNumElements());
+#else
+    result.array_items().push_back(T->getVectorNumElements());
+#endif
   } else if (T->isStructTy()) {
     StructType *ST = cast<StructType>(T);
     result.array_items().push_back(ST->isOpaque());
