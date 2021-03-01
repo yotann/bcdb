@@ -106,7 +106,8 @@ static int Alive2() {
       {srcFDs[1], /* shouldClose */ true, /* unbuffered */ true},
   };
 
-  unsigned NumValid = 0, NumInvalid = 0, NumCrash = 0;
+  unsigned NumValid = 0, NumInvalid = 0, NumUnsupported = 0, NumCrash = 0,
+           NumTimeout = 0, NumApprox = 0, NumTypeMismatch = 0;
 
   for (auto &GroupPair : Collated.map_items()) {
     auto &Group = GroupPair.second;
@@ -124,11 +125,13 @@ static int Alive2() {
             memodb.call_get("refines.alive2", {SrcRefs[1], SrcRefs[0]}),
         };
 
-        // If we've already attempted each direction, or solved it with
-        // something other than Alive2, skip this pair.
-        if ((RefinesRefs[0] || AliveRefs[0]) ||
-            (RefinesRefs[1] || AliveRefs[1]))
-          continue;
+        if (false) {
+          // If we've already attempted each direction, or solved it with
+          // something other than Alive2, skip this pair.
+          if ((RefinesRefs[0] || AliveRefs[0]) &&
+              (RefinesRefs[1] || AliveRefs[1]))
+            continue;
+        }
 
         errs() << "comparing " << Group[i] << " with " << Group[j] << "\n";
 
@@ -144,45 +147,74 @@ static int Alive2() {
         }
 
         for (int k = 0; k < 2; k++) {
-          int rc = sys::ExecuteAndWait(
-              aliveTvPath,
-              {"alive-tv", "--succinct", srcPathStrs[k], srcPathStrs[1 - k]},
-              None, {None, stdoutPathStr, stderrPathStr});
+          memodb_value AliveValue;
+          int rc;
+          StringRef stdoutString, stderrString;
+          if (AliveRefs[k]) {
+            AliveValue = memodb.get(AliveRefs[k]);
+            rc = AliveValue["rc"].as_integer();
+          } else {
+            // TODO: measure execution time.
+            Err(errorCodeToError(sys::fs::remove(stdoutPathStr)));
+            Err(errorCodeToError(sys::fs::remove(stderrPathStr)));
+            rc = sys::ExecuteAndWait(
+                aliveTvPath,
+                {"alive-tv", "--succinct", srcPathStrs[k], srcPathStrs[1 - k]},
+                None, {None, stdoutPathStr, stderrPathStr});
+            auto stdoutBuffer =
+                Err(errorOrToExpected(MemoryBuffer::getFile(stdoutPathStr)));
+            auto stderrBuffer =
+                Err(errorOrToExpected(MemoryBuffer::getFile(stderrPathStr)));
+            AliveValue = memodb_value::map(
+                {{"rc", rc},
+                 {"stdout", memodb_value::bytes(stdoutBuffer->getBuffer())},
+                 {"stderr", memodb_value::bytes(stderrBuffer->getBuffer())}});
+            memodb.call_set("refines.alive2", {SrcRefs[k], SrcRefs[1 - k]},
+                            memodb.put(AliveValue));
+          }
+          stdoutString = AliveValue["stdout"].as_bytestring();
+          stderrString = AliveValue["stderr"].as_bytestring();
 
-          auto stdoutBuffer =
-              Err(errorOrToExpected(MemoryBuffer::getFile(stdoutPathStr)));
-          auto stderrBuffer =
-              Err(errorOrToExpected(MemoryBuffer::getFile(stderrPathStr)));
-          memodb_value AliveValue = memodb_value::map(
-              {{"rc", rc},
-               {"stdout", memodb_value::bytes(stdoutBuffer->getBuffer())},
-               {"stderr", memodb_value::bytes(stderrBuffer->getBuffer())}});
           memodb_value RefinesValue;
-          if (rc == 0 && stdoutBuffer->getBuffer().contains(
-                             "Transformation seems to be correct!")) {
+          if (rc == 0 &&
+              stdoutString.contains("Transformation seems to be correct!")) {
             RefinesValue = true;
             NumValid++;
-          } else if (rc == 0 && stdoutBuffer->getBuffer().contains(
-                                    "Transformation doesn't verify!")) {
+          } else if (rc == 0 &&
+                     stdoutString.contains("Transformation doesn't verify!")) {
             RefinesValue = false;
             NumInvalid++;
+          } else if (rc == 1 &&
+                     stderrString.contains("ERROR: Unsupported instruction:")) {
+            NumUnsupported++;
+          } else if (rc == 1 && stderrString.contains("ERROR: Timeout")) {
+            NumTimeout++;
+          } else if (rc == 1 &&
+                     stderrString.contains(
+                         "ERROR: Couldn't prove the correctness of the "
+                         "transformation\nAlive2 approximated the semantics")) {
+            NumApprox++;
+          } else if (rc == 1 && stderrString.contains(
+                                    "ERROR: program doesn't type check!")) {
+            RefinesValue = false;
+            NumTypeMismatch++;
           } else {
             errs() << AliveValue << "\n";
             errs() << "unknown result from alive-tv!\n";
             return 1;
           }
-          memodb.call_set("refines.alive2", {SrcRefs[k], SrcRefs[1 - k]},
-                          memodb.put(AliveValue));
-          if (RefinesValue != memodb_value{})
+          if (RefinesValue != memodb_value{} && !RefinesRefs[k])
             memodb.call_set("refines", {SrcRefs[k], SrcRefs[1 - k]},
                             memodb.put(RefinesValue));
         }
+
+        outs() << NumValid << " valid, " << NumInvalid << " invalid, "
+               << NumTimeout << " timeouts, " << NumUnsupported
+               << " unsupported, " << NumCrash << " crashes, " << NumApprox
+               << " approximated, " << NumTypeMismatch << " don't type check\n";
       }
     }
   }
-
-  outs() << NumValid << " valid, " << NumInvalid << " invalid, " << NumCrash
-         << " crashes\n";
 
   return 0;
 }
@@ -313,7 +345,8 @@ static int Collate() {
   for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
     memodb_ref candidates =
         db->get_db().call_get("smout.candidates", {memodb_ref{FuncId}});
-    for (const auto &item : db->get_db().get(candidates).array_items()) {
+    memodb_value candidates_value = db->get_db().get(candidates);
+    for (const auto &item : candidates_value.array_items()) {
       all_candidates.insert(item.map_items().at("callee").as_ref());
       total_candidates++;
     }
@@ -335,12 +368,13 @@ static int Collate() {
   }
 
   // Erase groups with only a single element.
-  size_t candidatesRemaining = 0;
+  size_t candidatesRemaining = 0, largestGroup = 0;
   for (auto it = result.map_items().begin(); it != result.map_items().end();) {
     if (it->second.array_items().size() < 2) {
       it = result.map_items().erase(it);
     } else {
       candidatesRemaining += it->second.array_items().size();
+      largestGroup = std::max(largestGroup, it->second.array_items().size());
       it++;
     }
   }
@@ -348,6 +382,7 @@ static int Collate() {
   outs() << "Number of groups: " << result.map_items().size() << "\n";
   outs() << "Number of candidates that belong to a group: "
          << candidatesRemaining << "\n";
+  outs() << "Largest group: " << largestGroup << "\n";
   db->get_db().call_set("smout.collated", {db->get_db().head_get(ModuleName)},
                         db->get_db().put(result));
   return 0;
