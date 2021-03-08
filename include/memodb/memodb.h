@@ -116,6 +116,11 @@ public:
   memodb_value(T val) : variant_(float_t(val)) {}
 
   memodb_value(llvm::ArrayRef<std::uint8_t> val) : variant_(bytes_t(val)) {}
+  static memodb_value bytes(llvm::ArrayRef<char> val) {
+    return memodb_value(llvm::ArrayRef<unsigned char>(
+        reinterpret_cast<const unsigned char *>(val.begin()),
+        reinterpret_cast<const unsigned char *>(val.end())));
+  }
   static memodb_value bytes(llvm::StringRef val) {
     return memodb_value(
         llvm::ArrayRef<unsigned char>(val.bytes_begin(), val.bytes_end()));

@@ -1,6 +1,8 @@
 #include <cstdlib>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/CodeGen/MachineModuleInfo.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -20,8 +22,12 @@
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/SystemUtils.h>
+#include <llvm/Support/TargetRegistry.h>
+#include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/Target/TargetOptions.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <memory>
 #include <set>
@@ -45,11 +51,13 @@ static cl::SubCommand CandidatesCommand("candidates",
 
 static cl::SubCommand CollateCommand("collate", "Organize candidates by type");
 
-static cl::opt<std::string> ModuleName("name",
-                                       cl::desc("Name of the head to work on"),
-                                       cl::sub(Alive2Command),
-                                       cl::sub(CandidatesCommand),
-                                       cl::sub(CollateCommand));
+static cl::SubCommand MeasureCommand("measure",
+                                     "Measure code size of candidates");
+
+static cl::opt<std::string>
+    ModuleName("name", cl::desc("Name of the head to work on"),
+               cl::sub(Alive2Command), cl::sub(CandidatesCommand),
+               cl::sub(CollateCommand), cl::sub(MeasureCommand));
 
 static cl::opt<std::string> UriOrEmpty(
     "uri", cl::Optional, cl::desc("URI of the database"),
@@ -388,6 +396,90 @@ static int Collate() {
   return 0;
 }
 
+// smout measure
+
+static int Measure() {
+  ExitOnError Err("smout measure: ");
+
+  // based on llvm/tools/llc/llc.cpp
+
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
+
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  auto &memodb = db->get_db();
+
+  std::set<memodb_ref> all_funcs;
+  for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
+    all_funcs.insert(memodb_ref{FuncId});
+    memodb_ref candidates =
+        memodb.call_get("smout.candidates", {memodb_ref{FuncId}});
+    memodb_value candidates_value = memodb.get(candidates);
+    for (const auto &item : candidates_value.array_items()) {
+      all_funcs.insert(item.map_items().at("callee").as_ref());
+      all_funcs.insert(item.map_items().at("caller").as_ref());
+    }
+  }
+  outs() << "Number of unique original functions, outlined callees, and "
+            "outlined callers: "
+         << all_funcs.size() << "\n";
+
+  for (memodb_ref FuncId : all_funcs) {
+    memodb_ref CompiledRef = memodb.call_get("compiled", {FuncId});
+    if (CompiledRef)
+      continue;
+
+    auto M = Err(db->GetFunctionById(StringRef(FuncId)));
+
+    std::string Error;
+    const Target *TheTarget =
+        TargetRegistry::lookupTarget(M->getTargetTriple(), Error);
+    if (!TheTarget) {
+      errs() << Error;
+      return 1;
+    }
+
+    TargetOptions Options;
+    std::unique_ptr<TargetMachine> Target(
+        TheTarget->createTargetMachine(M->getTargetTriple(), "", "", Options,
+                                       None, None, CodeGenOpt::Default));
+
+    SmallVector<char, 0> Buffer;
+    raw_svector_ostream OS(Buffer);
+
+    legacy::PassManager PM;
+    TargetLibraryInfoImpl TLII(Triple(M->getTargetTriple()));
+    PM.add(new TargetLibraryInfoWrapperPass(TLII));
+    LLVMTargetMachine &LLVMTM = static_cast<LLVMTargetMachine &>(*Target);
+#if LLVM_VERSION_MAJOR >= 10
+    MachineModuleInfoWrapperPass *MMIWP =
+        new MachineModuleInfoWrapperPass(&LLVMTM);
+    bool error = Target->addPassesToEmitFile(PM, OS, nullptr, CGFT_ObjectFile,
+                                             true, MMIWP);
+#else
+    MachineModuleInfo *MMI = new MachineModuleInfo(&LLVMTM);
+    bool error = Target->addPassesToEmitFile(
+        PM, OS, nullptr, TargetMachine::CGFT_ObjectFile, true, MMI);
+#endif
+    if (error) {
+      errs() << "can't compile to an object file\n";
+      return 1;
+    }
+
+    PM.run(*M);
+
+    outs() << StringRef(FuncId) << " compiled to " << Buffer.size()
+           << " bytes\n";
+    memodb_value CompiledValue = memodb_value::bytes(Buffer);
+    memodb.call_set("compiled", {FuncId}, memodb.put(CompiledValue));
+  }
+
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -412,6 +504,8 @@ int main(int argc, char **argv) {
     return Candidates();
   } else if (CollateCommand) {
     return Collate();
+  } else if (MeasureCommand) {
+    return Measure();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;
