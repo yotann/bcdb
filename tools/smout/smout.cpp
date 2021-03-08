@@ -10,6 +10,8 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/InitializePasses.h>
+#include <llvm/Object/Binary.h>
+#include <llvm/Object/ObjectFile.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
@@ -472,9 +474,29 @@ static int Measure() {
     PM.run(*M);
 
     outs() << StringRef(FuncId) << " compiled to " << Buffer.size()
-           << " bytes\n";
+           << " bytes of binary\n";
     memodb_value CompiledValue = memodb_value::bytes(Buffer);
     memodb.call_set("compiled", {FuncId}, memodb.put(CompiledValue));
+  }
+
+  for (memodb_ref FuncId : all_funcs) {
+    using namespace object;
+    memodb_ref CompiledRef = memodb.call_get("compiled", {FuncId});
+    memodb_value Compiled = memodb.get(CompiledRef);
+    MemoryBufferRef MB(Compiled.as_bytestring(), FuncId);
+    auto Binary = Err(createBinary(MB));
+    if (ObjectFile *Obj = dyn_cast<ObjectFile>(Binary.get())) {
+      memodb_value::integer_t Size = 0;
+      for (const SectionRef &Section : Obj->sections()) {
+        if (Section.isText() || Section.isData() || Section.isBSS() ||
+            Section.isBerkeleyText() || Section.isBerkeleyData())
+          Size += Section.getSize();
+      }
+      outs() << StringRef(FuncId) << " compiled to " << Size
+             << " bytes of code and data\n";
+      memodb.call_set("compiled.size", {FuncId},
+                      memodb.put(memodb_value(Size)));
+    }
   }
 
   return 0;
