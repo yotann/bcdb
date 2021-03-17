@@ -17,6 +17,7 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/FileUtilities.h>
+#include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
@@ -53,13 +54,22 @@ static cl::SubCommand CandidatesCommand("candidates",
 
 static cl::SubCommand CollateCommand("collate", "Organize candidates by type");
 
+static cl::SubCommand EstimateCommand("estimate",
+                                      "Estimate benefit of outlining");
+
 static cl::SubCommand MeasureCommand("measure",
                                      "Measure code size of candidates");
+
+static cl::opt<bool>
+    IgnoreEquivalence("ignore-equivalence",
+                      cl::desc("Ignore equivalence information"),
+                      cl::sub(EstimateCommand));
 
 static cl::opt<std::string>
     ModuleName("name", cl::desc("Name of the head to work on"),
                cl::sub(Alive2Command), cl::sub(CandidatesCommand),
-               cl::sub(CollateCommand), cl::sub(MeasureCommand));
+               cl::sub(CollateCommand), cl::sub(EstimateCommand),
+               cl::sub(MeasureCommand));
 
 static cl::opt<std::string> UriOrEmpty(
     "uri", cl::Optional, cl::desc("URI of the database"),
@@ -398,6 +408,279 @@ static int Collate() {
   return 0;
 }
 
+// smout estimate
+
+static int Estimate() {
+  ExitOnError Err("smout estimate: ");
+
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  auto &memodb = db->get_db();
+
+  auto compiled_size = [&](memodb_ref ref) -> size_t {
+    return memodb.get(memodb.call_get("compiled.size", {ref})).as_integer();
+  };
+
+  // Number of cases where the outlined caller is larger than the original
+  // function.
+  unsigned NeverProfitableCount = 0;
+
+  // Number of cases where outlining is profitable even with only one caller.
+  unsigned AlwaysProfitableCount = 0;
+
+  // Number of normal cases where outlining will be profitable, but only if
+  // enough callers use the same outlined function.
+  unsigned SometimesProfitableCount = 0;
+
+  // Total compiled size of the original functions.
+  unsigned TotalOrigSize = 0;
+
+  // The more copies of a function there are in the original, the more savings
+  // we get by outlining code from it.
+  StringMap<unsigned> FunctionUseCount;
+  for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
+    FunctionUseCount[FuncId]++;
+  }
+
+  /*
+   * We create an ILP (integer linear programming) problem of the following
+   * form:
+   *
+   * Variable X[i] is 1 if candidate i should be outlined, using the outlined
+   * caller function i as a replacement for the corresponding original
+   * function. The solution may outline multiple candidates from the same
+   * original function.
+   *
+   * Variable Y[m] is 1 if either outlined callee function m, or another
+   * function equivalent to it, should be included in the output program. (More
+   * precisely, either function m or another function that it refines to.)
+   *
+   * Variable Z[m] is 1 if outlined callee function m, specifically, should be
+   * included in the output program.
+   *
+   * Conflicts constraint: if candidates i,j,k all outline the same instruction
+   * from the same original function, they are mutually exclusive. So X[i] +
+   * X[j] + X[k] <= 1.
+   *
+   * Needs constraint: if candidate i is outlined, and the corresponding callee
+   * function is m, then a function equivalent to m must be included in the
+   * output program. So Y[m] - X[i] >= 0.
+   *
+   * Refines constraint: if a function equivalent to m must be included, and
+   * m,n,o are the known equivalent functions, then at least one of m,n,o must
+   * be included. So Z[m] + Z[n] + Z[o] - Y[m] >= 0.
+   *
+   * Goal: minimize the total size of the output program, considering the
+   * benefits of each candidate outlined (each X[i]) and the cost of each
+   * callee function that must be included (each Z[i]).
+   *
+   * (Note: it would be possible to eliminate the Y variables and combine the
+   * Needs and Refines constraints into something like Z[m] + Z[n] + Z[o] -
+   * X[i] >= 0. I'm not sure which way is better.)
+   */
+
+  // Variable names for each caller/candidate i and callee m.
+  std::vector<std::string> CallerVarNames;
+  std::vector<std::string> CalleeVarNames;
+
+  // Code size reduction by outlining each candidate i, and code size increase
+  // by including each callee function m.
+  std::vector<unsigned> CallerSavings;
+  std::vector<unsigned> CalleeSizes;
+
+  // Map from each caller/candidate i to the corresponding callee m.
+  std::vector<unsigned> CallerToCallee;
+
+  // Map from each callee m to the corresponding callee(s)/candidate(s) i.
+  std::vector<SmallVector<unsigned, 4>> CalleeToCaller;
+
+  // Map from each callee m to the other callees that it can substitute for.
+  std::vector<SmallVector<unsigned, 4>> RefinedCallees;
+
+  // Map from each caller/candidate i to a list of conflict groups it belongs
+  // to. If two callers/candidates share a value in CallerNodeConflicts, they
+  // are mutually exclusive.
+  std::vector<SmallVector<unsigned, 4>> CallerNodeConflicts;
+  unsigned NextNodeConflictIndex = 0;
+
+  StringMap<unsigned> CalleeIndexMap;
+  auto findOrAddCallee = [&](const memodb_ref &ref) {
+    auto inserted = CalleeIndexMap.insert(
+        std::make_pair(StringRef(ref), CalleeIndexMap.size()));
+    unsigned i = inserted.first->second;
+    if (inserted.second) {
+      CalleeSizes.push_back(compiled_size(ref));
+      RefinedCallees.push_back({i}); // callee i refines itself
+      CalleeToCaller.push_back({});
+      CalleeVarNames.push_back(std::string(StringRef(ref)));
+    }
+    return inserted.first->second;
+  };
+
+  for (const auto &FunctionUseEntry : FunctionUseCount) {
+    auto FuncId = FunctionUseEntry.getKey();
+    unsigned UseCount = FunctionUseEntry.second;
+
+    memodb_ref OrigSizeRef =
+        memodb.call_get("compiled.size", {memodb_ref(FuncId)});
+    if (!OrigSizeRef)
+      continue;
+    memodb_ref CandidatesRef =
+        memodb.call_get("smout.candidates", {memodb_ref(FuncId)});
+    if (!CandidatesRef)
+      continue;
+    size_t OrigSize = memodb.get(OrigSizeRef).as_integer();
+    TotalOrigSize += UseCount * OrigSize;
+    memodb_value Candidates = memodb.get(CandidatesRef);
+
+    // For each instruction/node in the original function, a list of the
+    // callers/candidates that would outline that node. Used to determine
+    // conflicts.
+    std::vector<SmallVector<unsigned, 4>> NodeUses;
+
+    for (memodb_value &Candidate : Candidates.array_items()) {
+      memodb_ref CalleeRef = Candidate["callee"].as_ref();
+      memodb_ref CallerRef = Candidate["caller"].as_ref();
+      auto CalleeSize = compiled_size(CalleeRef);
+      auto CallerSize = compiled_size(CallerRef);
+      if (CallerSize >= OrigSize) {
+        NeverProfitableCount++;
+        continue;
+      } else if (UseCount * CallerSize + CalleeSize < UseCount * OrigSize) {
+        AlwaysProfitableCount++;
+      } else {
+        SometimesProfitableCount++;
+      }
+
+      unsigned caller_i = CallerVarNames.size();
+      CallerSavings.push_back(UseCount * (OrigSize - CallerSize));
+      CallerNodeConflicts.push_back({});
+      CallerVarNames.push_back(formatv("func{0}_caller{1}_callee{2}_i{3}",
+                                       FuncId, CallerRef, CalleeRef, caller_i));
+      unsigned callee_m = findOrAddCallee(CalleeRef);
+      CallerToCallee.push_back(callee_m);
+      CalleeToCaller[callee_m].push_back(caller_i);
+
+      for (const memodb_value &Node : Candidate["nodes"].array_items()) {
+        unsigned i = Node.as_integer();
+        if (NodeUses.size() <= i)
+          NodeUses.resize(i + 1);
+        NodeUses[i].push_back(caller_i);
+      }
+    }
+
+    // Create conflict groups from sets of candidates that outline the same
+    // node.
+    for (const auto &Uses : NodeUses) {
+      if (Uses.size() <= 1)
+        continue;
+      unsigned I = NextNodeConflictIndex++;
+      for (unsigned caller_i : Uses)
+        CallerNodeConflicts[caller_i].push_back(I);
+    }
+  }
+
+  // Callees up to NumCalleesUsedDirectly need both Y and Z variables, because
+  // they are directly used by one of the candidates. Callees beyond that only
+  // need Z variables, because they are only used as substitutes for another
+  // callee.
+  size_t NumCalleesUsedDirectly = CalleeToCaller.size();
+
+  // Find callees that are equivalent to the ones we're already considering.
+  if (!IgnoreEquivalence) {
+    memodb_value Collated = memodb.get(
+        memodb.call_get("smout.collated", {memodb.head_get(ModuleName)}));
+    for (auto &GroupPair : Collated.map_items()) {
+      auto &Group = GroupPair.second;
+      for (const memodb_value &FirstValue : Group.array_items()) {
+        memodb_ref FirstRef = FirstValue.as_ref();
+        auto callee_it = CalleeIndexMap.find(StringRef(FirstRef));
+        if (callee_it == CalleeIndexMap.end())
+          continue;
+        if (callee_it->second >= NumCalleesUsedDirectly)
+          continue;
+        unsigned callee_m = callee_it->second;
+        for (const memodb_value &SecondValue : Group.array_items()) {
+          if (FirstValue == SecondValue)
+            continue;
+          memodb_ref SecondRef = SecondValue.as_ref();
+          memodb_ref RefinesRef =
+              memodb.call_get("refines", {FirstRef, SecondRef});
+          if (!RefinesRef)
+            continue;
+          if (memodb.get(RefinesRef) != memodb_value{true})
+            continue;
+          unsigned refined_m = findOrAddCallee(SecondRef);
+          assert(callee_m != refined_m);
+          RefinedCallees[refined_m].push_back(callee_m);
+        }
+      }
+    }
+  }
+
+  outs() << "* Out of "
+         << (NeverProfitableCount + AlwaysProfitableCount +
+             SometimesProfitableCount)
+         << " cases: ";
+  outs() << NeverProfitableCount << " never profitable, ";
+  outs() << AlwaysProfitableCount << " always profitable, ";
+  outs() << SometimesProfitableCount << " sometimes profitable\n";
+  outs() << "* Original size: " << TotalOrigSize << "\n";
+
+  // Print the ILP problem (as described above) in free MPS format. Free MPS
+  // format (described in the GLPK manual) is supported by multiple free
+  // solvers, including GLPK and lp_solve:
+  //
+  // glpsol --min out.mps
+  // lp_solve -min -fmps out.mps
+
+  outs() << "NAME SMOUT\n";
+  outs() << "ROWS\n";
+  outs() << " N SIZE\n";
+  for (unsigned a = 0; a < NextNodeConflictIndex; a++)
+    outs() << " L CONFLICTS" << a << "\n";
+  for (unsigned i = 0; i < CallerVarNames.size(); i++)
+    outs() << " G Y_NEEDED_BY_X" << CallerVarNames[i] << "\n";
+  for (unsigned m = 0; m < NumCalleesUsedDirectly; m++)
+    outs() << " G REFINES_Y" << CalleeVarNames[m] << "\n";
+  outs() << "COLUMNS\n";
+  for (unsigned i = 0; i < CallerVarNames.size(); i++) {
+    outs() << " X" << CallerVarNames[i] << " SIZE " << -(int)CallerSavings[i]
+           << "\n";
+    outs() << " X" << CallerVarNames[i] << " Y_NEEDED_BY_X" << CallerVarNames[i]
+           << " -1\n";
+    for (unsigned conflict_a : CallerNodeConflicts[i])
+      outs() << " X" << CallerVarNames[i] << " CONFLICTS" << conflict_a
+             << " 1\n";
+  }
+  for (unsigned m = 0; m < NumCalleesUsedDirectly; m++) {
+    for (unsigned caller_i : CalleeToCaller[m])
+      outs() << " Y" << CalleeVarNames[m] << " Y_NEEDED_BY_X"
+             << CallerVarNames[caller_i] << " 1\n";
+    outs() << " Y" << CalleeVarNames[m] << " REFINES_Y" << CalleeVarNames[m]
+           << " -1\n";
+  }
+  for (unsigned m = 0; m < RefinedCallees.size(); m++) {
+    outs() << " Z" << CalleeVarNames[m] << " SIZE " << CalleeSizes[m] << "\n";
+    for (unsigned callee_m : RefinedCallees[m])
+      outs() << " Z" << CalleeVarNames[m] << " REFINES_Y"
+             << CalleeVarNames[callee_m] << " 1\n";
+  }
+  outs() << "RHS\n";
+  for (unsigned a = 0; a < NextNodeConflictIndex; a++)
+    outs() << " RHS1 CONFLICTS" << a << " 1\n";
+  // All variables are boolean.
+  outs() << "BOUNDS\n";
+  for (unsigned i = 0; i < CallerVarNames.size(); i++)
+    outs() << " BV BND1 X" << CallerVarNames[i] << "\n";
+  for (unsigned m = 0; m < NumCalleesUsedDirectly; m++)
+    outs() << " BV BND1 Y" << CalleeVarNames[m] << "\n";
+  for (unsigned m = 0; m < CalleeVarNames.size(); m++)
+    outs() << " BV BND1 Z" << CalleeVarNames[m] << "\n";
+  outs() << "ENDATA\n";
+
+  return 0;
+}
+
 // smout measure
 
 static int Measure() {
@@ -526,6 +809,8 @@ int main(int argc, char **argv) {
     return Candidates();
   } else if (CollateCommand) {
     return Collate();
+  } else if (EstimateCommand) {
+    return Estimate();
   } else if (MeasureCommand) {
     return Measure();
   } else {
