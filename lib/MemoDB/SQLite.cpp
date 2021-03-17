@@ -24,11 +24,11 @@ static const std::vector<const char *> SQLITE_PRAGMAS = {
     "PRAGMA synchronous = 1;\n",
 };
 
-const unsigned int CURRENT_VERSION = 4;
+const unsigned int CURRENT_VERSION = 5;
 const unsigned long APPLICATION_ID = 1111704642;
 
 static const char SQLITE_INIT_STMTS[] =
-    "PRAGMA user_version = 4;\n"
+    "PRAGMA user_version = 5;\n"
     "PRAGMA application_id = 1111704642;\n"
     "CREATE TABLE value(\n"
     "  vid     INTEGER PRIMARY KEY,\n"
@@ -67,6 +67,7 @@ static const char SQLITE_INIT_STMTS[] =
     "          -- (only if this is the last arg)\n"
     ");\n"
     "CREATE INDEX call_by_arg ON call(arg, fid, parent);\n"
+    "CREATE INDEX call_by_fid ON call(fid);\n"
     "CREATE INDEX call_by_result ON call(result, fid);\n";
 
 namespace {
@@ -355,6 +356,16 @@ void sqlite_db::upgrade_schema() {
         "CREATE INDEX IF NOT EXISTS call_by_result ON call(result, fid);\n"
         "PRAGMA application_id = 1111704642;\n"
         "PRAGMA user_version = 4;\n";
+    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
+  }
+
+  // Version 5 adds an index.
+  if (user_version < 5) {
+    static const char UPGRADE_STMTS[] =
+        "CREATE INDEX call_by_fid ON call(fid);\n"
+        "PRAGMA user_version = 5;\n";
     rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
     if (rc != SQLITE_OK)
       fatal_error();
