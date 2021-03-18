@@ -21,6 +21,7 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
+#include <llvm/Support/Process.h>
 #include <llvm/Support/Program.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
@@ -87,44 +88,88 @@ static StringRef GetUri() {
 
 // smout alive2
 
+static memodb_value evaluate_refines_alive2(const memodb_value &src,
+                                            const memodb_value &tgt) {
+  using namespace sys;
+
+  ExitOnError Err("smout alive2: ");
+
+  std::string tmp_dir_str =
+      Process::GetEnv("XDG_RUNTIME_DIR").getValueOr("/tmp");
+  SmallVector<char, 64> tmp_dir(tmp_dir_str.begin(), tmp_dir_str.end());
+  path::append(tmp_dir, "bcdb-smout");
+  Err(errorCodeToError(fs::create_directories(tmp_dir)));
+  path::append(tmp_dir, "alive2-%%%%%%%%-");
+  bool keep = false;
+  fs::TempFile srcTemp[2] = {
+      Err(fs::TempFile::create(tmp_dir + "src.bc",
+                               fs::owner_read | fs::owner_write)),
+      Err(fs::TempFile::create(tmp_dir + "tgt.bc",
+                               fs::owner_read | fs::owner_write)),
+  };
+  fs::TempFile outTemp = Err(fs::TempFile::create(
+      tmp_dir + "out.txt", fs::owner_read | fs::owner_write));
+  fs::TempFile errTemp = Err(fs::TempFile::create(
+      tmp_dir + "err.txt", fs::owner_read | fs::owner_write));
+
+  raw_fd_ostream srcStreams[2] = {
+      {srcTemp[0].FD, /* shouldClose */ false, /* unbuffered */ true},
+      {srcTemp[1].FD, /* shouldClose */ false, /* unbuffered */ true},
+  };
+
+  const memodb_value *Blobs[2] = {&src, &tgt};
+  for (int i = 0; i < 2; i++) {
+    Err(errorCodeToError(
+        sys::fs::resize_file(srcTemp[i].FD, Blobs[i]->as_bytes().size())));
+    srcStreams[i].write(
+        reinterpret_cast<const char *>(Blobs[i]->as_bytes().data()),
+        Blobs[i]->as_bytes().size());
+    Err(errorCodeToError(srcStreams[i].error()));
+  }
+
+  std::string aliveTvPath =
+      Err(errorOrToExpected(findProgramByName("alive-tv")));
+
+  // TODO: measure execution time.
+  int rc = ExecuteAndWait(
+      aliveTvPath,
+      {"alive-tv", "--succinct", srcTemp[0].TmpName, srcTemp[1].TmpName}, None,
+      {None, StringRef(outTemp.TmpName), StringRef(errTemp.TmpName)});
+  auto stdoutBuffer =
+      Err(errorOrToExpected(MemoryBuffer::getFile(outTemp.TmpName)));
+  auto stderrBuffer =
+      Err(errorOrToExpected(MemoryBuffer::getFile(errTemp.TmpName)));
+  memodb_value Result = memodb_value::map(
+      {{"rc", rc},
+       {"stdout", memodb_value::bytes(stdoutBuffer->getBuffer())},
+       {"stderr", memodb_value::bytes(stderrBuffer->getBuffer())}});
+
+  if (keep) {
+    errs() << "files:\n";
+    errs() << "  " << srcTemp[0].TmpName << "\n";
+    errs() << "  " << srcTemp[1].TmpName << "\n";
+    errs() << "  " << outTemp.TmpName << "\n";
+    errs() << "  " << errTemp.TmpName << "\n";
+    Err(srcTemp[0].keep());
+    Err(srcTemp[1].keep());
+    Err(outTemp.keep());
+    Err(errTemp.keep());
+  } else {
+    Err(srcTemp[0].discard());
+    Err(srcTemp[1].discard());
+    Err(outTemp.discard());
+    Err(errTemp.discard());
+  }
+
+  return Result;
+}
+
 static int Alive2() {
   ExitOnError Err("smout alive2: ");
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
   memodb_ref Root = memodb.head_get(ModuleName);
   memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
-
-  std::string aliveTvPath =
-      Err(errorOrToExpected(sys::findProgramByName("alive-tv")));
-
-  int srcFDs[2];
-  SmallVector<char, 32> srcPath, dstPath, stdoutPath, stderrPath;
-  Err(errorCodeToError(
-      sys::fs::createTemporaryFile("smout-src", "bc", srcFDs[0], srcPath)));
-  // FileRemover srcRemover(srcPath);
-  Err(errorCodeToError(
-      sys::fs::createTemporaryFile("smout-dst", "bc", srcFDs[1], dstPath)));
-  // FileRemover dstRemover(dstPath);
-  Err(errorCodeToError(
-      sys::fs::createTemporaryFile("smout-stdout", "txt", stdoutPath)));
-  // FileRemover dstRemover(stdoutPath);
-  Err(errorCodeToError(
-      sys::fs::createTemporaryFile("smout-stderr", "txt", stderrPath)));
-  // FileRemover dstRemover(stderrPath);
-
-  StringRef srcPathStrs[2] = {
-      StringRef(srcPath.data(), srcPath.size()),
-      StringRef(dstPath.data(), dstPath.size()),
-  };
-  StringRef stdoutPathStr(stdoutPath.data(), stdoutPath.size());
-  StringRef stderrPathStr(stderrPath.data(), stderrPath.size());
-
-  errs() << "Using files " << srcPath << " and " << dstPath << "\n";
-  errs() << "Saving output to " << stdoutPath << " and " << stderrPath << "\n";
-  raw_fd_ostream srcStreams[2] = {
-      {srcFDs[0], /* shouldClose */ true, /* unbuffered */ true},
-      {srcFDs[1], /* shouldClose */ true, /* unbuffered */ true},
-  };
 
   unsigned NumValid = 0, NumInvalid = 0, NumUnsupported = 0, NumCrash = 0,
            NumTimeout = 0, NumApprox = 0, NumTypeMismatch = 0;
@@ -155,45 +200,22 @@ static int Alive2() {
 
         errs() << "comparing " << Group[i] << " with " << Group[j] << "\n";
 
-        for (int k = 0; k < 2; k++) {
-          memodb_value Blob = memodb.get(SrcRefs[k]);
-          srcStreams[k].seek(0);
-          Err(errorCodeToError(
-              sys::fs::resize_file(srcFDs[k], Blob.as_bytes().size())));
-          srcStreams[k].write(
-              reinterpret_cast<const char *>(Blob.as_bytes().data()),
-              Blob.as_bytes().size());
-          Err(errorCodeToError(srcStreams[k].error()));
-        }
+        memodb_value Blobs[2];
+        for (int k = 0; k < 2; k++)
+          Blobs[k] = memodb.get(SrcRefs[k]);
 
         for (int k = 0; k < 2; k++) {
           memodb_value AliveValue;
-          int rc;
-          StringRef stdoutString, stderrString;
           if (AliveRefs[k]) {
             AliveValue = memodb.get(AliveRefs[k]);
-            rc = AliveValue["rc"].as_integer();
           } else {
-            // TODO: measure execution time.
-            Err(errorCodeToError(sys::fs::remove(stdoutPathStr)));
-            Err(errorCodeToError(sys::fs::remove(stderrPathStr)));
-            rc = sys::ExecuteAndWait(
-                aliveTvPath,
-                {"alive-tv", "--succinct", srcPathStrs[k], srcPathStrs[1 - k]},
-                None, {None, stdoutPathStr, stderrPathStr});
-            auto stdoutBuffer =
-                Err(errorOrToExpected(MemoryBuffer::getFile(stdoutPathStr)));
-            auto stderrBuffer =
-                Err(errorOrToExpected(MemoryBuffer::getFile(stderrPathStr)));
-            AliveValue = memodb_value::map(
-                {{"rc", rc},
-                 {"stdout", memodb_value::bytes(stdoutBuffer->getBuffer())},
-                 {"stderr", memodb_value::bytes(stderrBuffer->getBuffer())}});
+            AliveValue = evaluate_refines_alive2(Blobs[k], Blobs[1 - k]);
             memodb.call_set("refines.alive2", {SrcRefs[k], SrcRefs[1 - k]},
                             memodb.put(AliveValue));
           }
-          stdoutString = AliveValue["stdout"].as_bytestring();
-          stderrString = AliveValue["stderr"].as_bytestring();
+          int rc = AliveValue["rc"].as_integer();
+          StringRef stdoutString = AliveValue["stdout"].as_bytestring();
+          StringRef stderrString = AliveValue["stderr"].as_bytestring();
 
           memodb_value RefinesValue;
           if (rc == 0 &&
