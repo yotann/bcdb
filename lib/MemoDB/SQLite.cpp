@@ -192,17 +192,20 @@ public:
 void sqlite_db::fatal_error() { llvm::report_fatal_error(sqlite3_errmsg(db)); }
 
 void sqlite_db::open(const char *uri, bool create_if_missing) {
-  const std::lock_guard<std::mutex> lock(mutex);
-  assert(!db);
-  int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX |
-              (create_if_missing ? SQLITE_OPEN_CREATE : 0);
-  int rc = sqlite3_open_v2(uri, &db, flags, /*zVfs*/ nullptr);
-  if (rc != SQLITE_OK)
-    fatal_error();
+  {
+    const std::lock_guard<std::mutex> lock(mutex);
+    assert(!db);
+    int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE |
+                SQLITE_OPEN_FULLMUTEX |
+                (create_if_missing ? SQLITE_OPEN_CREATE : 0);
+    int rc = sqlite3_open_v2(uri, &db, flags, /*zVfs*/ nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
 
-  for (const char *stmt : SQLITE_PRAGMAS) {
-    rc = sqlite3_exec(db, stmt, nullptr, nullptr, nullptr);
-    // ignore return code
+    for (const char *stmt : SQLITE_PRAGMAS) {
+      rc = sqlite3_exec(db, stmt, nullptr, nullptr, nullptr);
+      // ignore return code
+    }
   }
 
   upgrade_schema();
