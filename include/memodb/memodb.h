@@ -277,6 +277,29 @@ public:
   virtual void call_invalidate(llvm::StringRef name) = 0;
 
   virtual std::vector<memodb_path> list_paths_to(const memodb_ref &ref);
+
+  template <typename F, typename... Targs>
+  memodb_ref call_or_lookup_ref(llvm::StringRef name, F func, Targs... Fargs) {
+    memodb_ref ref = call_get(name, {Fargs...});
+    if (!ref) {
+      ref = put(func(*this, get(Fargs)...));
+      call_set(name, {Fargs...}, ref);
+    }
+    return ref;
+  }
+
+  template <typename F, typename... Targs>
+  memodb_value call_or_lookup_value(llvm::StringRef name, F func,
+                                    Targs... Fargs) {
+    memodb_value value;
+    if (memodb_ref ref = call_get(name, {Fargs...})) {
+      value = get(ref);
+    } else {
+      value = func(*this, get(Fargs)...);
+      call_set(name, {Fargs...}, put(value));
+    }
+    return value;
+  }
 };
 
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
