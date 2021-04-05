@@ -1,4 +1,4 @@
-{ stdenv, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd }:
+{ stdenv, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd, openmp ? null }:
 
 let
   gitFilter = patterns: root: with nix-gitignore;
@@ -24,7 +24,7 @@ in stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [ clang cmake pkgconfig python2 xxd ];
-  buildInputs = [ libsodium llvm sqlite ];
+  buildInputs = [ libsodium llvm sqlite openmp ];
 
   preConfigure = ''
     patchShebangs third_party/lit/lit.py
