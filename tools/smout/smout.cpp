@@ -88,7 +88,8 @@ static StringRef GetUri() {
 
 // smout alive2
 
-static memodb_value evaluate_refines_alive2(const memodb_value &src,
+static memodb_value evaluate_refines_alive2(memodb_db &db,
+                                            const memodb_value &src,
                                             const memodb_value &tgt) {
   using namespace sys;
 
@@ -171,93 +172,89 @@ static int Alive2() {
   memodb_ref Root = memodb.head_get(ModuleName);
   memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
 
-  unsigned NumValid = 0, NumInvalid = 0, NumUnsupported = 0, NumCrash = 0,
-           NumTimeout = 0, NumApprox = 0, NumTypeMismatch = 0;
-
+  std::vector<std::pair<memodb_ref, memodb_ref>> AllPairs;
   for (auto &GroupPair : Collated.map_items()) {
     auto &Group = GroupPair.second;
     for (unsigned i = 1; i < Group.array_items().size(); i++) {
       for (unsigned j = 0; j < i; j++) {
-        memodb_ref SrcRefs[2] = {Group[i].as_ref(), Group[j].as_ref()};
-        if (SrcRefs[1] < SrcRefs[0])
-          std::swap(SrcRefs[0], SrcRefs[1]);
-        memodb_ref RefinesRefs[2] = {
-            memodb.call_get("refines", {SrcRefs[0], SrcRefs[1]}),
-            memodb.call_get("refines", {SrcRefs[1], SrcRefs[0]}),
-        };
-        memodb_ref AliveRefs[2] = {
-            memodb.call_get("refines.alive2", {SrcRefs[0], SrcRefs[1]}),
-            memodb.call_get("refines.alive2", {SrcRefs[1], SrcRefs[0]}),
-        };
-
-        if (false) {
-          // If we've already attempted each direction, or solved it with
-          // something other than Alive2, skip this pair.
-          if ((RefinesRefs[0] || AliveRefs[0]) &&
-              (RefinesRefs[1] || AliveRefs[1]))
-            continue;
-        }
-
-        errs() << "comparing " << Group[i] << " with " << Group[j] << "\n";
-
-        memodb_value Blobs[2];
-        for (int k = 0; k < 2; k++)
-          Blobs[k] = memodb.get(SrcRefs[k]);
-
-        for (int k = 0; k < 2; k++) {
-          memodb_value AliveValue;
-          if (AliveRefs[k]) {
-            AliveValue = memodb.get(AliveRefs[k]);
-          } else {
-            AliveValue = evaluate_refines_alive2(Blobs[k], Blobs[1 - k]);
-            memodb.call_set("refines.alive2", {SrcRefs[k], SrcRefs[1 - k]},
-                            memodb.put(AliveValue));
-          }
-          int rc = AliveValue["rc"].as_integer();
-          StringRef stdoutString = AliveValue["stdout"].as_bytestring();
-          StringRef stderrString = AliveValue["stderr"].as_bytestring();
-
-          memodb_value RefinesValue;
-          if (rc == 0 &&
-              stdoutString.contains("Transformation seems to be correct!")) {
-            RefinesValue = true;
-            NumValid++;
-          } else if (rc == 0 &&
-                     stdoutString.contains("Transformation doesn't verify!")) {
-            RefinesValue = false;
-            NumInvalid++;
-          } else if (rc == 1 &&
-                     stderrString.contains("ERROR: Unsupported instruction:")) {
-            NumUnsupported++;
-          } else if (rc == 1 && stderrString.contains("ERROR: Timeout")) {
-            NumTimeout++;
-          } else if (rc == 1 &&
-                     stderrString.contains(
-                         "ERROR: Couldn't prove the correctness of the "
-                         "transformation\nAlive2 approximated the semantics")) {
-            NumApprox++;
-          } else if (rc == 1 && stderrString.contains(
-                                    "ERROR: program doesn't type check!")) {
-            RefinesValue = false;
-            NumTypeMismatch++;
-          } else {
-            errs() << AliveValue << "\n";
-            errs() << "unknown result from alive-tv!\n";
-            return 1;
-          }
-          if (RefinesValue != memodb_value{} && !RefinesRefs[k])
-            memodb.call_set("refines", {SrcRefs[k], SrcRefs[1 - k]},
-                            memodb.put(RefinesValue));
-        }
-
-        outs() << NumValid << " valid, " << NumInvalid << " invalid, "
-               << NumTimeout << " timeouts, " << NumUnsupported
-               << " unsupported, " << NumCrash << " crashes, " << NumApprox
-               << " approximated, " << NumTypeMismatch << " don't type check\n";
+        AllPairs.emplace_back(Group[i].as_ref(), Group[j].as_ref());
+        AllPairs.emplace_back(Group[j].as_ref(), Group[i].as_ref());
       }
     }
   }
 
+  unsigned NumValid = 0, NumInvalid = 0, NumUnsupported = 0, NumCrash = 0,
+           NumTimeout = 0, NumApprox = 0, NumTypeMismatch = 0, NumTotal = 0;
+  unsigned ProgressReported = 0;
+
+  auto reportProgress = [&] {
+    outs() << "Progress: " << NumTotal << "/" << AllPairs.size() << "\n";
+    outs() << NumValid << " valid, " << NumInvalid << " invalid, " << NumTimeout
+           << " timeouts, " << NumUnsupported << " unsupported, " << NumCrash
+           << " crashes, " << NumApprox << " approximated, " << NumTypeMismatch
+           << " don't type check\n";
+    ProgressReported = NumTotal;
+  };
+
+#pragma omp parallel for
+  for (size_t i = 0; i < AllPairs.size(); i++) {
+    const auto &Pair = AllPairs[i];
+
+    memodb_value AliveValue = memodb.call_or_lookup_value(
+        "refines.alive2", evaluate_refines_alive2, Pair.first, Pair.second);
+    int rc = AliveValue["rc"].as_integer();
+    StringRef stdoutString = AliveValue["stdout"].as_bytestring();
+    StringRef stderrString = AliveValue["stderr"].as_bytestring();
+
+    memodb_value RefinesValue;
+    if (rc == 0 &&
+        stdoutString.contains("Transformation seems to be correct!")) {
+      RefinesValue = true;
+#pragma omp atomic update
+      NumValid++;
+    } else if (rc == 0 &&
+               stdoutString.contains("Transformation doesn't verify!")) {
+      RefinesValue = false;
+#pragma omp atomic update
+      NumInvalid++;
+    } else if (rc == 1 &&
+               stderrString.contains("ERROR: Unsupported instruction:")) {
+#pragma omp atomic update
+      NumUnsupported++;
+    } else if (rc == 1 && stderrString.contains("ERROR: Timeout")) {
+#pragma omp atomic update
+      NumTimeout++;
+    } else if (rc == 1 &&
+               stderrString.contains(
+                   "ERROR: Couldn't prove the correctness of the "
+                   "transformation\nAlive2 approximated the semantics")) {
+#pragma omp atomic update
+      NumApprox++;
+    } else if (rc == 1 &&
+               stderrString.contains("ERROR: program doesn't type check!")) {
+      RefinesValue = false;
+#pragma omp atomic update
+      NumTypeMismatch++;
+    } else {
+      errs() << "comparing " << StringRef(Pair.first) << " with "
+             << StringRef(Pair.second) << "\n";
+      errs() << AliveValue << "\n";
+      report_fatal_error("unknown result from alive-tv!");
+    }
+#pragma omp atomic update
+    NumTotal++;
+    memodb_ref RefinesRef =
+        memodb.call_get("refines", {Pair.first, Pair.second});
+    if (RefinesValue != memodb_value{} && !RefinesRef)
+      memodb.call_set("refines", {Pair.first, Pair.second},
+                      memodb.put(RefinesValue));
+
+    if (NumTotal >= ProgressReported + 128)
+#pragma omp critical
+      reportProgress();
+  }
+
+  reportProgress();
   return 0;
 }
 
