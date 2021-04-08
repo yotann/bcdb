@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/CodeGen/MachineModuleInfo.h>
 #include <llvm/IR/Constants.h>
@@ -260,68 +261,79 @@ static int Alive2() {
 
 // smout candidates
 
+static memodb_value evaluate_candidates(memodb_db &db,
+                                        const memodb_value &func) {
+  ExitOnError Err("smout candidates evaluator: ");
+  BCDB bcdb(db);
+
+  auto M = Err(parseBitcodeFile(MemoryBufferRef(func.as_bytestring(), ""),
+                                bcdb.GetContext()));
+  getSoleDefinition(*M); // check that there's only one definition
+
+  legacy::PassManager PM;
+  PM.add(new OutliningExtractorWrapperPass());
+  PM.run(*M);
+
+  // Make sure all functions are named so we can track them after saving.
+  nameUnamedGlobals(*M);
+
+  SmallVector<memodb_value, 8> NodesValues;
+  SmallVector<std::string, 8> CalleeNames;
+  SmallVector<std::string, 8> CallerNames;
+
+  NamedMDNode *NMD = M->getNamedMetadata("smout.extracted.functions");
+  if (NMD && NMD->getNumOperands()) {
+    for (auto &Candidate :
+         cast<MDNode>(*NMD->getOperand(0)->getOperand(1)).operands()) {
+      // [Nodes, callee, caller]
+      MDNode &Node = cast<MDNode>(*Candidate);
+      ConstantDataSequential &NodesArray = cast<ConstantDataSequential>(
+          *cast<ConstantAsMetadata>(*Node.getOperand(0)).getValue());
+      Constant *Callee =
+          cast<ConstantAsMetadata>(*Node.getOperand(1)).getValue();
+      Constant *Caller =
+          cast<ConstantAsMetadata>(*Node.getOperand(2)).getValue();
+      if (Callee->isNullValue() || Caller->isNullValue())
+        continue; // ignore unsupported sequences
+
+      CalleeNames.push_back(Callee->getName().str());
+      CallerNames.push_back(Caller->getName().str());
+      memodb_value NodesValue = memodb_value::array();
+      for (size_t i = 0; i < NodesArray.getNumElements(); i++)
+        NodesValue.array_items().push_back(NodesArray.getElementAsInteger(i));
+      NodesValues.push_back(std::move(NodesValue));
+    }
+  }
+
+  memodb_value Module = db.get(Err(bcdb.AddWithoutHead(std::move(M))));
+  memodb_value Functions = Module.map_items()["functions"];
+
+  memodb_value Result = memodb_value::array();
+  for (size_t i = 0; i < NodesValues.size(); i++) {
+    Result.array_items().push_back(memodb_value::map({
+        {"nodes", std::move(NodesValues[i])},
+        {"callee",
+         std::move(Functions.map_items()[memodb_value::bytes(CalleeNames[i])])},
+        {"caller",
+         std::move(Functions.map_items()[memodb_value::bytes(CallerNames[i])])},
+    }));
+  }
+  return Result;
+}
+
 static int Candidates() {
   ExitOnError Err("smout candidates: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
-  for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
-    auto M = Err(db->GetFunctionById(FuncId));
-    getSoleDefinition(*M); // check that there's only one definition
-
-    legacy::PassManager PM;
-    PM.add(new OutliningExtractorWrapperPass());
-    PM.run(*M);
-
-    // Make sure all functions are named so we can track them after saving.
-    nameUnamedGlobals(*M);
-
-    SmallVector<memodb_value, 8> NodesValues;
-    SmallVector<std::string, 8> CalleeNames;
-    SmallVector<std::string, 8> CallerNames;
-
-    NamedMDNode *NMD = M->getNamedMetadata("smout.extracted.functions");
-    if (NMD && NMD->getNumOperands()) {
-      for (auto &Candidate :
-           cast<MDNode>(*NMD->getOperand(0)->getOperand(1)).operands()) {
-        // [Nodes, callee, caller]
-        MDNode &Node = cast<MDNode>(*Candidate);
-        ConstantDataSequential &NodesArray = cast<ConstantDataSequential>(
-            *cast<ConstantAsMetadata>(*Node.getOperand(0)).getValue());
-        Constant *Callee =
-            cast<ConstantAsMetadata>(*Node.getOperand(1)).getValue();
-        Constant *Caller =
-            cast<ConstantAsMetadata>(*Node.getOperand(2)).getValue();
-        if (Callee->isNullValue() || Caller->isNullValue())
-          continue; // ignore unsupported sequences
-
-        CalleeNames.push_back(Callee->getName().str());
-        CallerNames.push_back(Caller->getName().str());
-        memodb_value NodesValue = memodb_value::array();
-        for (size_t i = 0; i < NodesArray.getNumElements(); i++)
-          NodesValue.array_items().push_back(NodesArray.getElementAsInteger(i));
-        NodesValues.push_back(std::move(NodesValue));
-      }
-    }
-
-    Err(db->Add("__outlined", std::move(M)));
-
-    memodb_value Module = db->get_db().get(db->get_db().head_get("__outlined"));
-    memodb_value Functions = Module.map_items()["functions"];
-
-    memodb_value Result = memodb_value::array();
-    for (size_t i = 0; i < NodesValues.size(); i++) {
-      Result.array_items().push_back(memodb_value::map({
-          {"nodes", std::move(NodesValues[i])},
-          {"callee",
-           std::move(
-               Functions.map_items()[memodb_value::bytes(CalleeNames[i])])},
-          {"caller",
-           std::move(
-               Functions.map_items()[memodb_value::bytes(CallerNames[i])])},
-      }));
-    }
-
-    db->get_db().call_set("smout.candidates", {memodb_ref{FuncId}},
-                          db->get_db().put(Result));
+  auto OriginalFunctions = Err(db->ListFunctionsInModule(ModuleName));
+  size_t num_handled = 0;
+#pragma omp parallel for
+  for (auto &FuncId : OriginalFunctions) {
+    errs() << "Processing function " << FuncId << ", handled " << num_handled
+           << "/" << OriginalFunctions.size() << "\n";
+    db->get_db().call_or_lookup_ref("smout.candidates", evaluate_candidates,
+                                    memodb_ref{FuncId});
+#pragma omp atomic update
+    num_handled++;
   }
   return 0;
 }

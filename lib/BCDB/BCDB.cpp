@@ -48,7 +48,10 @@ Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef uri) {
 }
 
 BCDB::BCDB(std::unique_ptr<memodb_db> db)
-    : Context(new LLVMContext()), db(std::move(db)) {}
+    : Context(new LLVMContext()), unique_db(std::move(db)),
+      db(unique_db.get()) {}
+
+BCDB::BCDB(memodb_db &db) : Context(new LLVMContext()), db(&db) {}
 
 BCDB::~BCDB() {}
 
@@ -129,7 +132,7 @@ static void PreprocessModule(Module &M) {
   M.getMDKindID("srcloc");
 }
 
-Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
+Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   PreprocessModule(*M);
 
   auto SaveModule = [&](Module &M) {
@@ -171,7 +174,14 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
 
   auto result = memodb_value::map(
       {{"functions", function_map}, {"remainder", remainder_value}});
-  db->head_set(Name, db->put(result));
+  return db->put(result);
+}
+
+Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
+  Expected<memodb_ref> refOrErr = AddWithoutHead(std::move(M));
+  if (!refOrErr)
+    return refOrErr.takeError();
+  db->head_set(Name, *refOrErr);
   return Error::success();
 }
 
@@ -194,7 +204,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
                                    inconvertibleErrorCode());
   memodb_value head = db->get(head_ref);
   auto Remainder =
-      LoadModuleFromValue(db.get(), head["remainder"].as_ref(), Name, *Context);
+      LoadModuleFromValue(db, head["remainder"].as_ref(), Name, *Context);
 
   for (auto &Item : head["functions"].map_items()) {
     auto Name = Item.first.as_bytestring();
@@ -206,7 +216,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
 }
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
-  return LoadModuleFromValue(db.get(), memodb_ref(Id), Id, *Context);
+  return LoadModuleFromValue(db, memodb_ref(Id), Id, *Context);
 }
 
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
@@ -216,13 +226,12 @@ Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
                                    inconvertibleErrorCode());
   memodb_value head = db->get(head_ref);
 
-  auto M = LoadModuleFromValue(db.get(), head["remainder"].as_ref(),
-                               "remainder", *Context);
+  auto M = LoadModuleFromValue(db, head["remainder"].as_ref(), "remainder",
+                               *Context);
   Joiner Joiner(*M);
   for (auto &Item : head["functions"].map_items()) {
     auto Name = Item.first.as_bytestring();
-    auto MPart =
-        LoadModuleFromValue(db.get(), Item.second.as_ref(), Name, *Context);
+    auto MPart = LoadModuleFromValue(db, Item.second.as_ref(), Name, *Context);
     Joiner.JoinGlobal(Name, std::move(MPart));
   }
 
