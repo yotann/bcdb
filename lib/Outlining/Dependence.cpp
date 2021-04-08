@@ -306,6 +306,7 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
     PreventsOutlining.set(NodeIndices[BB]);
 
   // TODO: add support for control flow (also modifying the extractor).
+  PreventsOutlining.set(NodeIndices[BB->getTerminator()]);
   PreventsOutlining.set(NodeIndices[BB]);
 }
 
