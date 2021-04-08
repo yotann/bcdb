@@ -20,6 +20,10 @@ static cl::opt<size_t>
                        cl::desc("Maximum number of unrelated adjacent "
                                 "instructions to outline together."));
 
+static cl::opt<size_t>
+    OutlineMaxNodes("outline-max-nodes", cl::init(50),
+                    cl::desc("Maximum number of instructions to outline."));
+
 static cl::opt<bool> OutlineUnprofitable(
     "outline-unprofitable",
     cl::desc(
@@ -84,6 +88,8 @@ void OutliningCandidates::queueBV(BitVector BV) {
 }
 
 void OutliningCandidates::processCandidate(BitVector BV) {
+  if (BV.count() > OutlineMaxNodes)
+    return;
   if (OutDep.PreventsOutlining.anyCommon(BV))
     return;
 
