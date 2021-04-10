@@ -34,6 +34,9 @@ public:
   bool operator==(const memodb_ref &other) const { return id_ == other.id_; }
 };
 
+std::ostream &operator<<(std::ostream &os, const memodb_ref &ref);
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_ref &ref);
+
 class memodb_value {
 public:
   enum value_t {
