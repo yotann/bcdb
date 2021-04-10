@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -20,6 +21,7 @@
 #include <llvm/Support/FileUtilities.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Parallel.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Process.h>
@@ -29,12 +31,14 @@
 #include <llvm/Support/SystemUtils.h>
 #include <llvm/Support/TargetRegistry.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/Threading.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -61,6 +65,10 @@ static cl::SubCommand EstimateCommand("estimate",
 
 static cl::SubCommand MeasureCommand("measure",
                                      "Measure code size of candidates");
+
+static cl::opt<std::string> Threads("j",
+                                    cl::desc("Number of threads, or \"all\""),
+                                    cl::sub(CandidatesCommand));
 
 static cl::opt<bool>
     IgnoreEquivalence("ignore-equivalence",
@@ -325,16 +333,49 @@ static int Candidates() {
   ExitOnError Err("smout candidates: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   auto OriginalFunctions = Err(db->ListFunctionsInModule(ModuleName));
-  size_t num_handled = 0;
-#pragma omp parallel for
-  for (auto &FuncId : OriginalFunctions) {
-    errs() << "Processing function " << FuncId << ", handled " << num_handled
-           << "/" << OriginalFunctions.size() << "\n";
-    db->get_db().call_or_lookup_ref("smout.candidates", evaluate_candidates,
-                                    memodb_ref{FuncId});
-#pragma omp atomic update
-    num_handled++;
-  }
+
+  size_t TotalInputs = OriginalFunctions.size();
+  std::atomic<size_t> FinishedInputs = 0, TotalCandidates = 0;
+  StringSet ActiveInputs;
+  std::mutex PrintMutex;
+
+  auto PrintJobs = [&] {
+    size_t PrintActiveInputs = ActiveInputs.size(),
+           PrintFinishedInputs = FinishedInputs;
+    size_t PrintUnstartedInputs =
+        TotalInputs - PrintActiveInputs - PrintFinishedInputs;
+    errs() << PrintUnstartedInputs << "->" << PrintActiveInputs << "->"
+           << PrintFinishedInputs << ':';
+    for (const auto &ActiveInput : ActiveInputs)
+      errs() << ' ' << ActiveInput.getKey();
+    errs() << ' ';
+  };
+
+  auto Transform = [&](StringRef FuncId) {
+    {
+      const std::lock_guard<std::mutex> Lock(PrintMutex);
+      ActiveInputs.insert(FuncId);
+      PrintJobs();
+      errs() << "starting " << FuncId << "\n";
+    }
+
+    memodb_value value = db->get_db().call_or_lookup_value(
+        "smout.candidates", evaluate_candidates, memodb_ref{FuncId});
+    size_t result = value.array_items().size();
+    TotalCandidates += value.array_items().size();
+
+    {
+      const std::lock_guard<std::mutex> Lock(PrintMutex);
+      PrintJobs();
+      errs() << "finished " << FuncId << ": " << result << " candidates\n";
+      FinishedInputs++;
+      ActiveInputs.erase(FuncId);
+    }
+  };
+
+  parallel::strategy = heavyweight_hardware_concurrency(Threads);
+  parallelForEach(OriginalFunctions, Transform);
+  errs() << "Total candidates: " << TotalCandidates << "\n";
   return 0;
 }
 
@@ -714,6 +755,73 @@ static int Estimate() {
 
 // smout measure
 
+static memodb_value evaluate_compiled(memodb_db &db, const memodb_value &func) {
+  ExitOnError Err("smout compiled evaluator: ");
+  LLVMContext Context;
+
+  auto M =
+      Err(parseBitcodeFile(MemoryBufferRef(func.as_bytestring(), ""), Context));
+
+  std::string Error;
+  const Target *TheTarget =
+      TargetRegistry::lookupTarget(M->getTargetTriple(), Error);
+  if (!TheTarget) {
+    errs() << Error;
+    report_fatal_error("Can't lookup target triple.");
+  }
+
+  TargetOptions Options;
+  std::unique_ptr<TargetMachine> Target(TheTarget->createTargetMachine(
+      M->getTargetTriple(), "", "", Options, None, None, CodeGenOpt::Default));
+
+  SmallVector<char, 0> Buffer;
+  raw_svector_ostream OS(Buffer);
+
+  legacy::PassManager PM;
+  TargetLibraryInfoImpl TLII(Triple(M->getTargetTriple()));
+  PM.add(new TargetLibraryInfoWrapperPass(TLII));
+  LLVMTargetMachine &LLVMTM = static_cast<LLVMTargetMachine &>(*Target);
+#if LLVM_VERSION_MAJOR >= 10
+  MachineModuleInfoWrapperPass *MMIWP =
+      new MachineModuleInfoWrapperPass(&LLVMTM);
+  bool error = Target->addPassesToEmitFile(PM, OS, nullptr, CGFT_ObjectFile,
+                                           true, MMIWP);
+#else
+  MachineModuleInfo *MMI = new MachineModuleInfo(&LLVMTM);
+  bool error = Target->addPassesToEmitFile(
+      PM, OS, nullptr, TargetMachine::CGFT_ObjectFile, true, MMI);
+#endif
+  if (error) {
+    errs() << "can't compile to an object file\n";
+    return 1;
+  }
+
+  PM.run(*M);
+  assert(Buffer.size() > 0);
+  return memodb_value::bytes(Buffer);
+}
+
+static memodb_value evaluate_compiled_size(memodb_db &db,
+                                           const memodb_value &func) {
+  using namespace object;
+  ExitOnError Err("smout compiled size evaluator: ");
+  memodb_ref FuncId = db.put(func);
+  memodb_value Compiled =
+      db.call_or_lookup_value("compiled", evaluate_compiled, FuncId);
+  MemoryBufferRef MB(Compiled.as_bytestring(), FuncId);
+  auto Binary = Err(createBinary(MB));
+  if (ObjectFile *Obj = dyn_cast<ObjectFile>(Binary.get())) {
+    memodb_value::integer_t Size = 0;
+    for (const SectionRef &Section : Obj->sections()) {
+      if (Section.isText() || Section.isData() || Section.isBSS() ||
+          Section.isBerkeleyText() || Section.isBerkeleyData())
+        Size += Section.getSize();
+    }
+    return Size;
+  }
+  report_fatal_error("Invalid object file");
+}
+
 static int Measure() {
   ExitOnError Err("smout measure: ");
 
@@ -728,90 +836,45 @@ static int Measure() {
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   auto &memodb = db->get_db();
 
-  std::set<memodb_ref> all_funcs;
+  // It's okay if there are duplicates in this list; the BCDB will cache the
+  // compilation result.
+  std::vector<memodb_ref> all_funcs;
   for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
-    all_funcs.insert(memodb_ref{FuncId});
+    all_funcs.push_back(memodb_ref{FuncId});
     memodb_ref candidates =
         memodb.call_get("smout.candidates", {memodb_ref{FuncId}});
     memodb_value candidates_value = memodb.get(candidates);
     for (const auto &item : candidates_value.array_items()) {
-      all_funcs.insert(item.map_items().at("callee").as_ref());
-      all_funcs.insert(item.map_items().at("caller").as_ref());
+      all_funcs.push_back(item.map_items().at("callee").as_ref());
+      all_funcs.push_back(item.map_items().at("caller").as_ref());
     }
   }
   outs() << "Number of unique original functions, outlined callees, and "
             "outlined callers: "
          << all_funcs.size() << "\n";
 
-  for (memodb_ref FuncId : all_funcs) {
-    memodb_ref CompiledRef = memodb.call_get("compiled", {FuncId});
-    if (CompiledRef)
-      continue;
+  std::atomic<size_t> InProgress = 0, FinishedInputs = 0;
+  size_t TotalInputs = all_funcs.size();
 
-    auto M = Err(db->GetFunctionById(StringRef(FuncId)));
+  auto Transform = [&](memodb_ref FuncId) {
+    InProgress++;
+    memodb_value Size = db->get_db().call_or_lookup_value(
+        "compiled.size", evaluate_compiled_size, FuncId);
+    size_t Pending = TotalInputs - InProgress - FinishedInputs;
+    outs() << Pending << "->" << InProgress << "->" << FinishedInputs << ": "
+           << FuncId << ": compiled to " << Size << " bytes\n";
+    FinishedInputs++;
+    InProgress--;
+  };
 
-    std::string Error;
-    const Target *TheTarget =
-        TargetRegistry::lookupTarget(M->getTargetTriple(), Error);
-    if (!TheTarget) {
-      errs() << Error;
-      return 1;
-    }
-
-    TargetOptions Options;
-    std::unique_ptr<TargetMachine> Target(
-        TheTarget->createTargetMachine(M->getTargetTriple(), "", "", Options,
-                                       None, None, CodeGenOpt::Default));
-
-    SmallVector<char, 0> Buffer;
-    raw_svector_ostream OS(Buffer);
-
-    legacy::PassManager PM;
-    TargetLibraryInfoImpl TLII(Triple(M->getTargetTriple()));
-    PM.add(new TargetLibraryInfoWrapperPass(TLII));
-    LLVMTargetMachine &LLVMTM = static_cast<LLVMTargetMachine &>(*Target);
-#if LLVM_VERSION_MAJOR >= 10
-    MachineModuleInfoWrapperPass *MMIWP =
-        new MachineModuleInfoWrapperPass(&LLVMTM);
-    bool error = Target->addPassesToEmitFile(PM, OS, nullptr, CGFT_ObjectFile,
-                                             true, MMIWP);
-#else
-    MachineModuleInfo *MMI = new MachineModuleInfo(&LLVMTM);
-    bool error = Target->addPassesToEmitFile(
-        PM, OS, nullptr, TargetMachine::CGFT_ObjectFile, true, MMI);
-#endif
-    if (error) {
-      errs() << "can't compile to an object file\n";
-      return 1;
-    }
-
-    PM.run(*M);
-
-    outs() << StringRef(FuncId) << " compiled to " << Buffer.size()
-           << " bytes of binary\n";
-    memodb_value CompiledValue = memodb_value::bytes(Buffer);
-    memodb.call_set("compiled", {FuncId}, memodb.put(CompiledValue));
+  Optional<ThreadPoolStrategy> strategyOrNone =
+      get_threadpool_strategy(Threads);
+  if (!strategyOrNone) {
+    report_fatal_error("invalid number of threads");
+    return 1;
   }
-
-  for (memodb_ref FuncId : all_funcs) {
-    using namespace object;
-    memodb_ref CompiledRef = memodb.call_get("compiled", {FuncId});
-    memodb_value Compiled = memodb.get(CompiledRef);
-    MemoryBufferRef MB(Compiled.as_bytestring(), FuncId);
-    auto Binary = Err(createBinary(MB));
-    if (ObjectFile *Obj = dyn_cast<ObjectFile>(Binary.get())) {
-      memodb_value::integer_t Size = 0;
-      for (const SectionRef &Section : Obj->sections()) {
-        if (Section.isText() || Section.isData() || Section.isBSS() ||
-            Section.isBerkeleyText() || Section.isBerkeleyData())
-          Size += Section.getSize();
-      }
-      outs() << StringRef(FuncId) << " compiled to " << Size
-             << " bytes of code and data\n";
-      memodb.call_set("compiled.size", {FuncId},
-                      memodb.put(memodb_value(Size)));
-    }
-  }
+  parallel::strategy = *strategyOrNone;
+  parallelForEach(all_funcs, Transform);
 
   return 0;
 }
