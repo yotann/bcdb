@@ -1,5 +1,6 @@
 #include "memodb_internal.h"
 
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/ScopedPrinter.h>
@@ -10,6 +11,11 @@
 #include <sodium.h>
 #include <sqlite3.h>
 #include <vector>
+
+/* NOTE: we allow thread-safe access to sqlite_db by creating a separate
+ * database connection for each thread. It may be worth experimenting with
+ * shared caches <https://sqlite.org/sharedcache.html> as a trade-off between
+ * RAM usage and lock contention. */
 
 enum ValueType {
   BYTES_BLOB = 0,   // bytestring stored directly in "blob" table
@@ -73,11 +79,25 @@ static const char SQLITE_INIT_STMTS[] =
 
 namespace {
 class sqlite_db : public memodb_db {
-  // TODO: use a separate db instance for each thread, to improve concurrency.
-  // Will need a separate list of all instances so they can all be closed in
-  // the destructor.
-  sqlite3 *db = nullptr;
+  // Used by each thread to look up its own connection to the database.
+  // TODO: entries in this map are never removed, even when the sqlite_db is
+  // destroyed, which could cause memory leaks.
+  static thread_local llvm::DenseMap<sqlite_db *, sqlite3 *> thread_connections;
+
+  // Used to make new connections to the database.
+  std::string uri = {};
+
+  // This field is used solely so that all threads' connections can be closed
+  // in the single thread that calls the destructor.
+  std::vector<sqlite3 *> open_connections = {};
+
+  // Protects access to open_connections and uri.
   std::mutex mutex;
+
+  // Get the current thread's database connection (creating a new connection if
+  // necessary). The create_file_if_missing argument will cause a new database
+  // file to be created if there isn't one.
+  sqlite3 *get_db(bool create_file_if_missing = false);
 
   void fatal_error();
 
@@ -114,6 +134,9 @@ public:
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
+
+thread_local llvm::DenseMap<sqlite_db *, sqlite3 *>
+    sqlite_db::thread_connections = llvm::DenseMap<sqlite_db *, sqlite3 *>();
 
 namespace {
 struct Stmt {
@@ -163,14 +186,13 @@ struct Stmt {
 namespace {
 class Transaction {
   sqlite_db &db;
-  const std::lock_guard<std::mutex> lock;
   int rc = 0;
   bool committed = false;
 
 public:
-  Transaction(sqlite_db &db, bool exclusive = false) : db(db), lock(db.mutex) {
-    rc = sqlite3_exec(db.db, exclusive ? "BEGIN EXCLUSIVE" : "BEGIN", nullptr,
-                      nullptr, nullptr);
+  Transaction(sqlite_db &db, bool exclusive = false) : db(db) {
+    rc = sqlite3_exec(db.get_db(), exclusive ? "BEGIN EXCLUSIVE" : "BEGIN",
+                      nullptr, nullptr, nullptr);
     if (rc)
       db.fatal_error();
   }
@@ -179,46 +201,63 @@ public:
     committed = true;
     if (rc)
       return rc;
-    return sqlite3_exec(db.db, "COMMIT", nullptr, nullptr, nullptr);
+    return sqlite3_exec(db.get_db(), "COMMIT", nullptr, nullptr, nullptr);
   }
   ~Transaction() {
     if (!committed) {
-      sqlite3_exec(db.db, "ROLLBACK", nullptr, nullptr, nullptr);
+      sqlite3_exec(db.get_db(), "ROLLBACK", nullptr, nullptr, nullptr);
     }
   }
 };
 } // end anonymous namespace
 
-void sqlite_db::fatal_error() { llvm::report_fatal_error(sqlite3_errmsg(db)); }
+sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
+  sqlite3 *&result = thread_connections[this];
 
-void sqlite_db::open(const char *uri, bool create_if_missing) {
-  {
+  if (!result) {
     const std::lock_guard<std::mutex> lock(mutex);
-    assert(!db);
-    int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE |
-                SQLITE_OPEN_FULLMUTEX |
-                (create_if_missing ? SQLITE_OPEN_CREATE : 0);
-    int rc = sqlite3_open_v2(uri, &db, flags, /*zVfs*/ nullptr);
+
+    int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX |
+                (create_file_if_missing ? SQLITE_OPEN_CREATE : 0);
+    int rc = sqlite3_open_v2(uri.c_str(), &result, flags, /*zVfs*/ nullptr);
     if (rc != SQLITE_OK)
       fatal_error();
 
     for (const char *stmt : SQLITE_PRAGMAS) {
-      rc = sqlite3_exec(db, stmt, nullptr, nullptr, nullptr);
+      rc = sqlite3_exec(result, stmt, nullptr, nullptr, nullptr);
       // ignore return code
     }
+    upgrade_schema();
+
+    open_connections.push_back(result);
   }
 
-  upgrade_schema();
+  return result;
+}
+
+void sqlite_db::fatal_error() {
+  llvm::report_fatal_error(sqlite3_errmsg(get_db()));
+}
+
+void sqlite_db::open(const char *uri, bool create_if_missing) {
+  // We don't need to lock the mutex, since only the thread calling
+  // memodb_sqlite_open knows about the sqlite_db at this point.
+  assert(open_connections.empty());
+  this->uri = uri;
+  get_db(create_if_missing);
 }
 
 sqlite_db::~sqlite_db() {
-  sqlite3_exec(db, "PRAGMA optimize;", nullptr, nullptr, nullptr);
+  sqlite3_exec(get_db(), "PRAGMA optimize;", nullptr, nullptr, nullptr);
   // ignore return code
 
-  sqlite3_close(db);
+  const std::lock_guard<std::mutex> lock(mutex);
+  for (sqlite3 *db : open_connections)
+    sqlite3_close(db);
 }
 
 void sqlite_db::upgrade_schema() {
+  sqlite3 *db = get_db();
   int rc;
 
   // Exit early if the schema is already current.
@@ -411,6 +450,8 @@ sqlite3_int64 sqlite_db::ref_to_id(const memodb_ref &ref) {
 }
 
 memodb_ref sqlite_db::put(const memodb_value &value) {
+  sqlite3 *db = get_db();
+
   std::vector<std::uint8_t> buffer;
   int value_type;
   if (value.type() == memodb_value::BYTES) {
@@ -483,6 +524,7 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
 }
 
 void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
+  sqlite3 *db = get_db();
   if (value.type() == memodb_value::REF) {
     auto dest = ref_to_id(value.as_ref());
     Stmt stmt(db, "INSERT OR IGNORE INTO refs(src, dest) VALUES (?1,?2)");
@@ -502,6 +544,7 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
 }
 
 memodb_value sqlite_db::get(const memodb_ref &ref) {
+  sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
   stmt.bind_int(1, ref_to_id(ref));
   int rc = stmt.step();
@@ -526,6 +569,7 @@ memodb_value sqlite_db::get(const memodb_ref &ref) {
 memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
   // Load an obsolete map value. Return a nested map where leaves are
   // memodb_ref.
+  sqlite3 *db = get_db();
   int value_type;
   {
     Stmt stmt(db, "SELECT type FROM value WHERE vid = ?1");
@@ -575,6 +619,7 @@ memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
 }
 
 std::vector<memodb_ref> sqlite_db::list_refs_using(const memodb_ref &ref) {
+  sqlite3 *db = get_db();
   std::vector<memodb_ref> result;
   Stmt stmt(db, "SELECT src FROM refs WHERE dest = ?1");
   stmt.bind_int(1, ref_to_id(ref));
@@ -590,6 +635,7 @@ std::vector<memodb_ref> sqlite_db::list_refs_using(const memodb_ref &ref) {
 }
 
 std::vector<std::string> sqlite_db::list_heads() {
+  sqlite3 *db = get_db();
   std::vector<std::string> result;
   Stmt stmt(db, "SELECT name FROM head");
   while (true) {
@@ -605,6 +651,7 @@ std::vector<std::string> sqlite_db::list_heads() {
 }
 
 std::vector<std::string> sqlite_db::list_heads_using(const memodb_ref &ref) {
+  sqlite3 *db = get_db();
   std::vector<std::string> result;
   Stmt stmt(db, "SELECT name FROM head WHERE vid = ?1");
   stmt.bind_int(1, ref_to_id(ref));
@@ -621,6 +668,7 @@ std::vector<std::string> sqlite_db::list_heads_using(const memodb_ref &ref) {
 }
 
 memodb_ref sqlite_db::head_get(llvm::StringRef name) {
+  sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT vid FROM head WHERE name = ?1");
   stmt.bind_text(1, name);
   if (stmt.step() != SQLITE_ROW)
@@ -629,6 +677,7 @@ memodb_ref sqlite_db::head_get(llvm::StringRef name) {
 }
 
 void sqlite_db::head_set(llvm::StringRef name, const memodb_ref &value) {
+  sqlite3 *db = get_db();
   Stmt insert_stmt(db, "INSERT OR REPLACE INTO head(name, vid) VALUES(?1,?2)");
   insert_stmt.bind_text(1, name);
   insert_stmt.bind_int(2, ref_to_id(value));
@@ -637,6 +686,7 @@ void sqlite_db::head_set(llvm::StringRef name, const memodb_ref &value) {
 }
 
 void sqlite_db::head_delete(llvm::StringRef name) {
+  sqlite3 *db = get_db();
   Stmt delete_stmt(db, "DELETE FROM head WHERE name = ?1");
   delete_stmt.bind_text(1, name);
   if (delete_stmt.step() != SQLITE_DONE)
@@ -644,6 +694,7 @@ void sqlite_db::head_delete(llvm::StringRef name) {
 }
 
 sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
+  sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT fid FROM func WHERE name = ?1");
   stmt.bind_text(1, name);
   if (stmt.step() == SQLITE_ROW)
@@ -669,6 +720,7 @@ sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
 
 memodb_ref sqlite_db::call_get(llvm::StringRef name,
                                llvm::ArrayRef<memodb_ref> args) {
+  sqlite3 *db = get_db();
   auto fid = get_fid(name);
   if (fid == -1)
     return {};
@@ -692,6 +744,7 @@ memodb_ref sqlite_db::call_get(llvm::StringRef name,
 
 void sqlite_db::call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
                          const memodb_ref &result) {
+  sqlite3 *db = get_db();
   auto fid = get_fid(name, /* create_if_missing */ true);
 
   Transaction transaction(*this, true);
@@ -732,6 +785,7 @@ void sqlite_db::call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
 }
 
 void sqlite_db::call_invalidate(llvm::StringRef name) {
+  sqlite3 *db = get_db();
   auto fid = get_fid(name);
   if (fid == -1)
     return;
