@@ -40,8 +40,12 @@ TEST(ValuePrintTest, Bytes) {
   using bytes = std::vector<uint8_t>;
   test_print("''", memodb_value(bytes{}));
   test_print("'ascii'", memodb_value(bytes{0x61, 0x73, 0x63, 0x69, 0x69}));
-  test_print("h'27'", memodb_value(bytes{0x27}));
-  test_print("h'5c'", memodb_value(bytes{0x5c}));
+  test_print("h'00'", memodb_value(bytes{0x00}));
+  test_print("'\"'", memodb_value(bytes{0x22}));
+  test_print("'\\''", memodb_value(bytes{0x27}));
+  test_print("'\\\\'", memodb_value(bytes{0x5c}));
+  test_print("h'7f'", memodb_value(bytes{0x7f}));
+  test_print("h'80'", memodb_value(bytes{0x80}));
   test_print("h'00ff30'", memodb_value(bytes{0x00, 0xff, 0x30}));
 }
 
@@ -50,8 +54,13 @@ TEST(ValuePrintTest, String) {
   test_print("\"foo bar\"", memodb_value("foo bar"));
   test_print("\"\\\"\"", memodb_value("\""));
   test_print("\"\\\\\"", memodb_value("\\"));
-  test_print("\"\\u0000\\u000a\"",
+  test_print("\"\\u0000\\n\"",
              memodb_value::string(llvm::StringRef("\x00\n", 2)));
+  test_print("\"\\u0001\\u007f\"",
+             memodb_value::string(llvm::StringRef("\x01\x7f", 2)));
+  test_print(
+      "\"\xe2\x80\xa2\xf0\x9d\x84\x9e\"",
+      memodb_value::string(llvm::StringRef("\xe2\x80\xa2\xf0\x9d\x84\x9e", 7)));
 }
 
 TEST(ValuePrintTest, Array) {

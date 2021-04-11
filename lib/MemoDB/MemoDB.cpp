@@ -26,10 +26,16 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
   // Print the value in CBOR extended diagnostic notation.
   // https://tools.ietf.org/html/rfc8610#appendix-G
 
-  auto print_escaped = [&](llvm::StringRef str) {
+  auto print_escaped = [&](llvm::StringRef str, char quote) {
     for (char c : str) {
-      if (c == '\\' || c == '"')
+      if (c == '\\' || c == quote)
         os << '\\' << c;
+      else if (c == '\n')
+        os << "\\n";
+      else if (c == '\r')
+        os << "\\r";
+      else if (c == '\t')
+        os << "\\t";
       else if ((unsigned char)c < 0x20 || c == 0x7f) {
         char buf[5];
         std::snprintf(buf, sizeof(buf), "%04x", (unsigned int)(unsigned char)c);
@@ -55,12 +61,13 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
           },
           [&](const memodb_value::bytes_t &x) {
             if (std::all_of(x.begin(), x.end(), [](std::uint8_t b) {
-                  return b >= 33 && b <= 126 && b != '\'' && b != '"' &&
-                         b != '\\';
+                  return (b >= 32 && b <= 126) || b == '\n' || b == '\r' ||
+                         b == '\t';
                 })) {
+              // NOTE: implementations are inconsistent about how ' and "
+              // should be escaped. We escape ' as \' and leave " as-is.
               os << "'";
-              for (std::uint8_t b : x)
-                os << static_cast<char>(b);
+              print_escaped(value.as_bytestring(), '\'');
               os << "'";
             } else {
               os << "h'";
@@ -74,12 +81,12 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
           },
           [&](const memodb_value::string_t &x) {
             os << '"';
-            print_escaped(x);
+            print_escaped(x, '"');
             os << '"';
           },
           [&](const memodb_value::ref_t &x) {
             os << "39(\"";
-            print_escaped(x);
+            print_escaped(x, '"');
             os << "\")";
           },
           [&](const memodb_value::array_t &x) {
