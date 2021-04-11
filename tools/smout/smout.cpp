@@ -31,6 +31,7 @@
 #include <llvm/Support/SystemUtils.h>
 #include <llvm/Support/TargetRegistry.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/ThreadPool.h>
 #include <llvm/Support/Threading.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
@@ -429,54 +430,138 @@ static memodb_value GroupForGlobals(Module &M) {
   return result;
 }
 
+template <class ContainerTy, class ResultTy, class ReduceFuncTy,
+          class TransformFuncTy>
+ResultTy parallel_transform_reduce(ContainerTy Container, ResultTy Init,
+                                   ReduceFuncTy Reduce,
+                                   TransformFuncTy Transform) {
+  ResultTy Result = Init;
+  std::mutex Mutex;
+  Optional<ThreadPoolStrategy> strategyOrNone =
+      get_threadpool_strategy(Threads);
+  if (!strategyOrNone)
+    report_fatal_error("invalid number of threads");
+  ThreadPool pool(*strategyOrNone);
+  size_t NumTasks = std::min<size_t>(4 * strategyOrNone->compute_thread_count(),
+                                     Container.size());
+  size_t TaskSize = Container.size() / NumTasks;
+  size_t RemainingInputs = Container.size() % NumTasks;
+  size_t IBegin = 0;
+  for (size_t i = 0; i < NumTasks; i++) {
+    size_t IEnd = IBegin + TaskSize + (i < RemainingInputs ? 1 : 0);
+    pool.async([IBegin, IEnd, &Container, &Mutex, &Result, &Init, &Transform,
+                &Reduce] {
+      ResultTy ThreadResult = Init;
+      for (size_t I = IBegin; I != IEnd; I++)
+        ThreadResult = Reduce(ThreadResult, Transform(Container[I]));
+      const std::lock_guard<std::mutex> Lock(Mutex);
+      Result = Reduce(Result, ThreadResult);
+    });
+    IBegin = IEnd;
+  }
+  assert(IBegin == Container.size());
+  pool.wait();
+  return Result;
+}
+
+// Exclude candidates that would make the caller larger; they can never be
+// profitable.
+static memodb_value evaluate_profitable(memodb_db &db,
+                                        const memodb_value &func) {
+  memodb_ref FuncId = db.put(func);
+  memodb_value candidates = db.get(db.call_get("smout.candidates", {FuncId}));
+  memodb_value result = memodb_value::array();
+  memodb_value orig_size = db.get(db.call_get("compiled.size", {FuncId}));
+  for (const auto &item : candidates.array_items()) {
+    memodb_ref caller = item.map_items().at("caller").as_ref();
+    memodb_value caller_size = db.get(db.call_get("compiled.size", {caller}));
+    if (caller_size < orig_size)
+      result.array_items().push_back(item);
+  }
+  return result;
+}
+
 static int Collate() {
   ExitOnError Err("smout collate: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
-  std::set<memodb_ref> all_candidates;
-  size_t total_candidates = 0;
-  for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
-    memodb_ref candidates =
-        db->get_db().call_get("smout.candidates", {memodb_ref{FuncId}});
-    memodb_value candidates_value = db->get_db().get(candidates);
-    for (const auto &item : candidates_value.array_items()) {
-      all_candidates.insert(item.map_items().at("callee").as_ref());
-      total_candidates++;
-    }
-  }
-  outs() << "Number of unique candidates: " << all_candidates.size() << "\n";
-  outs() << "Number of total candidates: " << total_candidates << "\n";
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  memodb_db &db = bcdb->get_db();
+  auto AllFunctions = Err(bcdb->ListFunctionsInModule(ModuleName));
 
-  memodb_value result = memodb_value::map();
-  for (const memodb_ref &ref : all_candidates) {
-    auto M = Err(db->GetFunctionById(StringRef(ref)));
+  std::atomic<size_t> TotalCandidates = 0, TotalProfitable = 0;
+  auto TransformProfitable = [&](StringRef FuncId) {
+    memodb_value candidates =
+        db.get(db.call_get("smout.candidates", {memodb_ref(FuncId)}));
+    memodb_value profitable = db.call_or_lookup_value(
+        "smout.candidates.profitable", evaluate_profitable, memodb_ref(FuncId));
+    TotalCandidates += candidates.array_items().size();
+    TotalProfitable += profitable.array_items().size();
+    StringSet Result;
+    for (const auto &item : profitable.array_items()) {
+      memodb_ref callee = item.map_items().at("callee").as_ref();
+      Result.insert(StringRef(callee));
+    }
+    return Result;
+  };
+  auto ReduceProfitable = [](StringSet<> A, StringSet<> B) {
+    for (auto &Item : B) {
+      A.insert(Item.getKey());
+    }
+    return A;
+  };
+  StringSet UniqueCandidates = parallel_transform_reduce(
+      AllFunctions, StringSet(), ReduceProfitable, TransformProfitable);
+  outs() << "Number of total candidates: " << TotalCandidates << "\n";
+  outs() << "Number of potentially profitable candidates: " << TotalProfitable
+         << "\n";
+  outs() << "Number of unique candidates: " << UniqueCandidates.size() << "\n";
+
+  std::vector<memodb_ref> UniqueCandidatesVec;
+  for (auto &Item : UniqueCandidates)
+    UniqueCandidatesVec.push_back(Item.getKey());
+  auto Reduce = [](memodb_value A, memodb_value B) {
+    for (auto &Item : B.map_items()) {
+      memodb_value &value = A[Item.first];
+      if (value.type() != memodb_value::ARRAY)
+        value = memodb_value::array({Item.second});
+      else
+        value.array_items().push_back(Item.second);
+    }
+    return A;
+  };
+  auto Transform = [&db, &Err](const memodb_ref &ref) {
+    LLVMContext Context;
+    auto M = Err(parseBitcodeFile(
+        MemoryBufferRef(db.get(ref).as_bytestring(), StringRef(ref)), Context));
     Function &Def = getSoleDefinition(*M);
-    memodb_value key = memodb_value::array(
-        {GroupForType(Def.getFunctionType()), GroupForGlobals(*M)});
-    memodb_value &value = result[key];
-    if (value.type() != memodb_value::ARRAY)
-      value = memodb_value::array({ref});
-    else
-      value.array_items().push_back(ref);
-  }
+    return memodb_value::map(
+        {{memodb_value::array(
+              {GroupForType(Def.getFunctionType()), GroupForGlobals(*M)}),
+          memodb_value::array({ref})}});
+  };
+  memodb_value Groups = parallel_transform_reduce(
+      UniqueCandidatesVec, memodb_value::map(), Reduce, Transform);
+  outs() << "Number of groups: " << Groups.map_items().size() << "\n";
 
   // Erase groups with only a single element.
   size_t candidatesRemaining = 0, largestGroup = 0;
-  for (auto it = result.map_items().begin(); it != result.map_items().end();) {
-    if (it->second.array_items().size() < 2) {
-      it = result.map_items().erase(it);
+  for (auto it = Groups.map_items().begin(); it != Groups.map_items().end();) {
+    auto size = it->second.array_items().size();
+    largestGroup = std::max(largestGroup, size);
+    if (size < 2) {
+      it = Groups.map_items().erase(it);
     } else {
-      candidatesRemaining += it->second.array_items().size();
-      largestGroup = std::max(largestGroup, it->second.array_items().size());
+      candidatesRemaining += size;
       it++;
     }
   }
-
-  outs() << "Number of groups: " << result.map_items().size() << "\n";
-  outs() << "Number of candidates that belong to a group: "
+  outs() << "Number of nontrivial groups: " << Groups.map_items().size()
+         << "\n";
+  outs() << "Number of candidates that belong to a nontrivial group: "
          << candidatesRemaining << "\n";
   outs() << "Largest group: " << largestGroup << "\n";
-  db->get_db().call_set("smout.collated", {db->get_db().head_get(ModuleName)},
-                        db->get_db().put(result));
+
+  db.call_set("smout.collated", {db.head_get(ModuleName)}, db.put(Groups));
+
   return 0;
 }
 
