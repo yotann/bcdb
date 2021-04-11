@@ -224,10 +224,9 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
       bool inner_indefinite;
       start(inner_major_type, inner_minor_type, additional, inner_indefinite);
       if (inner_major_type != major_type)
-        llvm::report_fatal_error("Invalid indefinite-length array or map");
+        llvm::report_fatal_error("Invalid indefinite-length string");
       if (inner_indefinite)
-        llvm::report_fatal_error(
-            "Invalid nested indefinite-length arrays or maps");
+        llvm::report_fatal_error("Invalid nested indefinite-length strings");
       return true;
     } else {
       return true;
