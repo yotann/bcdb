@@ -25,7 +25,7 @@ enum ValueType {
 
 // Errors when running these statements are ignored.
 static const std::vector<const char *> SQLITE_PRAGMAS = {
-    "PRAGMA busy_timeout = 10000;\n",
+    "PRAGMA busy_timeout = 60000;\n", // TODO: write our own busy handler?
     "PRAGMA foreign_keys = ON;\n",
     "PRAGMA journal_mode = WAL;\n",
     "PRAGMA synchronous = 1;\n",
