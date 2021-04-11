@@ -203,7 +203,7 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
     } else if (minor_type == 31) {
       indefinite = true;
     } else {
-      assert(false);
+      llvm::report_fatal_error("Invalid minor type");
     }
   };
 
@@ -223,8 +223,11 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
       int inner_major_type, inner_minor_type;
       bool inner_indefinite;
       start(inner_major_type, inner_minor_type, additional, inner_indefinite);
-      assert(inner_major_type == major_type);
-      assert(!inner_indefinite);
+      if (inner_major_type != major_type)
+        llvm::report_fatal_error("Invalid indefinite-length array or map");
+      if (inner_indefinite)
+        llvm::report_fatal_error(
+            "Invalid nested indefinite-length arrays or maps");
       return true;
     } else {
       return true;
@@ -250,15 +253,17 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
       is_ref = true;
   } while (major_type == 6);
 
-  if (is_ref)
-    assert(major_type == 3);
+  if (is_ref && major_type != 3)
+    llvm::report_fatal_error("Invalid reference type");
 
   switch (major_type) {
   case 0:
-    assert(!indefinite);
+    if (indefinite)
+      llvm::report_fatal_error("Integers may not be indefinite");
     return additional;
   case 1:
-    assert(!indefinite);
+    if (indefinite)
+      llvm::report_fatal_error("Integers may not be indefinite");
     return -std::int64_t(additional) - 1;
   case 2: {
     bytes_t result;
@@ -293,7 +298,8 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
     return result;
   }
   case 7:
-    assert(!indefinite);
+    if (indefinite)
+      llvm::report_fatal_error("Simple values may not be indefinite");
     switch (minor_type) {
     case 20:
       return false;
@@ -310,7 +316,7 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
     case 27:
       return decode_float(additional, 64, 52, 1023);
     }
-    assert(false);
+    llvm::report_fatal_error("Unsupported simple value");
   default:
     llvm_unreachable("impossible major type");
   }
