@@ -317,8 +317,8 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
 }
 
 void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
-  // Save the value in canonical CBOR format.
-  // https://tools.ietf.org/html/rfc7049#section-3.9
+  // Save the value in deterministically encoded CBOR format.
+  // https://www.rfc-editor.org/rfc/rfc8949.html#name-deterministically-encoded-c
 
   auto start = [&](int major_type, std::uint64_t additional,
                    int force_minor = 0) {
@@ -389,11 +389,7 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                      items.emplace_back(bytes_t(), &item.second);
                      item.first.save_cbor(items.back().first);
                    }
-                   std::sort(items.begin(), items.end(), [](auto &a, auto &b) {
-                     return a.first.size() != b.first.size()
-                                ? a.first.size() < b.first.size()
-                                : a.first < b.first;
-                   });
+                   std::sort(items.begin(), items.end());
                    start(5, items.size());
                    for (const auto &item : items) {
                      out.insert(out.end(), item.first.begin(),
