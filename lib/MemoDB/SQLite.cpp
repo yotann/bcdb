@@ -25,7 +25,6 @@ enum ValueType {
 
 // Errors when running these statements are ignored.
 static const std::vector<const char *> SQLITE_PRAGMAS = {
-    "PRAGMA busy_timeout = 60000;\n", // TODO: write our own busy handler?
     "PRAGMA foreign_keys = ON;\n",
     "PRAGMA journal_mode = WAL;\n",
     "PRAGMA synchronous = 1;\n",
@@ -190,26 +189,41 @@ class Transaction {
   bool committed = false;
 
 public:
-  Transaction(sqlite_db &db, bool exclusive = false) : db(db) {
-    rc = sqlite3_exec(db.get_db(), exclusive ? "BEGIN EXCLUSIVE" : "BEGIN",
-                      nullptr, nullptr, nullptr);
+  Transaction(sqlite_db &db) : db(db) {
+    rc =
+        sqlite3_exec(db.get_db(), "BEGIN EXCLUSIVE", nullptr, nullptr, nullptr);
     if (rc)
       db.fatal_error();
   }
-  int commit() {
+  void commit() {
     assert(!committed);
     committed = true;
     if (rc)
-      return rc;
-    return sqlite3_exec(db.get_db(), "COMMIT", nullptr, nullptr, nullptr);
+      db.fatal_error();
+    rc = sqlite3_exec(db.get_db(), "COMMIT", nullptr, nullptr, nullptr);
+    if (rc)
+      db.fatal_error();
   }
   ~Transaction() {
-    if (!committed) {
+    if (!committed)
       sqlite3_exec(db.get_db(), "ROLLBACK", nullptr, nullptr, nullptr);
-    }
   }
 };
 } // end anonymous namespace
+
+static int busy_callback(void *, int count) {
+  int ms = 1;
+  if (count >= 16) {
+    unsigned total_seconds = (65535 + 65536 * (count - 16)) / 1000;
+    ms = 65536;
+    llvm::errs() << "database locked, still trying after " << total_seconds
+                 << " seconds\n";
+  } else {
+    ms = 1 << count;
+  }
+  sqlite3_sleep(ms);
+  return 1; // keep trying
+}
 
 sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
   sqlite3 *&result = thread_connections[this];
@@ -220,6 +234,10 @@ sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
     int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX |
                 (create_file_if_missing ? SQLITE_OPEN_CREATE : 0);
     int rc = sqlite3_open_v2(uri.c_str(), &result, flags, /*zVfs*/ nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
+
+    rc = sqlite3_busy_handler(result, busy_callback, nullptr);
     if (rc != SQLITE_OK)
       fatal_error();
 
@@ -273,7 +291,7 @@ void sqlite_db::upgrade_schema() {
 
   // Start an exclusive transaction so the upgrade process doesn't conflict
   // with other processes.
-  Transaction transaction(*this, true);
+  Transaction transaction(*this);
 
   // If the database is empty, initialize it.
   {
@@ -428,8 +446,7 @@ void sqlite_db::upgrade_schema() {
   // slow and it requires either gigabytes of RAM or gigabytes of /tmp space
   // (depending on the value of PRAGMA temp_store).
 
-  if (transaction.commit() != SQLITE_OK)
-    fatal_error();
+  transaction.commit();
 
   // Ensure the new user_version/application_id are written to the actual
   // database file.
@@ -480,7 +497,7 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
 
   // We may need to add a new entry. Start an exclusive transaction and check
   // again (an entry may have been added since the previous check).
-  Transaction transaction(*this, true);
+  Transaction transaction(*this);
   {
     Stmt select_stmt(db, "SELECT vid FROM blob WHERE hash = ?1 AND type = ?2");
     select_stmt.bind_blob(1, hash, sizeof hash);
@@ -518,8 +535,7 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
   // Update the refs table.
   add_refs_from(new_id, value);
 
-  if (transaction.commit() != SQLITE_OK)
-    fatal_error();
+  transaction.commit();
   return id_to_ref(new_id);
 }
 
@@ -702,7 +718,7 @@ sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
   if (!create_if_missing)
     return -1;
 
-  Transaction transaction(*this, true);
+  Transaction transaction(*this);
   stmt.reset();
   if (stmt.step() == SQLITE_ROW)
     return sqlite3_column_int64(stmt.stmt, 0);
@@ -713,8 +729,7 @@ sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
     fatal_error();
   sqlite3_int64 newid = sqlite3_last_insert_rowid(db);
   assert(newid);
-  if (transaction.commit() != SQLITE_OK)
-    fatal_error();
+  transaction.commit();
   return newid;
 }
 
@@ -747,7 +762,7 @@ void sqlite_db::call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
   sqlite3 *db = get_db();
   auto fid = get_fid(name, /* create_if_missing */ true);
 
-  Transaction transaction(*this, true);
+  Transaction transaction(*this);
 
   Stmt select_stmt(
       db, "SELECT cid FROM call WHERE fid = ?1 AND parent IS ?2 AND arg = ?3");
@@ -780,8 +795,7 @@ void sqlite_db::call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
   update_stmt.bind_int(2, parent);
   if (update_stmt.step() != SQLITE_DONE)
     fatal_error();
-  if (transaction.commit() != SQLITE_OK)
-    fatal_error();
+  transaction.commit();
 }
 
 void sqlite_db::call_invalidate(llvm::StringRef name) {
