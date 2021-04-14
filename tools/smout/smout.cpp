@@ -69,7 +69,14 @@ static cl::SubCommand MeasureCommand("measure",
 
 static cl::opt<std::string> Threads("j",
                                     cl::desc("Number of threads, or \"all\""),
-                                    cl::sub(CandidatesCommand));
+                                    cl::sub(CandidatesCommand),
+                                    cl::sub(CollateCommand),
+                                    cl::sub(MeasureCommand));
+
+static cl::opt<std::string>
+    Timeout("timeout", cl::init("1000"),
+            cl::desc("Timeout for Alive2's SMT queries (ms)"),
+            cl::sub(Alive2Command));
 
 static cl::opt<bool>
     IgnoreEquivalence("ignore-equivalence",
@@ -144,8 +151,9 @@ static memodb_value evaluate_refines_alive2(memodb_db &db,
   // TODO: measure execution time.
   int rc = ExecuteAndWait(
       aliveTvPath,
-      {"alive-tv", "--succinct", srcTemp[0].TmpName, srcTemp[1].TmpName}, None,
-      {None, StringRef(outTemp.TmpName), StringRef(errTemp.TmpName)});
+      {"alive-tv", "--smt-to", Timeout, "--succinct", srcTemp[0].TmpName,
+       srcTemp[1].TmpName},
+      None, {None, StringRef(outTemp.TmpName), StringRef(errTemp.TmpName)});
   auto stdoutBuffer =
       Err(errorOrToExpected(MemoryBuffer::getFile(outTemp.TmpName)));
   auto stderrBuffer =
@@ -194,15 +202,16 @@ static int Alive2() {
   }
 
   unsigned NumValid = 0, NumInvalid = 0, NumUnsupported = 0, NumCrash = 0,
-           NumTimeout = 0, NumApprox = 0, NumTypeMismatch = 0, NumTotal = 0;
+           NumTimeout = 0, NumMemout = 0, NumApprox = 0, NumTypeMismatch = 0,
+           NumTotal = 0;
   unsigned ProgressReported = 0;
 
   auto reportProgress = [&] {
     outs() << "Progress: " << NumTotal << "/" << AllPairs.size() << "\n";
     outs() << NumValid << " valid, " << NumInvalid << " invalid, " << NumTimeout
-           << " timeouts, " << NumUnsupported << " unsupported, " << NumCrash
-           << " crashes, " << NumApprox << " approximated, " << NumTypeMismatch
-           << " don't type check\n";
+           << " timeouts, " << NumMemout << " memouts, " << NumUnsupported
+           << " unsupported, " << NumCrash << " crashes, " << NumApprox
+           << " approximated, " << NumTypeMismatch << " don't type check\n";
     ProgressReported = NumTotal;
   };
 
@@ -231,9 +240,21 @@ static int Alive2() {
                stderrString.contains("ERROR: Unsupported instruction:")) {
 #pragma omp atomic update
       NumUnsupported++;
+    } else if (rc == 1 &&
+               stderrString.contains("ERROR: Unsupported metadata:")) {
+#pragma omp atomic update
+      NumUnsupported++;
+    } else if (rc == 1 && stderrString.contains("ERROR: Unsupported type:")) {
+#pragma omp atomic update
+      NumUnsupported++;
     } else if (rc == 1 && stderrString.contains("ERROR: Timeout")) {
 #pragma omp atomic update
       NumTimeout++;
+    } else if (rc == 1 &&
+               stderrString.contains("ERROR: SMT Error: smt tactic failed to "
+                                     "show goal to be sat/unsat memout")) {
+#pragma omp atomic update
+      NumMemout++;
     } else if (rc == 1 &&
                stderrString.contains(
                    "ERROR: Couldn't prove the correctness of the "
@@ -522,9 +543,10 @@ static int Collate() {
     for (auto &Item : B.map_items()) {
       memodb_value &value = A[Item.first];
       if (value.type() != memodb_value::ARRAY)
-        value = memodb_value::array({Item.second});
+        value = Item.second;
       else
-        value.array_items().push_back(Item.second);
+        for (auto &X : Item.second.array_items())
+          value.array_items().push_back(X);
     }
     return A;
   };
