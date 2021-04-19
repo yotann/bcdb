@@ -471,6 +471,8 @@ ResultTy parallel_transform_reduce(ContainerTy Container, ResultTy Init,
   ThreadPool pool(*strategyOrNone);
   size_t NumTasks = std::min<size_t>(4 * strategyOrNone->compute_thread_count(),
                                      Container.size());
+  if (!NumTasks)
+    return Init;
   size_t TaskSize = Container.size() / NumTasks;
   size_t RemainingInputs = Container.size() % NumTasks;
   size_t IBegin = 0;
