@@ -57,7 +57,7 @@ in rec {
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
   bcdb-clang = pkgs.callPackage ./nix/bcdb {
-    inherit (pkgs.llvmPackages_11) stdenv llvm clang openmp;
+    inherit (pkgs.llvmPackages_11) stdenv llvm clang;
   };
 
   bcdb = bcdb-llvm11;

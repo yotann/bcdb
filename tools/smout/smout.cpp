@@ -67,6 +67,9 @@ static cl::SubCommand EstimateCommand("estimate",
 static cl::SubCommand MeasureCommand("measure",
                                      "Measure code size of candidates");
 
+static cl::SubCommand ShowGroupsCommand("show-groups",
+                                        "Print group information");
+
 static cl::opt<std::string> Threads("j",
                                     cl::desc("Number of threads, or \"all\""),
                                     cl::sub(CandidatesCommand),
@@ -87,7 +90,7 @@ static cl::opt<std::string>
     ModuleName("name", cl::desc("Name of the head to work on"),
                cl::sub(Alive2Command), cl::sub(CandidatesCommand),
                cl::sub(CollateCommand), cl::sub(EstimateCommand),
-               cl::sub(MeasureCommand));
+               cl::sub(MeasureCommand), cl::sub(ShowGroupsCommand));
 
 static cl::opt<std::string> UriOrEmpty(
     "uri", cl::Optional, cl::desc("URI of the database"),
@@ -201,24 +204,22 @@ static int Alive2() {
     }
   }
 
-  unsigned NumValid = 0, NumInvalid = 0, NumUnsupported = 0, NumCrash = 0,
-           NumTimeout = 0, NumMemout = 0, NumApprox = 0, NumTypeMismatch = 0,
-           NumTotal = 0;
-  unsigned ProgressReported = 0;
+  std::atomic<unsigned> NumValid = 0, NumInvalid = 0, NumUnsupported = 0,
+                        NumCrash = 0, NumTimeout = 0, NumMemout = 0,
+                        NumApprox = 0, NumTypeMismatch = 0, NumTotal = 0;
+  std::atomic<unsigned> ProgressReported = 0;
+  std::mutex PrintMutex;
 
   auto reportProgress = [&] {
-    outs() << "Progress: " << NumTotal << "/" << AllPairs.size() << "\n";
+    ProgressReported = NumTotal.load();
+    outs() << "Progress: " << NumTotal << "/" << AllPairs.size() << ", ";
     outs() << NumValid << " valid, " << NumInvalid << " invalid, " << NumTimeout
            << " timeouts, " << NumMemout << " memouts, " << NumUnsupported
            << " unsupported, " << NumCrash << " crashes, " << NumApprox
            << " approximated, " << NumTypeMismatch << " don't type check\n";
-    ProgressReported = NumTotal;
   };
 
-#pragma omp parallel for
-  for (size_t i = 0; i < AllPairs.size(); i++) {
-    const auto &Pair = AllPairs[i];
-
+  auto Transform = [&](const std::pair<memodb_ref, memodb_ref> &Pair) {
     memodb_value AliveValue = memodb.call_or_lookup_value(
         "refines.alive2", evaluate_refines_alive2, Pair.first, Pair.second);
     int rc = AliveValue["rc"].as_integer();
@@ -229,61 +230,66 @@ static int Alive2() {
     if (rc == 0 &&
         stdoutString.contains("Transformation seems to be correct!")) {
       RefinesValue = true;
-#pragma omp atomic update
       NumValid++;
     } else if (rc == 0 &&
                stdoutString.contains("Transformation doesn't verify!")) {
       RefinesValue = false;
-#pragma omp atomic update
       NumInvalid++;
     } else if (rc == 1 &&
                stderrString.contains("ERROR: Unsupported instruction:")) {
-#pragma omp atomic update
       NumUnsupported++;
     } else if (rc == 1 &&
                stderrString.contains("ERROR: Unsupported metadata:")) {
-#pragma omp atomic update
       NumUnsupported++;
     } else if (rc == 1 && stderrString.contains("ERROR: Unsupported type:")) {
-#pragma omp atomic update
       NumUnsupported++;
     } else if (rc == 1 && stderrString.contains("ERROR: Timeout")) {
-#pragma omp atomic update
       NumTimeout++;
     } else if (rc == 1 &&
                stderrString.contains("ERROR: SMT Error: smt tactic failed to "
                                      "show goal to be sat/unsat memout")) {
-#pragma omp atomic update
       NumMemout++;
     } else if (rc == 1 &&
                stderrString.contains(
                    "ERROR: Couldn't prove the correctness of the "
                    "transformation\nAlive2 approximated the semantics")) {
-#pragma omp atomic update
       NumApprox++;
     } else if (rc == 1 &&
                stderrString.contains("ERROR: program doesn't type check!")) {
       RefinesValue = false;
-#pragma omp atomic update
       NumTypeMismatch++;
+    } else if (rc == -2 && stdoutString.empty() && stderrString.empty()) {
+      // FIXME: what's going on?
+      NumCrash++;
     } else {
       errs() << "comparing " << StringRef(Pair.first) << " with "
              << StringRef(Pair.second) << "\n";
       errs() << AliveValue << "\n";
       report_fatal_error("unknown result from alive-tv!");
     }
-#pragma omp atomic update
     NumTotal++;
+
     memodb_ref RefinesRef =
         memodb.call_get("refines", {Pair.first, Pair.second});
     if (RefinesValue != memodb_value{} && !RefinesRef)
       memodb.call_set("refines", {Pair.first, Pair.second},
                       memodb.put(RefinesValue));
 
-    if (NumTotal >= ProgressReported + 128)
-#pragma omp critical
-      reportProgress();
+    if (NumTotal >= ProgressReported + 64) {
+      const std::lock_guard<std::mutex> Lock(PrintMutex);
+      if (NumTotal >= ProgressReported + 64)
+        reportProgress();
+    }
+  };
+
+  Optional<ThreadPoolStrategy> strategyOrNone =
+      get_threadpool_strategy(Threads);
+  if (!strategyOrNone) {
+    report_fatal_error("invalid number of threads");
+    return 1;
   }
+  parallel::strategy = *strategyOrNone;
+  parallelForEach(AllPairs, Transform);
 
   reportProgress();
   return 0;
@@ -986,6 +992,29 @@ static int Measure() {
   return 0;
 }
 
+// show-groups
+
+static int ShowGroups() {
+  ExitOnError Err("smout show-groups: ");
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  auto &memodb = bcdb->get_db();
+  memodb_ref Root = memodb.head_get(ModuleName);
+  memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
+
+  std::vector<std::pair<size_t, memodb_value>> GroupCounts;
+  for (const auto &Item : Collated.map_items()) {
+    GroupCounts.emplace_back(Item.second.array_items().size(), Item.first);
+  }
+
+  std::sort(GroupCounts.begin(), GroupCounts.end(),
+            [](const auto &a, const auto &b) { return b < a; });
+  for (const auto &Item : GroupCounts) {
+    outs() << Item.first << " " << Item.second << "\n";
+  }
+
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -1014,6 +1043,8 @@ int main(int argc, char **argv) {
     return Estimate();
   } else if (MeasureCommand) {
     return Measure();
+  } else if (ShowGroupsCommand) {
+    return ShowGroups();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;
