@@ -76,8 +76,8 @@ static cl::opt<std::string> Threads("j",
                                     cl::sub(CollateCommand),
                                     cl::sub(MeasureCommand));
 
-static cl::opt<std::string>
-    Timeout("timeout", cl::init("1000"),
+static cl::opt<unsigned>
+    Timeout("timeout", cl::init(1000),
             cl::desc("Timeout for Alive2's SMT queries (ms)"),
             cl::sub(Alive2Command));
 
@@ -109,6 +109,7 @@ static StringRef GetUri() {
 // smout alive2
 
 static memodb_value evaluate_refines_alive2(memodb_db &db,
+                                            const memodb_value &AliveSettings,
                                             const memodb_value &src,
                                             const memodb_value &tgt) {
   using namespace sys;
@@ -151,11 +152,13 @@ static memodb_value evaluate_refines_alive2(memodb_db &db,
   std::string aliveTvPath =
       Err(errorOrToExpected(findProgramByName("alive-tv")));
 
+  auto Timeout = formatv("{0}", AliveSettings["smt-to"].as_integer());
+
   // TODO: measure execution time.
   int rc = ExecuteAndWait(
       aliveTvPath,
-      {"alive-tv", "--smt-to", Timeout, "--succinct", srcTemp[0].TmpName,
-       srcTemp[1].TmpName},
+      {"alive-tv", "--smt-to", StringRef(Timeout), "--succinct",
+       srcTemp[0].TmpName, srcTemp[1].TmpName},
       None, {None, StringRef(outTemp.TmpName), StringRef(errTemp.TmpName)});
   auto stdoutBuffer =
       Err(errorOrToExpected(MemoryBuffer::getFile(outTemp.TmpName)));
@@ -193,6 +196,10 @@ static int Alive2() {
   memodb_ref Root = memodb.head_get(ModuleName);
   memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
 
+  memodb_ref AliveSettings = memodb.put(memodb_value::map({
+      {"smt-to", (unsigned)Timeout},
+  }));
+
   std::vector<std::pair<memodb_ref, memodb_ref>> AllPairs;
   for (auto &GroupPair : Collated.map_items()) {
     auto &Group = GroupPair.second;
@@ -220,8 +227,19 @@ static int Alive2() {
   };
 
   auto Transform = [&](const std::pair<memodb_ref, memodb_ref> &Pair) {
-    memodb_value AliveValue = memodb.call_or_lookup_value(
-        "refines.alive2", evaluate_refines_alive2, Pair.first, Pair.second);
+    memodb_ref RefinesRef =
+        memodb.call_get("refines", {Pair.first, Pair.second});
+    if (RefinesRef) {
+      if (memodb.get(RefinesRef).as_bool())
+        NumValid++;
+      else
+        NumInvalid++;
+      return;
+    }
+
+    memodb_value AliveValue =
+        memodb.call_or_lookup_value("refines.alive2", evaluate_refines_alive2,
+                                    AliveSettings, Pair.first, Pair.second);
     int rc = AliveValue["rc"].as_integer();
     StringRef stdoutString = AliveValue["stdout"].as_bytestring();
     StringRef stderrString = AliveValue["stderr"].as_bytestring();
@@ -269,9 +287,7 @@ static int Alive2() {
     }
     NumTotal++;
 
-    memodb_ref RefinesRef =
-        memodb.call_get("refines", {Pair.first, Pair.second});
-    if (RefinesValue != memodb_value{} && !RefinesRef)
+    if (RefinesValue != memodb_value{})
       memodb.call_set("refines", {Pair.first, Pair.second},
                       memodb.put(RefinesValue));
 

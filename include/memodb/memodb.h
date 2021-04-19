@@ -154,6 +154,7 @@ public:
   }
   template <class InputIT> static memodb_value map(InputIT first, InputIT last);
 
+  bool_t as_bool() const { return as<bool_t>(); }
   integer_t as_integer() const { return as<integer_t>(); }
   float_t as_float() const { return as<float_t>(); }
   const ref_t &as_ref() const { return as<ref_t>(); }
