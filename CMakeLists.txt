@@ -73,6 +73,9 @@ pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 link_directories(${SQLITE3_LIBRARY_DIRS})
 find_program(CLANG clang)
 find_program(XXD xxd)
+find_package(Threads REQUIRED) # needed by nng
+find_package(nng REQUIRED)
+find_package(nngpp REQUIRED)
 
 
 
@@ -83,6 +86,7 @@ option(LLVM_ENABLE_WARNINGS "Enable warnings" ON)
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 include(HandleLLVMOptions)
+set(LLVM_REQUIRES_EH ON) # exceptions needed by nngpp
 
 # Put libs and bins in expected place.
 # XXX: We don't setup CMAKE_CFG_INTDIR to distinguish Release/Debug/etc.

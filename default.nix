@@ -29,34 +29,44 @@ let
     ];
   });
 
+  nng = pkgs.callPackage ./nix/nng {};
+  nngpp = pkgs.callPackage ./nix/nngpp { inherit nng; };
+
 in rec {
   bcdb-llvm7 = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     llvm = debugLLVM pkgs.llvmPackages_7.llvm;
     clang = pkgs.clang_7;
   };
   bcdb-llvm8 = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     llvm = debugLLVM pkgs.llvmPackages_8.llvm;
     clang = pkgs.clang_8;
   };
   bcdb-llvm9 = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     llvm = debugLLVM pkgs.llvmPackages_9.llvm;
     clang = pkgs.clang_9;
   };
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     llvm = debugLLVM pkgs.llvmPackages_10.llvm;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     llvm = debugLLVM pkgs.llvmPackages_11.llvm;
     clang = pkgs.clang_11;
   };
   bcdb-llvmAlive = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     llvm = debugLLVM llvmAlive;
     clang = pkgs.clang_11;
   };
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
   bcdb-clang = pkgs.callPackage ./nix/bcdb {
+    inherit nng nngpp;
     inherit (pkgs.llvmPackages_11) stdenv llvm clang;
   };
 
