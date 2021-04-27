@@ -183,7 +183,8 @@ static bool encode_float(std::uint64_t &result, memodb_value::float_t value,
   return exact;
 }
 
-memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
+memodb_value
+memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
   auto start = [&](int &major_type, int &minor_type, std::uint64_t &additional,
                    bool &indefinite) {
     major_type = in.front() >> 5;
@@ -285,14 +286,14 @@ memodb_value memodb_value::load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in) {
   case 4: {
     array_t result;
     while (next_item())
-      result.emplace_back(load_cbor_ref(in));
+      result.emplace_back(load_cbor_from_sequence(in));
     return result;
   }
   case 5: {
     map_t result;
     while (next_item()) {
-      memodb_value key = load_cbor_ref(in);
-      result[key] = load_cbor_ref(in);
+      memodb_value key = load_cbor_from_sequence(in);
+      result[key] = load_cbor_from_sequence(in);
     }
     return result;
   }

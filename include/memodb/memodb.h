@@ -119,6 +119,7 @@ public:
   memodb_value(T val) : variant_(float_t(val)) {}
 
   memodb_value(llvm::ArrayRef<std::uint8_t> val) : variant_(bytes_t(val)) {}
+  static memodb_value bytes() { return memodb_value(bytes_t{}); }
   static memodb_value bytes(llvm::ArrayRef<char> val) {
     return memodb_value(llvm::ArrayRef<unsigned char>(
         reinterpret_cast<const unsigned char *>(val.begin()),
@@ -191,13 +192,12 @@ public:
   }
 
   static memodb_value load_cbor(llvm::ArrayRef<std::uint8_t> in) {
-    return load_cbor_ref(in);
+    return load_cbor_from_sequence(in);
   }
+  static memodb_value load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in);
   void save_cbor(std::vector<std::uint8_t> &out) const;
 
 private:
-  static memodb_value load_cbor_ref(llvm::ArrayRef<std::uint8_t> &in);
-
   void require_type(value_t type) const {
     if (type != this->type()) {
       llvm::report_fatal_error("invalid memodb_value type");
