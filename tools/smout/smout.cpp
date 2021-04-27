@@ -234,6 +234,7 @@ static int Alive2() {
         NumValid++;
       else
         NumInvalid++;
+      NumTotal++;
       return;
     }
 
