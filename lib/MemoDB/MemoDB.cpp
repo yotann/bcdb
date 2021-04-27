@@ -15,7 +15,7 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_ref &ref) {
-  return os << llvm::StringRef(ref);
+  return os << llvm::StringRef(ref).str();
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_ref &ref) {
