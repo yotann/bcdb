@@ -40,6 +40,8 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <memory>
 #include <mutex>
+#include <nngpp/nngpp.h>
+#include <nngpp/protocol/req0.h>
 #include <set>
 #include <string>
 
@@ -70,16 +72,20 @@ static cl::SubCommand MeasureCommand("measure",
 static cl::SubCommand ShowGroupsCommand("show-groups",
                                         "Print group information");
 
-static cl::opt<std::string> Threads("j",
-                                    cl::desc("Number of threads, or \"all\""),
-                                    cl::sub(CandidatesCommand),
-                                    cl::sub(CollateCommand),
-                                    cl::sub(MeasureCommand));
+static cl::opt<std::string>
+    Threads("j", cl::desc("Number of threads, or \"all\""),
+            cl::sub(Alive2Command), cl::sub(CandidatesCommand),
+            cl::sub(CollateCommand), cl::sub(MeasureCommand));
 
 static cl::opt<unsigned>
     Timeout("timeout", cl::init(1000),
             cl::desc("Timeout for Alive2's SMT queries (ms)"),
             cl::sub(Alive2Command));
+
+static cl::opt<std::string>
+    BrokerURL("broker-url", cl::Required,
+              cl::desc("URL of MemoDB broker to connect to"),
+              cl::sub(Alive2Command));
 
 static cl::opt<bool>
     IgnoreEquivalence("ignore-equivalence",
@@ -108,85 +114,68 @@ static StringRef GetUri() {
 
 // smout alive2
 
+static nng::socket BrokerSocket;
+
 static memodb_value evaluate_refines_alive2(memodb_db &db,
                                             const memodb_value &AliveSettings,
                                             const memodb_value &src,
                                             const memodb_value &tgt) {
-  using namespace sys;
+  // Allow the job to take 10x the time of the SMT timeout, in case there are
+  // many SMT queries.
+  auto JobTimeout = AliveSettings["smt-to"].as_integer() * 10 + 30000;
+  memodb_value Header = memodb_value::array(
+      {"memo01", 0x02, memodb_value::bytes(), "alive.tv", JobTimeout});
 
-  ExitOnError Err("smout alive2: ");
+  memodb_value Job = AliveSettings;
+  Job["src"] = src;
+  Job["tgt"] = tgt;
 
-  std::string tmp_dir_str =
-      Process::GetEnv("XDG_RUNTIME_DIR").getValueOr("/tmp");
-  SmallVector<char, 64> tmp_dir(tmp_dir_str.begin(), tmp_dir_str.end());
-  path::append(tmp_dir, "bcdb-smout");
-  Err(errorCodeToError(fs::create_directories(tmp_dir)));
-  path::append(tmp_dir, "alive2-%%%%%%%%-");
-  bool keep = false;
-  fs::TempFile srcTemp[2] = {
-      Err(fs::TempFile::create(tmp_dir + "src.bc",
-                               fs::owner_read | fs::owner_write)),
-      Err(fs::TempFile::create(tmp_dir + "tgt.bc",
-                               fs::owner_read | fs::owner_write)),
-  };
-  fs::TempFile outTemp = Err(fs::TempFile::create(
-      tmp_dir + "out.txt", fs::owner_read | fs::owner_write));
-  fs::TempFile errTemp = Err(fs::TempFile::create(
-      tmp_dir + "err.txt", fs::owner_read | fs::owner_write));
+  std::vector<uint8_t> Request;
+  Header.save_cbor(Request);
+  Job.save_cbor(Request);
 
-  raw_fd_ostream srcStreams[2] = {
-      {srcTemp[0].FD, /* shouldClose */ false, /* unbuffered */ true},
-      {srcTemp[1].FD, /* shouldClose */ false, /* unbuffered */ true},
-  };
+  nng::ctx Ctx(BrokerSocket);
+  nng::aio Aio(nullptr, nullptr);
+  auto Msg = nng::make_msg(0);
+  nng::req::v0::set_opt_resend_time(Ctx, JobTimeout + 30000);
+  Msg.body().append({Request.data(), Request.size()});
+  Aio.set_msg(std::move(Msg));
 
-  const memodb_value *Blobs[2] = {&src, &tgt};
-  for (int i = 0; i < 2; i++) {
-    Err(errorCodeToError(
-        sys::fs::resize_file(srcTemp[i].FD, Blobs[i]->as_bytes().size())));
-    srcStreams[i].write(
-        reinterpret_cast<const char *>(Blobs[i]->as_bytes().data()),
-        Blobs[i]->as_bytes().size());
-    Err(errorCodeToError(srcStreams[i].error()));
+  Ctx.send(Aio);
+  Aio.wait();
+  if (Aio.result() != nng::error::success) {
+    errs() << "broker send error: " << nng::to_string(Aio.result()) << "\n";
+    report_fatal_error("broker send failed");
   }
-
-  std::string aliveTvPath =
-      Err(errorOrToExpected(findProgramByName("alive-tv")));
-
-  auto Timeout = formatv("{0}", AliveSettings["smt-to"].as_integer());
 
   // TODO: measure execution time.
-  int rc = ExecuteAndWait(
-      aliveTvPath,
-      {"alive-tv", "--smt-to", StringRef(Timeout), "--succinct",
-       srcTemp[0].TmpName, srcTemp[1].TmpName},
-      None, {None, StringRef(outTemp.TmpName), StringRef(errTemp.TmpName)});
-  auto stdoutBuffer =
-      Err(errorOrToExpected(MemoryBuffer::getFile(outTemp.TmpName)));
-  auto stderrBuffer =
-      Err(errorOrToExpected(MemoryBuffer::getFile(errTemp.TmpName)));
-  memodb_value Result = memodb_value::map(
-      {{"rc", rc},
-       {"stdout", memodb_value::bytes(stdoutBuffer->getBuffer())},
-       {"stderr", memodb_value::bytes(stderrBuffer->getBuffer())}});
 
-  if (keep) {
-    errs() << "files:\n";
-    errs() << "  " << srcTemp[0].TmpName << "\n";
-    errs() << "  " << srcTemp[1].TmpName << "\n";
-    errs() << "  " << outTemp.TmpName << "\n";
-    errs() << "  " << errTemp.TmpName << "\n";
-    Err(srcTemp[0].keep());
-    Err(srcTemp[1].keep());
-    Err(outTemp.keep());
-    Err(errTemp.keep());
-  } else {
-    Err(srcTemp[0].discard());
-    Err(srcTemp[1].discard());
-    Err(outTemp.discard());
-    Err(errTemp.discard());
+  Ctx.recv(Aio);
+  Aio.wait();
+  if (Aio.result() != nng::error::success) {
+    errs() << "broker receive error: " << nng::to_string(Aio.result()) << "\n";
+    report_fatal_error("broker receive failed");
   }
 
-  return Result;
+  Msg = Aio.release_msg();
+  llvm::ArrayRef<uint8_t> Reply(Msg.body().data<uint8_t>(), Msg.body().size());
+
+  Header = memodb_value::load_cbor_from_sequence(Reply);
+  if (Header.type() != memodb_value::ARRAY ||
+      Header.array_items().size() != 3 || Header[0] != "memo01" ||
+      Header[1] != 0x03) {
+    errs() << "received invalid reply header: " << Header << "\n";
+    report_fatal_error("invalid reply header");
+  }
+
+  memodb_value Result = memodb_value::load_cbor(Reply);
+  if (Result.type() != memodb_value::ARRAY || Result.array_items().size() < 2 ||
+      Result[0] != 0) {
+    errs() << "received error from worker: " << Result << "\n";
+    report_fatal_error("error from worker");
+  }
+
+  return Result[1][memodb_value::bytes()]["forward"];
 }
 
 static int Alive2() {
@@ -195,6 +184,9 @@ static int Alive2() {
   auto &memodb = bcdb->get_db();
   memodb_ref Root = memodb.head_get(ModuleName);
   memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
+
+  BrokerSocket = nng::req::v0::open();
+  BrokerSocket.dial(BrokerURL.c_str());
 
   memodb_ref AliveSettings = memodb.put(memodb_value::map({
       {"smt-to", (unsigned)Timeout},
@@ -213,17 +205,20 @@ static int Alive2() {
 
   std::atomic<unsigned> NumValid = 0, NumInvalid = 0, NumUnsupported = 0,
                         NumCrash = 0, NumTimeout = 0, NumMemout = 0,
-                        NumApprox = 0, NumTypeMismatch = 0, NumTotal = 0;
+                        NumApprox = 0, NumTypeMismatch = 0, NumTotal = 0,
+                        NumIdentical = 0, NumOldFailed = 0;
   std::atomic<unsigned> ProgressReported = 0;
   std::mutex PrintMutex;
 
   auto reportProgress = [&] {
     ProgressReported = NumTotal.load();
     outs() << "Progress: " << NumTotal << "/" << AllPairs.size() << ", ";
-    outs() << NumValid << " valid, " << NumInvalid << " invalid, " << NumTimeout
-           << " timeouts, " << NumMemout << " memouts, " << NumUnsupported
-           << " unsupported, " << NumCrash << " crashes, " << NumApprox
-           << " approximated, " << NumTypeMismatch << " don't type check\n";
+    outs() << NumValid << " valid, " << NumInvalid << " invalid, "
+           << NumIdentical << " identical, " << NumTimeout << " timeouts, "
+           << NumMemout << " memouts, " << NumUnsupported << " unsupported, "
+           << NumCrash << " crashes, " << NumApprox << " approximated, "
+           << NumTypeMismatch << " don't type check, " << NumOldFailed
+           << " old failures\n";
   };
 
   auto Transform = [&](const std::pair<memodb_ref, memodb_ref> &Pair) {
@@ -241,44 +236,46 @@ static int Alive2() {
     memodb_value AliveValue =
         memodb.call_or_lookup_value("refines.alive2", evaluate_refines_alive2,
                                     AliveSettings, Pair.first, Pair.second);
-    int rc = AliveValue["rc"].as_integer();
-    StringRef stdoutString = AliveValue["stdout"].as_bytestring();
-    StringRef stderrString = AliveValue["stderr"].as_bytestring();
+    if (AliveValue.map_items().count("rc")) {
+      // An old result from when we were starting Alive2 as a separate process.
+      NumOldFailed++;
+      NumTotal++;
+      return;
+    }
 
-    memodb_value RefinesValue;
-    if (rc == 0 &&
-        stdoutString.contains("Transformation seems to be correct!")) {
-      RefinesValue = true;
+    memodb_value RefinesValue = AliveValue["valid"];
+    StringRef status = AliveValue["status"].as_string();
+    StringRef stderrString;
+    if (AliveValue.map_items().count("errs"))
+      stderrString = AliveValue["errs"].as_string();
+
+    if (RefinesValue == true && status == "CORRECT" && stderrString.empty()) {
       NumValid++;
-    } else if (rc == 0 &&
-               stdoutString.contains("Transformation doesn't verify!")) {
-      RefinesValue = false;
+    } else if (RefinesValue == true && status == "SYNTACTIC_EQ" &&
+               stderrString.empty()) {
+      NumIdentical++;
+    } else if (RefinesValue == false && status == "UNSOUND") {
       NumInvalid++;
-    } else if (rc == 1 &&
-               stderrString.contains("ERROR: Unsupported instruction:")) {
+    } else if (RefinesValue == memodb_value{} &&
+               status == "COULD_NOT_TRANSLATE") {
       NumUnsupported++;
-    } else if (rc == 1 &&
-               stderrString.contains("ERROR: Unsupported metadata:")) {
-      NumUnsupported++;
-    } else if (rc == 1 && stderrString.contains("ERROR: Unsupported type:")) {
-      NumUnsupported++;
-    } else if (rc == 1 && stderrString.contains("ERROR: Timeout")) {
+    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+               stderrString.contains("ERROR: Timeout")) {
       NumTimeout++;
-    } else if (rc == 1 &&
+    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains("ERROR: SMT Error: smt tactic failed to "
                                      "show goal to be sat/unsat memout")) {
       NumMemout++;
-    } else if (rc == 1 &&
+    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains(
                    "ERROR: Couldn't prove the correctness of the "
                    "transformation\nAlive2 approximated the semantics")) {
       NumApprox++;
-    } else if (rc == 1 &&
-               stderrString.contains("ERROR: program doesn't type check!")) {
-      RefinesValue = false;
+    } else if (RefinesValue == false && status == "TYPE_CHECKER_FAILED") {
       NumTypeMismatch++;
-    } else if (rc == -2 && stdoutString.empty() && stderrString.empty()) {
-      // FIXME: what's going on?
+    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+               stderrString.contains(
+                   "ERROR: SMT Error: interrupted from keyboard")) {
       NumCrash++;
     } else {
       errs() << "comparing " << StringRef(Pair.first) << " with "
