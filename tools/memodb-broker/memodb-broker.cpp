@@ -312,6 +312,9 @@ Context::Context()
 }
 
 void Context::aioCallback() {
+  if (Aio.result() == nng::error::canceled)
+    return;
+
   if (Aio.result() == nng::error::closed) {
     // This happens when main() exits and closes the socket.
     return;
@@ -415,12 +418,10 @@ void Context::handleClientJob(std::unique_lock<std::mutex> Lock,
       break;
     // XXX: Be careful not to use any references to volatile global structures,
     // like Services[SN], after releasing the lock.
-    std::cerr << "worker " << Worker << " cancelling...\n";
     Lock.unlock();
     Worker->Aio.cancel();
     Worker->Aio.wait();
     Lock.lock();
-    std::cerr << "worker " << Worker << " cancelled\n";
     if (Worker->State == Worker::WAITING_FOR_JOB)
       return Worker->startJob(this);
   }
@@ -435,8 +436,6 @@ void Context::handleMessage(std::unique_lock<std::mutex> Lock) {
                          Msg.body().size());
   // FIXME: handle CBOR errors using exceptions, don't just abort.
   memodb_value Header = memodb_value::load_cbor_from_sequence(Data);
-  std::cerr << "received " << Header << ", " << Data.size()
-            << " byte payload\n";
 
   if (Header.type() != memodb_value::ARRAY || Header.array_items().size() < 3 ||
       Header[0] != "memo01" || Header[1].type() != memodb_value::INTEGER ||
@@ -547,8 +546,6 @@ void Context::reset() {
 void Context::send(const memodb_value &Header, ArrayRef<uint8_t> Payload) {
   std::vector<uint8_t> Bytes;
   Header.save_cbor(Bytes);
-  std::cerr << "sending " << Header << ", " << Payload.size()
-            << " byte payload\n";
 
   nng::msg Msg(Bytes.size() + Payload.size());
   memcpy(Msg.body().data(), Bytes.data(), Bytes.size());
@@ -568,8 +565,6 @@ Worker::Worker(ServiceSetNumber SSN, WorkerID ID)
     : ID(ID), SSN(SSN), Aio(::workerAioCallback, this) {}
 
 void Worker::aioCallback() {
-  std::cerr << "worker callback: " << nng::to_string(Aio.result()) << "\n";
-
   if (Aio.result() == nng::error::canceled)
     return;
 
@@ -606,8 +601,6 @@ void Worker::changeState(StateEnum NewState) {
     }
   }
 
-  std::cerr << "worker " << this << " changing " << State << " -> " << NewState
-            << "\n";
   State = NewState;
 
   if (State == WAITING_FOR_RESULT)
@@ -625,7 +618,6 @@ void Worker::changeState(StateEnum NewState) {
   if (State == WAITING_FOR_RESULT)
     nng::sleep(ClientContext->JobTimeout, Aio);
   if (State == WAITING_FOR_JOB) {
-    std::cerr << "waiting WORKER_HEARTBEAT_TIME...\n";
     ServiceSets[SSN].WaitingWorkers.push_back(*this);
     nng::sleep(WORKER_HEARTBEAT_TIME, Aio);
   }
@@ -717,15 +709,35 @@ int main(int argc, char **argv) {
   GlobalContexts.resize(16);
 
   while (true) {
-    nng::msleep(500);
+    nng::msleep(1000);
     std::lock_guard<std::mutex> Guard(GlobalMutex);
     auto NumContexts = GlobalContexts.size();
-    size_t NumBusyContexts = 0;
-    for (Context &Context : GlobalContexts)
-      if (Context.State != Context::RECEIVING)
-        NumBusyContexts++;
-    std::cerr << NumBusyContexts << " of " << NumContexts << " contexts busy\n";
-    if (NumContexts - NumBusyContexts < 8)
+    size_t NumReceiving = 0, NumSending = 0, NumJobQueued = 0,
+           NumWorkerWaiting = 0, NumJobProcessing = 0;
+    for (Context &Context : GlobalContexts) {
+      switch (Context.State) {
+      case Context::RECEIVING:
+        NumReceiving++;
+        break;
+      case Context::SENDING:
+        NumSending++;
+        break;
+      case Context::JOB_QUEUED:
+        NumJobQueued++;
+        break;
+      case Context::WORKER_WAITING:
+        NumWorkerWaiting++;
+        break;
+      case Context::JOB_PROCESSING:
+        NumJobProcessing++;
+        break;
+      }
+    }
+    std::cerr << NumContexts << " contexts: " << NumReceiving << " idle, "
+              << NumSending << " sending, " << NumJobQueued << " queued jobs, "
+              << NumWorkerWaiting << " waiting workers, " << NumJobProcessing
+              << " jobs being processed\n";
+    if (NumReceiving < 8)
       GlobalContexts.resize(NumContexts * 2);
   }
 
