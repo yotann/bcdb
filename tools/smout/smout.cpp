@@ -77,10 +77,9 @@ static cl::opt<std::string>
             cl::sub(Alive2Command), cl::sub(CandidatesCommand),
             cl::sub(CollateCommand), cl::sub(MeasureCommand));
 
-static cl::opt<unsigned>
-    Timeout("timeout", cl::init(1000),
-            cl::desc("Timeout for Alive2's SMT queries (ms)"),
-            cl::sub(Alive2Command));
+static cl::opt<unsigned> Timeout("timeout", cl::init(10000),
+                                 cl::desc("Timeout for Alive2 jobs (ms)"),
+                                 cl::sub(Alive2Command));
 
 static cl::opt<std::string>
     BrokerURL("broker-url", cl::Required,
@@ -122,7 +121,7 @@ static memodb_value evaluate_refines_alive2(memodb_db &db,
                                             const memodb_value &tgt) {
   // Allow the job to take 10x the time of the SMT timeout, in case there are
   // many SMT queries.
-  auto JobTimeout = AliveSettings["smt-to"].as_integer() * 10 + 30000;
+  auto JobTimeout = AliveSettings["timeout"].as_integer() + 30000;
   memodb_value Header = memodb_value::array(
       {"memo01", 0x02, memodb_value::bytes(), "alive.tv", JobTimeout});
 
@@ -189,7 +188,8 @@ static int Alive2() {
   BrokerSocket.dial(BrokerURL.c_str());
 
   memodb_ref AliveSettings = memodb.put(memodb_value::map({
-      {"smt-to", (unsigned)Timeout},
+      {"smt-to", 2 * (unsigned)Timeout},
+      {"timeout", (unsigned)Timeout},
   }));
 
   std::vector<std::pair<memodb_ref, memodb_ref>> AllPairs;
@@ -259,6 +259,8 @@ static int Alive2() {
     } else if (RefinesValue == memodb_value{} &&
                status == "COULD_NOT_TRANSLATE") {
       NumUnsupported++;
+    } else if (RefinesValue == memodb_value{} && status == "TIMEOUT") {
+      NumTimeout++;
     } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains("ERROR: Timeout")) {
       NumTimeout++;
@@ -268,11 +270,17 @@ static int Alive2() {
       NumMemout++;
     } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains(
+                   "ERROR: Out of memory; skipping function.")) {
+      NumMemout++;
+    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+               stderrString.contains(
                    "ERROR: Couldn't prove the correctness of the "
                    "transformation\nAlive2 approximated the semantics")) {
       NumApprox++;
     } else if (RefinesValue == false && status == "TYPE_CHECKER_FAILED") {
       NumTypeMismatch++;
+    } else if (RefinesValue == memodb_value{} && status == "CRASHED") {
+      NumCrash++;
     } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains(
                    "ERROR: SMT Error: interrupted from keyboard")) {
