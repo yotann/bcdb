@@ -29,19 +29,35 @@
  *
  * Several possible solutions:
  *
- *  - The current solution: Call nng::aio::wait after cancelling the timeout in
- *    step 3, so the timeout callback finishes. We need to use two global
- *    mutexes: one used to ensure only one message is processed at once, and
- *    one to ensure only one thread accesses global structures at a time. The
- *    latter mutex is temporarily unlocked while calling nng::aio::wait so the
- *    timeout callback can lock it.
- *  - Use different callback functions or callback pointers depending on the
- *    current state of the object, so the timeout callback can figure out the
- *    object is no longer in the right state. Requires multiple nng::aio
- *    instances, and might not work in 100% of cases.
- *  - Check a clock in the timeout callback to determine whether the right
- *    timeout has passed. Could lead to shenanigans when the system clock
- *    changes, or if NNG's idea of time is slightly different from the clock's.
+ *  - **The current solution:** Have the timeout callback check whether the
+ *    current time matches the current intended timeout time. Could lead to
+ *    shenanigans when the system clock changes, or if NNG's idea of time is
+ *    slightly different from the clock's.
+ *
+ *  - Instead of doing nontrivial processing in aioCallback(), add everything
+ *    to a global task queue. The first task that uses the object can modify
+ *    the queue to cancel the other task. But this would prevent using
+ *    multithreading in the future.
+ *
+ *  - Use a different callback pointer each time the timeout is set, pointing
+ *    to a struct that includes the expected timeout number. If that number
+ *    matches the current timeout number in the object itself, the correct
+ *    timeout has expired. Requires allocation of a new struct and a new
+ *    nng::aio instance every time a timeout is set.
+ *
+ *  - Call nng::aio::wait after cancelling the timeout in step 3, so the
+ *    timeout callback finishes. We need to use two global mutexes: one used to
+ *    ensure only one message is processed at once, and one to ensure only one
+ *    thread accesses global structures at a time. The latter mutex is
+ *    temporarily unlocked while calling nng::aio::wait so the timeout callback
+ *    can lock it.
+ *
+ *    Unfortunately, this can still deadlock. nng::aio::cancel doesn't call the
+ *    callback with nng::error::canceled immediately; it adds a task that does
+ *    so to the task queue. And nng::aio::wait blocks until that task
+ *    completes. If all threads are blocked on nng::aio::wait or the message
+ *    mutex, nothing from the task queue can be executed, so the whole process
+ *    deadlocks.
  */
 
 #include <arpa/inet.h>
@@ -86,6 +102,11 @@ static const nng_duration WORKER_TIMEOUT = 10000;
 // disconnect from the client that submitted the job.
 static const nng_duration JOB_QUEUE_TIMEOUT = 10000;
 
+// If a timeout callback triggers before the timeout is due, but the difference
+// is less than this amount, we handle it as a timeout anyway. Should be
+// significantly less than the timeout values above.
+static const nng_duration TIMEOUT_VARIANCE = 100;
+
 namespace {
 struct Context;
 struct Worker;
@@ -99,7 +120,6 @@ struct Service {
   std::string Name;
   std::vector<ServiceSetNumber> Sets;
   simple_ilist<Context> WaitingClients;
-  Worker *findPossibleWorker();
 };
 } // end anonymous namespace
 
@@ -107,7 +127,41 @@ namespace {
 struct ServiceSet {
   std::vector<ServiceNumber> Services;
   simple_ilist<Worker> WaitingWorkers;
-  Context *findPossibleClient();
+};
+} // end anonymous namespace
+
+namespace {
+struct Object {
+  nng::aio Aio;
+  nng_time TimeoutTime = 0;
+
+  Object(void (*cb)(void *), void *arg) : Aio(cb, arg) {}
+
+  void startTimeout(nng_duration Duration) {
+    TimeoutTime = nng::clock() + Duration;
+    nng::sleep(Duration, Aio);
+  }
+
+  void cancelTimeout() {
+    Aio.cancel();
+    TimeoutTime = 0;
+  }
+
+  bool timeoutDone() {
+    // Check if the currently set timeout has actually expired.
+    if (!TimeoutTime)
+      return false;
+    if (nng::clock() < TimeoutTime - TIMEOUT_VARIANCE) {
+      // Hasn't expired yet. Maybe the new timeout has already started, or
+      // maybe there IS no new timeout, and the times just look wrong because
+      // of system clock shenanigans. Restart the timeout just in case.
+      Aio.cancel();
+      nng::sleep(TimeoutTime - nng::clock(), Aio);
+      return false;
+    }
+    TimeoutTime = 0;
+    return true;
+  }
 };
 } // end anonymous namespace
 
@@ -151,7 +205,7 @@ struct ServiceSet {
  * |====
  */
 namespace {
-struct Context : ilist_node<Context> {
+struct Context : Object, ilist_node<Context> {
   enum StateEnum {
     RECEIVING,
     SENDING,
@@ -160,7 +214,6 @@ struct Context : ilist_node<Context> {
     JOB_PROCESSING
   } State;
   nng::ctx Ctx;
-  nng::aio Aio;
   ServiceNumber JobService;     // only if State == JOB_QUEUED
   ArrayRef<uint8_t> JobPayload; // only if State == JOB_QUEUED
   int64_t JobTimeout;           // only if State == JOB_QUEUED
@@ -169,13 +222,11 @@ struct Context : ilist_node<Context> {
   void aioCallback();
   void changeState(StateEnum NewState);
   void disconnectWorker(const memodb_value &Id);
-  Worker *findWorkerExpectedState(std::unique_lock<std::mutex> *Lock,
-                                  const memodb_value &Id, int ExpectedState);
-  void handleClientJob(std::unique_lock<std::mutex> Lock, ServiceNumber SN,
-                       int64_t Timeout, ArrayRef<uint8_t> Payload);
-  void handleMessage(std::unique_lock<std::mutex> Lock);
-  void handleWorkerReady(std::unique_lock<std::mutex> Lock,
-                         const memodb_value &ServiceNames);
+  Worker *findWorkerExpectedState(const memodb_value &Id, int ExpectedState);
+  void handleClientJob(ServiceNumber SN, int64_t Timeout,
+                       ArrayRef<uint8_t> Payload);
+  void handleMessage();
+  void handleWorkerReady(const memodb_value &ServiceNames);
   void invalidMessage();
   void reset();
   void send(const memodb_value &Header, ArrayRef<uint8_t> Payload = {});
@@ -222,7 +273,7 @@ struct Context : ilist_node<Context> {
  * |====
  */
 namespace {
-struct Worker : ilist_node<Worker> {
+struct Worker : Object, ilist_node<Worker> {
   enum StateEnum {
     INIT,
     WAITING_FOR_JOB,
@@ -236,9 +287,6 @@ struct Worker : ilist_node<Worker> {
   // Which services are handled by this worker.
   ServiceSetNumber SSN;
 
-  // Must never be deleted; this is accessed outside the global mutex.
-  nng::aio Aio;
-
   // If State is WAITING_FOR_JOB, the Context that has an outstanding request
   // from the worker.
   Context *WorkerContext = nullptr;
@@ -251,7 +299,7 @@ struct Worker : ilist_node<Worker> {
   void aioCallback();
   void changeState(StateEnum NewState);
   memodb_value encodeID();
-  void handleRequest(std::unique_lock<std::mutex> Lock, Context *Context);
+  void handleRequest(Context *Context);
   void handleResult(ArrayRef<uint8_t> Payload);
   void sendHeartbeat();
   void startJob(Context *Client);
@@ -265,7 +313,7 @@ struct Worker : ilist_node<Worker> {
 // its job from a different broker process (which may have died and restarted).
 static WorkerID FirstWorkerID = nng::random();
 
-static std::mutex MessageMutex, GlobalMutex;
+static std::mutex GlobalMutex;
 
 static nng::socket GlobalSocket;
 
@@ -307,7 +355,7 @@ static void contextAioCallback(void *opaque) {
 }
 
 Context::Context()
-    : State(RECEIVING), Ctx(GlobalSocket), Aio(contextAioCallback, this) {
+    : Object(contextAioCallback, this), State(RECEIVING), Ctx(GlobalSocket) {
   Ctx.recv(Aio);
 }
 
@@ -326,22 +374,17 @@ void Context::aioCallback() {
     return;
   }
 
-  std::unique_lock<std::mutex> Lock(GlobalMutex);
+  std::lock_guard<std::mutex> Lock(GlobalMutex);
   if (State == RECEIVING) {
-    // We must unlock GlobalMutex to prevent deadlock with another thread that
-    // has locked MessageMutex but not GlobalMutex. It's okay to unlock
-    // GlobalMutex because, when State == RECEIVING, no other thread can
-    // possibly access this Context.
-    Lock.unlock();
-    std::unique_lock<std::mutex> MessageLock(MessageMutex);
-    Lock.lock();
-    handleMessage(std::move(Lock));
+    handleMessage();
   } else if (State == SENDING) {
     changeState(RECEIVING);
     Ctx.recv(Aio);
   } else if (State == JOB_QUEUED) {
-    std::cerr << "job timed out in queue\n";
-    reset();
+    if (timeoutDone()) {
+      std::cerr << "job timed out in queue\n";
+      reset();
+    }
   } else if (State == JOB_PROCESSING) {
     report_fatal_error("Aio should not be triggered in JOB_PROCESSING");
   } else if (State == WORKER_WAITING) {
@@ -365,7 +408,7 @@ void Context::changeState(StateEnum NewState) {
   if (State == JOB_QUEUED) {
     Services[JobService].WaitingClients.push_back(*this);
     // FIXME: What if this deletes the message that JobPayload points to?
-    nng::sleep(JOB_QUEUE_TIMEOUT, Aio);
+    startTimeout(JOB_QUEUE_TIMEOUT);
   }
 }
 
@@ -374,16 +417,12 @@ void Context::disconnectWorker(const memodb_value &Id) {
   send(memodb_value::array({"memo01", 0x05, Id}));
 }
 
-Worker *Context::findWorkerExpectedState(std::unique_lock<std::mutex> *Lock,
-                                         const memodb_value &Id,
+Worker *Context::findWorkerExpectedState(const memodb_value &Id,
                                          int ExpectedState) {
   Worker *Worker = Worker::getById(Id);
   if (!Worker)
     return nullptr;
-  Lock->unlock();
-  Worker->Aio.cancel();
-  Worker->Aio.wait();
-  Lock->lock();
+  Worker->cancelTimeout();
   if (Worker->State != ExpectedState) {
     Worker->changeState(Worker::DISCONNECTED);
     return nullptr;
@@ -391,46 +430,27 @@ Worker *Context::findWorkerExpectedState(std::unique_lock<std::mutex> *Lock,
   return Worker;
 }
 
-Worker *Service::findPossibleWorker() {
-  for (ServiceSetNumber SSN : Sets)
-    if (!ServiceSets[SSN].WaitingWorkers.empty())
-      return &ServiceSets[SSN].WaitingWorkers.front();
-  return nullptr;
-}
-
-Context *ServiceSet::findPossibleClient() {
-  for (ServiceNumber SN : Services)
-    if (!::Services[SN].WaitingClients.empty())
-      return &::Services[SN].WaitingClients.front();
-  return nullptr;
-}
-
-void Context::handleClientJob(std::unique_lock<std::mutex> Lock,
-                              ServiceNumber SN, int64_t Timeout,
+void Context::handleClientJob(ServiceNumber SN, int64_t Timeout,
                               ArrayRef<uint8_t> Payload) {
   JobService = SN;
   JobPayload = Payload;
   JobTimeout = Timeout;
 
-  while (true) {
-    Worker *Worker = Services[SN].findPossibleWorker();
-    if (!Worker)
-      break;
-    // XXX: Be careful not to use any references to volatile global structures,
-    // like Services[SN], after releasing the lock.
-    Lock.unlock();
-    Worker->Aio.cancel();
-    Worker->Aio.wait();
-    Lock.lock();
-    if (Worker->State == Worker::WAITING_FOR_JOB)
-      return Worker->startJob(this);
+  for (ServiceSetNumber SSN : Services[SN].Sets) {
+    if (!ServiceSets[SSN].WaitingWorkers.empty()) {
+      Worker *Worker = &ServiceSets[SSN].WaitingWorkers.front();
+      if (Worker->State == Worker::WAITING_FOR_JOB) {
+        Worker->cancelTimeout();
+        return Worker->startJob(this);
+      }
+    }
   }
 
   // No appropriate workers waiting.
   changeState(JOB_QUEUED);
 }
 
-void Context::handleMessage(std::unique_lock<std::mutex> Lock) {
+void Context::handleMessage() {
   auto Msg = Aio.get_msg();
   ArrayRef<uint8_t> Data(reinterpret_cast<const uint8_t *>(Msg.body().data()),
                          Msg.body().size());
@@ -449,34 +469,32 @@ void Context::handleMessage(std::unique_lock<std::mutex> Lock) {
     if (Header.array_items().size() != 4 || !Id.empty() || !Data.empty())
       return invalidMessage();
     const auto &ServiceSet = Header[3];
-    return handleWorkerReady(std::move(Lock), ServiceSet);
+    return handleWorkerReady(ServiceSet);
 
   } else if (Operation == 0x02) { // client JOB
     if (Header.array_items().size() != 5 || !Id.empty() ||
         Header[3].type() != memodb_value::STRING ||
         Header[4].type() != memodb_value::INTEGER)
       return invalidMessage();
-    return handleClientJob(std::move(Lock), lookupService(Header[3]),
-                           Header[4].as_integer(), Data);
+    return handleClientJob(lookupService(Header[3]), Header[4].as_integer(),
+                           Data);
 
   } else if (Operation == 0x03) { // worker RESULT
     if (Header.array_items().size() != 3 || Id.empty())
       return invalidMessage();
-    Worker *Worker =
-        findWorkerExpectedState(&Lock, Id, Worker::WAITING_FOR_RESULT);
+    Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_RESULT);
     if (!Worker)
       return disconnectWorker(Id);
     Worker->handleResult(Data);
-    return Worker->handleRequest(std::move(Lock), this);
+    return Worker->handleRequest(this);
 
   } else if (Operation == 0x04) { // worker HEARTBEAT
     if (Header.array_items().size() != 3 || Id.empty() || !Data.empty())
       return invalidMessage();
-    Worker *Worker =
-        findWorkerExpectedState(&Lock, Id, Worker::WAITING_FOR_HEARTBEAT);
+    Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_HEARTBEAT);
     if (!Worker)
       return disconnectWorker(Id);
-    return Worker->handleRequest(std::move(Lock), this);
+    return Worker->handleRequest(this);
 
   } else {
     std::cerr << "Unsupported operation " << Operation << "\n";
@@ -484,8 +502,7 @@ void Context::handleMessage(std::unique_lock<std::mutex> Lock) {
   }
 }
 
-void Context::handleWorkerReady(std::unique_lock<std::mutex> Lock,
-                                const memodb_value &ServiceNames) {
+void Context::handleWorkerReady(const memodb_value &ServiceNames) {
   if (ServiceNames.type() != memodb_value::ARRAY)
     return invalidMessage();
   StringRef PrevService = "";
@@ -505,7 +522,7 @@ void Context::handleWorkerReady(std::unique_lock<std::mutex> Lock,
   ServiceSetNumber SSN = lookupServiceSet(ServiceNames);
   std::cerr << "Set number: " << SSN << "\n";
   Workers.emplace_back(SSN, FirstWorkerID + Workers.size());
-  return Workers.back().handleRequest(std::move(Lock), this);
+  return Workers.back().handleRequest(this);
 }
 
 void Context::invalidMessage() {
@@ -562,7 +579,7 @@ static void workerAioCallback(void *Opaque) {
 }
 
 Worker::Worker(ServiceSetNumber SSN, WorkerID ID)
-    : ID(ID), SSN(SSN), Aio(::workerAioCallback, this) {}
+    : Object(workerAioCallback, this), ID(ID), SSN(SSN) {}
 
 void Worker::aioCallback() {
   if (Aio.result() == nng::error::canceled)
@@ -574,7 +591,10 @@ void Worker::aioCallback() {
     return;
   }
 
-  std::lock_guard<std::mutex> Guard(GlobalMutex);
+  std::lock_guard<std::mutex> Lock(GlobalMutex);
+  if (!timeoutDone())
+    return;
+
   if (State == WAITING_FOR_JOB) {
     sendHeartbeat();
   } else if (State == WAITING_FOR_RESULT) {
@@ -614,12 +634,12 @@ void Worker::changeState(StateEnum NewState) {
     WorkerContext = nullptr;
 
   if (State == WAITING_FOR_HEARTBEAT)
-    nng::sleep(WORKER_TIMEOUT, Aio);
+    startTimeout(WORKER_TIMEOUT);
   if (State == WAITING_FOR_RESULT)
-    nng::sleep(ClientContext->JobTimeout, Aio);
+    startTimeout(ClientContext->JobTimeout);
   if (State == WAITING_FOR_JOB) {
     ServiceSets[SSN].WaitingWorkers.push_back(*this);
-    nng::sleep(WORKER_HEARTBEAT_TIME, Aio);
+    startTimeout(WORKER_HEARTBEAT_TIME);
   }
 }
 
@@ -642,25 +662,20 @@ Worker *Worker::getById(const memodb_value &ID) {
   return &Workers[i];
 }
 
-void Worker::handleRequest(std::unique_lock<std::mutex> Lock,
-                           Context *Context) {
+void Worker::handleRequest(Context *Context) {
   // Called after any type of worker request that we can respond to with a job.
   assert(State != DISCONNECTED);
   WorkerContext = Context;
   WorkerContext->changeState(Context::WORKER_WAITING);
 
-  while (true) {
-    ::Context *Client = ServiceSets[SSN].findPossibleClient();
-    if (!Client)
-      break;
-    // XXX: Be careful not to use any references to volatile global structures,
-    // like ServiceSets[SSN], after releasing the lock.
-    Lock.unlock();
-    Client->Aio.cancel();
-    Client->Aio.wait();
-    Lock.lock();
-    if (Client->State == Context::JOB_QUEUED)
-      return startJob(Client);
+  for (ServiceNumber SN : ServiceSets[SSN].Services) {
+    if (!::Services[SN].WaitingClients.empty()) {
+      ::Context *Client = &::Services[SN].WaitingClients.front();
+      if (Client->State == Context::JOB_QUEUED) {
+        Client->cancelTimeout();
+        return startJob(Client);
+      }
+    }
   }
 
   // No appropriate jobs waiting.
@@ -710,7 +725,7 @@ int main(int argc, char **argv) {
 
   while (true) {
     nng::msleep(1000);
-    std::lock_guard<std::mutex> Guard(GlobalMutex);
+    std::lock_guard<std::mutex> Lock(GlobalMutex);
     auto NumContexts = GlobalContexts.size();
     size_t NumReceiving = 0, NumSending = 0, NumJobQueued = 0,
            NumWorkerWaiting = 0, NumJobProcessing = 0;
