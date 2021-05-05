@@ -365,14 +365,17 @@ static std::map<memodb_value, size_t> ServiceSetNumbers;
 
 static ServiceNumber lookupService(const memodb_value &Name) {
   auto Entry = ServiceNumbers.insert({Name, Services.size()});
-  if (Entry.second)
+  if (Entry.second) {
+    std::cerr << "New service: " << Name << "\n";
     Services.push_back({Name.as_string()});
+  }
   return Entry.first->second;
 }
 
 static ServiceSetNumber lookupServiceSet(const memodb_value &Names) {
   auto Entry = ServiceSetNumbers.insert({Names, ServiceSets.size()});
   if (Entry.second) {
+    std::cerr << "New service set: " << Names << "\n";
     ServiceSet NewSet;
     for (const auto &Name : Names.array_items()) {
       ServiceNumber SN = lookupService(Name);
@@ -517,13 +520,21 @@ void Context::handleMessage() {
                            Data);
 
   } else if (Operation == 0x03) { // worker RESULT
-    if (Header.array_items().size() != 3 || Id.empty())
+    auto NumItems = Header.array_items().size();
+    if (Id.empty() || NumItems < 3 || NumItems > 4)
       return invalidMessage();
+    if (NumItems >= 4 && Header[3].type() != memodb_value::BOOL)
+      return invalidMessage();
+    bool Disconnecting = NumItems >= 4 ? Header[3].as_bool() : false;
     Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_RESULT);
     if (!Worker)
       return disconnectWorker(Id);
     Worker->handleResult(Data);
-    return Worker->handleRequest(this);
+    if (Disconnecting) {
+      send(memodb_value::array({"memo01", 0x05, Id}));
+      return Worker->changeState(Worker::DISCONNECTED);
+    } else
+      return Worker->handleRequest(this);
 
   } else if (Operation == 0x04) { // worker HEARTBEAT
     if (Header.array_items().size() != 3 || Id.empty() || !Data.empty())
@@ -555,9 +566,7 @@ void Context::handleWorkerReady(const memodb_value &ServiceNames) {
     PrevService = Service.as_string();
   }
 
-  std::cerr << "Worker with set " << ServiceNames << "\n";
   ServiceSetNumber SSN = lookupServiceSet(ServiceNames);
-  std::cerr << "Set number: " << SSN << "\n";
   Workers.emplace_back(SSN, FirstWorkerID + Workers.size());
   return Workers.back().handleRequest(this);
 }

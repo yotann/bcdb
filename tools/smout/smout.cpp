@@ -160,9 +160,8 @@ static memodb_value evaluate_refines_alive2(memodb_db &db,
   llvm::ArrayRef<uint8_t> Reply(Msg.body().data<uint8_t>(), Msg.body().size());
 
   Header = memodb_value::load_cbor_from_sequence(Reply);
-  if (Header.type() != memodb_value::ARRAY ||
-      Header.array_items().size() != 3 || Header[0] != "memo01" ||
-      Header[1] != 0x03) {
+  if (Header.type() != memodb_value::ARRAY || Header.array_items().size() < 3 ||
+      Header[0] != "memo01" || Header[1] != 0x03) {
     errs() << "received invalid reply header: " << Header << "\n";
     report_fatal_error("invalid reply header");
   }

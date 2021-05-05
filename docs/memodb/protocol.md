@@ -105,7 +105,10 @@ Each message type's format is as follows:
   milliseconds]`. Payload format depends on the service. The timeout is the
   amount of time the broker should wait for a RESULT before giving up after
   sending the job to a worker.
-- **RESULT**: `["memo01", 0x03, ID]`. Payload format depends on the service.
+- **RESULT**: `["memo01", 0x03, ID, optional bool if disconnecting]`. Payload
+  format depends on the service. If the optional bool is present and true, the
+  worker cannot handle any more jobs and the server should reply with
+  DISCONNECT.
 - **HEARTBEAT**: `["memo01", 0x04, ID]`. No payload.
 - **DISCONNECT**: `["memo01", 0x05, ID]`. No payload.
 
