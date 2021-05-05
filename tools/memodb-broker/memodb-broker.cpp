@@ -29,21 +29,20 @@
  *
  * Several possible solutions:
  *
- *  - **The current solution:** Have the timeout callback check whether the
- *    current time matches the current intended timeout time. Could lead to
- *    shenanigans when the system clock changes, or if NNG's idea of time is
- *    slightly different from the clock's.
+ *  - **The current solution:** Use a different callback pointer each time the
+ *    timeout is set, pointing to a struct that includes the expected timeout
+ *    number. If that number matches the current timeout number in the object
+ *    itself, the correct timeout has expired. Requires allocation of a new
+ *    struct and a new nng::aio instance every time a timeout is set.
  *
- *  - Instead of doing nontrivial processing in aioCallback(), add everything
- *    to a global task queue. The first task that uses the object can modify
- *    the queue to cancel the other task. But this would prevent using
- *    multithreading in the future.
+ *  - **TODO: explore this option.** Instead of using nng::aio, manage our own
+ *    timeout queue, which uses the global mutex and allows deleting timeouts
+ *    that we don't need anymore.
  *
- *  - Use a different callback pointer each time the timeout is set, pointing
- *    to a struct that includes the expected timeout number. If that number
- *    matches the current timeout number in the object itself, the correct
- *    timeout has expired. Requires allocation of a new struct and a new
- *    nng::aio instance every time a timeout is set.
+ *  - Have the timeout callback check whether the current time matches the
+ *    current intended timeout time. Could lead to shenanigans when the system
+ *    clock changes, or if NNG's idea of time is slightly different from the
+ *    clock's. BROKEN because of a race condition in nng::aio::cancel().
  *
  *  - Call nng::aio::wait after cancelling the timeout in step 3, so the
  *    timeout callback finishes. We need to use two global mutexes: one used to
@@ -107,6 +106,8 @@ static const nng_duration JOB_QUEUE_TIMEOUT = 10000;
 // significantly less than the timeout values above.
 static const nng_duration TIMEOUT_VARIANCE = 100;
 
+static std::mutex GlobalMutex;
+
 namespace {
 struct Context;
 struct Worker;
@@ -132,60 +133,88 @@ struct ServiceSet {
 
 namespace {
 struct Object {
-  nng::aio Aio;
-  nng_time TimeoutTime = 0;
+  struct PendingTimeout {
+    nng::aio Aio;
+    Object *Parent = nullptr;
+    size_t ExpectedIndex = 0;
+    bool Busy = false;
 
-  Object(void (*cb)(void *), void *arg) : Aio(cb, arg) {}
+    PendingTimeout() : Aio(aioCallback, this) {}
+
+    static void aioCallback(void *Opaque) {
+      PendingTimeout *PT = static_cast<PendingTimeout *>(Opaque);
+      if (PT->Aio.result() != nng::error::success) {
+        std::cerr << "timeout error: " << nng::to_string(PT->Aio.result())
+                  << "\n";
+        // TODO: error handling
+      } else {
+        std::lock_guard<std::mutex> Lock(GlobalMutex);
+        if (PT->ExpectedIndex == PT->Parent->TimeoutIndex)
+          PT->Parent->timeout();
+        PT->Busy = false;
+      }
+    }
+
+    void start(Object *Parent, nng_duration Duration) {
+      assert(!Busy);
+      this->Parent = Parent;
+      ExpectedIndex = Parent->TimeoutIndex;
+      Busy = true;
+      nng::sleep(Duration, Aio);
+    }
+  };
+
+  static std::deque<PendingTimeout> PendingTimeouts;
+
+  size_t TimeoutIndex = 0;
+
+  Object() {}
 
   void startTimeout(nng_duration Duration) {
-    TimeoutTime = nng::clock() + Duration;
-    nng::sleep(Duration, Aio);
-  }
-
-  void cancelTimeout() {
-    Aio.cancel();
-    TimeoutTime = 0;
-  }
-
-  bool timeoutDone() {
-    // Check if the currently set timeout has actually expired.
-    if (!TimeoutTime)
-      return false;
-    if (nng::clock() < TimeoutTime - TIMEOUT_VARIANCE) {
-      // Hasn't expired yet. Maybe the new timeout has already started, or
-      // maybe there IS no new timeout, and the times just look wrong because
-      // of system clock shenanigans. Restart the timeout just in case.
-      Aio.cancel();
-      nng::sleep(TimeoutTime - nng::clock(), Aio);
-      return false;
+    TimeoutIndex++;
+    for (PendingTimeout &PT : PendingTimeouts) {
+      if (!PT.Busy) {
+        PT.start(this, Duration);
+        return;
+      }
     }
-    TimeoutTime = 0;
-    return true;
+    PendingTimeouts.emplace_back();
+    PendingTimeouts.back().start(this, Duration);
   }
+
+  void cancelTimeout() { TimeoutIndex++; }
+
+  virtual void timeout() = 0;
 };
 } // end anonymous namespace
 
+std::deque<Object::PendingTimeout> Object::PendingTimeouts;
+
+// clang-format off
 /*
  * Each Context can handle one request at a time.
  *
  * .Context states (AsciiDoc format)
  * |====
- * |State|Means...|Aio is...|We can be accessed by...|Valid fields
+ * |State|Means...|Aio is...|Active timeout|We can be accessed by...|Valid fields
  *
  * |RECEIVING
  * |Called Ctx.recv()
  * |Waiting for new request
+ * |--
  * |Our callback
  * |Ctx, Aio
  *
  * |SENDING
  * |Called Ctx.send()
  * |Waiting for reply to be queued
+ * |--
  * |Our callback
  * |Ctx, Aio
  *
  * |JOB_QUEUED
  * |Received JOB, but no workers were available
+ * |--
  * |Sleeping until JOB times out and we give up on finding a worker
  * |Our callback or an arbitrary worker context's callback
  * |Ctx, Aio, JobService, JobPayload, JobTimeout
@@ -193,17 +222,20 @@ struct Object {
  * |WORKER_WAITING
  * |Received request from worker, but no jobs were available
  * |--
+ * |--
  * |Our worker's timeout callback or an arbitrary client context's callback
  * |Ctx, Aio
  *
  * |JOB_PROCESSING
  * |Forwarded our JOB to a worker, waiting for RESULT
  * |--
+ * |--
  * |The worker context's callback or the worker's timeout callback
  * |Ctx, Aio
  *
  * |====
  */
+// clang-format on
 namespace {
 struct Context : Object, ilist_node<Context> {
   enum StateEnum {
@@ -214,6 +246,7 @@ struct Context : Object, ilist_node<Context> {
     JOB_PROCESSING
   } State;
   nng::ctx Ctx;
+  nng::aio Aio;
   ServiceNumber JobService;     // only if State == JOB_QUEUED
   ArrayRef<uint8_t> JobPayload; // only if State == JOB_QUEUED
   int64_t JobTimeout;           // only if State == JOB_QUEUED
@@ -230,9 +263,11 @@ struct Context : Object, ilist_node<Context> {
   void invalidMessage();
   void reset();
   void send(const memodb_value &Header, ArrayRef<uint8_t> Payload = {});
+  void timeout() override;
 };
 } // end anonymous namespace
 
+// clang-format off
 /*
  * Each Worker can handle one job at a time. Note that each request from the
  * worker may arrive at a different Context.
@@ -244,7 +279,7 @@ struct Context : Object, ilist_node<Context> {
  *
  * .Worker states (AsciiDoc format)
  * |====
- * |State|Means...|Aio is...|We can be accessed by...|Valid fields
+ * |State|Means...|Active timeout|We can be accessed by...|Valid fields
  *
  * |WAITING_FOR_JOB
  * |Received request from worker, but no jobs were available
@@ -272,6 +307,7 @@ struct Context : Object, ilist_node<Context> {
  *
  * |====
  */
+// clang-format on
 namespace {
 struct Worker : Object, ilist_node<Worker> {
   enum StateEnum {
@@ -296,13 +332,13 @@ struct Worker : Object, ilist_node<Worker> {
   Context *ClientContext = nullptr;
 
   Worker(ServiceSetNumber SSN, WorkerID ID);
-  void aioCallback();
   void changeState(StateEnum NewState);
   memodb_value encodeID();
   void handleRequest(Context *Context);
   void handleResult(ArrayRef<uint8_t> Payload);
   void sendHeartbeat();
   void startJob(Context *Client);
+  void timeout() override;
 
   static Worker *getById(const memodb_value &ID);
 };
@@ -312,8 +348,6 @@ struct Worker : Object, ilist_node<Worker> {
 // check the worker ID in each request to determine if the worker actually got
 // its job from a different broker process (which may have died and restarted).
 static WorkerID FirstWorkerID = nng::random();
-
-static std::mutex GlobalMutex;
 
 static nng::socket GlobalSocket;
 
@@ -355,7 +389,7 @@ static void contextAioCallback(void *opaque) {
 }
 
 Context::Context()
-    : Object(contextAioCallback, this), State(RECEIVING), Ctx(GlobalSocket) {
+    : State(RECEIVING), Ctx(GlobalSocket), Aio(contextAioCallback, this) {
   Ctx.recv(Aio);
 }
 
@@ -381,10 +415,7 @@ void Context::aioCallback() {
     changeState(RECEIVING);
     Ctx.recv(Aio);
   } else if (State == JOB_QUEUED) {
-    if (timeoutDone()) {
-      std::cerr << "job timed out in queue\n";
-      reset();
-    }
+    report_fatal_error("Aio should not be triggered in JOB_QUEUED");
   } else if (State == JOB_PROCESSING) {
     report_fatal_error("Aio should not be triggered in JOB_PROCESSING");
   } else if (State == WORKER_WAITING) {
@@ -392,6 +423,12 @@ void Context::aioCallback() {
   } else {
     llvm_unreachable("impossible Context state");
   }
+}
+
+void Context::timeout() {
+  assert(State == JOB_QUEUED);
+  std::cerr << "job timed out in queue\n";
+  reset();
 }
 
 void Context::changeState(StateEnum NewState) {
@@ -574,27 +611,9 @@ void Context::send(const memodb_value &Header, ArrayRef<uint8_t> Payload) {
   Ctx.send(Aio);
 }
 
-static void workerAioCallback(void *Opaque) {
-  reinterpret_cast<Worker *>(Opaque)->aioCallback();
-}
+Worker::Worker(ServiceSetNumber SSN, WorkerID ID) : ID(ID), SSN(SSN) {}
 
-Worker::Worker(ServiceSetNumber SSN, WorkerID ID)
-    : Object(workerAioCallback, this), ID(ID), SSN(SSN) {}
-
-void Worker::aioCallback() {
-  if (Aio.result() == nng::error::canceled)
-    return;
-
-  if (Aio.result() != nng::error::success) {
-    std::cerr << "worker error: " << nng::to_string(Aio.result()) << "\n";
-    // TODO: error handling
-    return;
-  }
-
-  std::lock_guard<std::mutex> Lock(GlobalMutex);
-  if (!timeoutDone())
-    return;
-
+void Worker::timeout() {
   if (State == WAITING_FOR_JOB) {
     sendHeartbeat();
   } else if (State == WAITING_FOR_RESULT) {
