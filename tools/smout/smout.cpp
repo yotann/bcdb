@@ -778,8 +778,11 @@ static int Estimate() {
 
     // Create conflict groups from sets of candidates that outline the same
     // node.
-    for (const auto &Uses : NodeUses) {
+    for (size_t NodeI = 0; NodeI < NodeUses.size(); NodeI++) {
+      const auto &Uses = NodeUses[NodeI];
       if (Uses.size() <= 1)
+        continue;
+      if (NodeI > 0 && Uses == NodeUses[NodeI - 1])
         continue;
       unsigned I = NextNodeConflictIndex++;
       for (unsigned caller_i : Uses)
@@ -825,65 +828,116 @@ static int Estimate() {
     }
   }
 
-  outs() << "* Out of "
-         << (NeverProfitableCount + AlwaysProfitableCount +
-             SometimesProfitableCount)
-         << " cases: ";
-  outs() << NeverProfitableCount << " never profitable, ";
-  outs() << AlwaysProfitableCount << " always profitable, ";
-  outs() << SometimesProfitableCount << " sometimes profitable\n";
+  // Determine which callees and callers could possibly be beneficial.
+  std::vector<bool> CallerUseful(CallerSavings.size());
+  std::vector<bool> CalleeUseful(CalleeSizes.size());
+  std::vector<bool> CalleeNeededForCaller(NumCalleesUsedDirectly);
+  std::vector<size_t> ConflictGroupUsage(NextNodeConflictIndex);
+  size_t NumCallerUseful = 0, NumCalleeUseful = 0;
+  for (size_t CalleeI = 0; CalleeI < CalleeSizes.size(); CalleeI++) {
+    size_t Savings = 0;
+    for (auto RefinedI : RefinedCallees[CalleeI])
+      for (auto CallerI : CalleeToCaller[RefinedI])
+        Savings += CallerSavings[CallerI];
+    if (Savings > CalleeSizes[CalleeI]) {
+      NumCalleeUseful++;
+      CalleeUseful[CalleeI] = true;
+      for (auto RefinedI : RefinedCallees[CalleeI]) {
+        if (RefinedI >= NumCalleesUsedDirectly)
+          continue;
+        CalleeNeededForCaller[RefinedI] = true;
+        for (auto CallerI : CalleeToCaller[RefinedI]) {
+          assert(CallerI < CallerUseful.size());
+          assert(CallerI < CallerSavings.size());
+          if (!CallerUseful[CallerI]) {
+            NumCallerUseful++;
+            CallerUseful[CallerI] = true;
+            for (auto ConflictI : CallerNodeConflicts[CallerI])
+              ConflictGroupUsage[ConflictI]++;
+          }
+        }
+      }
+    }
+  }
+
   outs() << "* Original size: " << TotalOrigSize << "\n";
+  outs() << "* Out of " << (NeverProfitableCount + CallerSavings.size())
+         << " callers:\n";
+  outs() << "* - " << NeverProfitableCount << " never profitable\n";
+  outs() << "* - " << AlwaysProfitableCount << " always profitable\n";
+  outs() << "* - " << (NumCallerUseful - AlwaysProfitableCount)
+         << " profitable thanks to duplication\n";
+  outs() << "* - " << (CallerSavings.size() - NumCallerUseful)
+         << " unprofitable due to lack of duplication\n";
+  outs() << "* " << NumCalleeUseful << " of " << CalleeSizes.size()
+         << " considered callees potentially useful\n";
 
   // Print the ILP problem (as described above) in free MPS format. Free MPS
   // format (described in the GLPK manual) is supported by multiple free
   // solvers, including GLPK and lp_solve:
   //
-  // glpsol --min out.mps
-  // lp_solve -min -fmps out.mps
+  // glpsol --min out.mps -o out.sol
+  // lp_solve -ia -R -min -fmps out.mps > out.sol
 
   outs() << "NAME SMOUT\n";
   outs() << "ROWS\n";
   outs() << " N SIZE\n";
   for (unsigned a = 0; a < NextNodeConflictIndex; a++)
-    outs() << " L CONFLICTS" << a << "\n";
+    if (ConflictGroupUsage[a] >= 2)
+      outs() << " L CONFLICTS" << a << "\n";
   for (unsigned i = 0; i < CallerVarNames.size(); i++)
-    outs() << " G Y_NEEDED_BY_X" << CallerVarNames[i] << "\n";
+    if (CallerUseful[i])
+      outs() << " G Y_NEEDED_BY_X" << CallerVarNames[i] << "\n";
   for (unsigned m = 0; m < NumCalleesUsedDirectly; m++)
-    outs() << " G REFINES_Y" << CalleeVarNames[m] << "\n";
+    if (CalleeNeededForCaller[m])
+      outs() << " G REFINES_Y" << CalleeVarNames[m] << "\n";
   outs() << "COLUMNS\n";
   for (unsigned i = 0; i < CallerVarNames.size(); i++) {
+    if (!CallerUseful[i])
+      continue;
     outs() << " X" << CallerVarNames[i] << " SIZE " << -(int)CallerSavings[i]
            << "\n";
     outs() << " X" << CallerVarNames[i] << " Y_NEEDED_BY_X" << CallerVarNames[i]
            << " -1\n";
     for (unsigned conflict_a : CallerNodeConflicts[i])
-      outs() << " X" << CallerVarNames[i] << " CONFLICTS" << conflict_a
-             << " 1\n";
+      if (ConflictGroupUsage[conflict_a] >= 2)
+        outs() << " X" << CallerVarNames[i] << " CONFLICTS" << conflict_a
+               << " 1\n";
   }
   for (unsigned m = 0; m < NumCalleesUsedDirectly; m++) {
+    if (!CalleeNeededForCaller[m])
+      continue;
     for (unsigned caller_i : CalleeToCaller[m])
-      outs() << " Y" << CalleeVarNames[m] << " Y_NEEDED_BY_X"
-             << CallerVarNames[caller_i] << " 1\n";
+      if (CallerUseful[caller_i])
+        outs() << " Y" << CalleeVarNames[m] << " Y_NEEDED_BY_X"
+               << CallerVarNames[caller_i] << " 1\n";
     outs() << " Y" << CalleeVarNames[m] << " REFINES_Y" << CalleeVarNames[m]
            << " -1\n";
   }
   for (unsigned m = 0; m < RefinedCallees.size(); m++) {
+    if (!CalleeUseful[m])
+      continue;
     outs() << " Z" << CalleeVarNames[m] << " SIZE " << CalleeSizes[m] << "\n";
     for (unsigned callee_m : RefinedCallees[m])
-      outs() << " Z" << CalleeVarNames[m] << " REFINES_Y"
-             << CalleeVarNames[callee_m] << " 1\n";
+      if (callee_m < NumCalleesUsedDirectly)
+        outs() << " Z" << CalleeVarNames[m] << " REFINES_Y"
+               << CalleeVarNames[callee_m] << " 1\n";
   }
   outs() << "RHS\n";
   for (unsigned a = 0; a < NextNodeConflictIndex; a++)
-    outs() << " RHS1 CONFLICTS" << a << " 1\n";
+    if (ConflictGroupUsage[a] >= 2)
+      outs() << " RHS1 CONFLICTS" << a << " 1\n";
   // All variables are boolean.
   outs() << "BOUNDS\n";
   for (unsigned i = 0; i < CallerVarNames.size(); i++)
-    outs() << " BV BND1 X" << CallerVarNames[i] << "\n";
+    if (CallerUseful[i])
+      outs() << " BV BND1 X" << CallerVarNames[i] << "\n";
   for (unsigned m = 0; m < NumCalleesUsedDirectly; m++)
-    outs() << " BV BND1 Y" << CalleeVarNames[m] << "\n";
+    if (CalleeNeededForCaller[m])
+      outs() << " BV BND1 Y" << CalleeVarNames[m] << "\n";
   for (unsigned m = 0; m < CalleeVarNames.size(); m++)
-    outs() << " BV BND1 Z" << CalleeVarNames[m] << "\n";
+    if (CalleeUseful[m])
+      outs() << " BV BND1 Z" << CalleeVarNames[m] << "\n";
   outs() << "ENDATA\n";
 
   return 0;
