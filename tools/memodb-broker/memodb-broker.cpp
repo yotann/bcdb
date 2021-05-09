@@ -101,11 +101,6 @@ static const nng_duration WORKER_TIMEOUT = 10000;
 // disconnect from the client that submitted the job.
 static const nng_duration JOB_QUEUE_TIMEOUT = 10000;
 
-// If a timeout callback triggers before the timeout is due, but the difference
-// is less than this amount, we handle it as a timeout anyway. Should be
-// significantly less than the timeout values above.
-static const nng_duration TIMEOUT_VARIANCE = 100;
-
 static std::mutex GlobalMutex;
 
 namespace {
@@ -119,15 +114,15 @@ typedef size_t ServiceSetNumber;
 namespace {
 struct Service {
   std::string Name;
-  std::vector<ServiceSetNumber> Sets;
-  simple_ilist<Context> WaitingClients;
+  std::vector<ServiceSetNumber> Sets = {};
+  simple_ilist<Context> WaitingClients = {};
 };
 } // end anonymous namespace
 
 namespace {
 struct ServiceSet {
-  std::vector<ServiceNumber> Services;
-  simple_ilist<Worker> WaitingWorkers;
+  std::vector<ServiceNumber> Services = {};
+  simple_ilist<Worker> WaitingWorkers = {};
 };
 } // end anonymous namespace
 
@@ -169,6 +164,7 @@ struct Object {
   size_t TimeoutIndex = 0;
 
   Object() {}
+  virtual ~Object() {}
 
   void startTimeout(nng_duration Duration) {
     TimeoutIndex++;
@@ -252,6 +248,7 @@ struct Context : Object, ilist_node<Context> {
   int64_t JobTimeout;           // only if State == JOB_QUEUED
 
   Context();
+  ~Context() {}
   void aioCallback();
   void changeState(StateEnum NewState);
   void disconnectWorker(const memodb_value &Id);
@@ -332,6 +329,7 @@ struct Worker : Object, ilist_node<Worker> {
   Context *ClientContext = nullptr;
 
   Worker(ServiceSetNumber SSN, WorkerID ID);
+  ~Worker() {}
   void changeState(StateEnum NewState);
   memodb_value encodeID();
   void handleRequest(Context *Context);
