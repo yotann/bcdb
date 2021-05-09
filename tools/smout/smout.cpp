@@ -1045,14 +1045,18 @@ static int Measure() {
 
   std::atomic<size_t> InProgress = 0, FinishedInputs = 0;
   size_t TotalInputs = all_funcs.size();
+  std::mutex OutputMutex;
 
   auto Transform = [&](memodb_ref FuncId) {
     InProgress++;
     memodb_value Size = db->get_db().call_or_lookup_value(
         "compiled.size", evaluate_compiled_size, FuncId);
     size_t Pending = TotalInputs - InProgress - FinishedInputs;
-    outs() << Pending << "->" << InProgress << "->" << FinishedInputs << ": "
-           << FuncId << ": compiled to " << Size << " bytes\n";
+    std::unique_lock<std::mutex> OutputLock(OutputMutex, std::try_to_lock);
+    if (OutputLock) {
+      outs() << Pending << "->" << InProgress << "->" << FinishedInputs << ": "
+             << FuncId << ": compiled to " << Size << " bytes\n";
+    }
     FinishedInputs++;
     InProgress--;
   };
