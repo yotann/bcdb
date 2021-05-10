@@ -658,10 +658,6 @@ static int Estimate() {
    * function. The solution may outline multiple candidates from the same
    * original function.
    *
-   * Variable Y[m] is 1 if either outlined callee function m, or another
-   * function equivalent to it, should be included in the output program. (More
-   * precisely, either function m or another function that it refines to.)
-   *
    * Variable Z[m] is 1 if outlined callee function m, specifically, should be
    * included in the output program.
    *
@@ -670,20 +666,12 @@ static int Estimate() {
    * X[j] + X[k] <= 1.
    *
    * Needs constraint: if candidate i is outlined, and the corresponding callee
-   * function is m, then a function equivalent to m must be included in the
-   * output program. So Y[m] - X[i] >= 0.
-   *
-   * Refines constraint: if a function equivalent to m must be included, and
-   * m,n,o are the known equivalent functions, then at least one of m,n,o must
-   * be included. So Z[m] + Z[n] + Z[o] - Y[m] >= 0.
+   * function is m, and m,n,o are the functions equivalent to m, then at least
+   * one of m,n,o must be included. So Z[m] + Z[n] + Z[o] - X[i] >= 0.
    *
    * Goal: minimize the total size of the output program, considering the
    * benefits of each candidate outlined (each X[i]) and the cost of each
    * callee function that must be included (each Z[i]).
-   *
-   * (Note: it would be possible to eliminate the Y variables and combine the
-   * Needs and Refines constraints into something like Z[m] + Z[n] + Z[o] -
-   * X[i] >= 0. I'm not sure which way is better.)
    */
 
   // Variable names for each caller/candidate i and callee m.
@@ -831,7 +819,6 @@ static int Estimate() {
   // Determine which callees and callers could possibly be beneficial.
   std::vector<bool> CallerUseful(CallerSavings.size());
   std::vector<bool> CalleeUseful(CalleeSizes.size());
-  std::vector<bool> CalleeNeededForCaller(NumCalleesUsedDirectly);
   std::vector<size_t> ConflictGroupUsage(NextNodeConflictIndex);
   size_t NumCallerUseful = 0, NumCalleeUseful = 0;
   for (size_t CalleeI = 0; CalleeI < CalleeSizes.size(); CalleeI++) {
@@ -845,7 +832,6 @@ static int Estimate() {
       for (auto RefinedI : RefinedCallees[CalleeI]) {
         if (RefinedI >= NumCalleesUsedDirectly)
           continue;
-        CalleeNeededForCaller[RefinedI] = true;
         for (auto CallerI : CalleeToCaller[RefinedI]) {
           assert(CallerI < CallerUseful.size());
           assert(CallerI < CallerSavings.size());
@@ -887,32 +873,19 @@ static int Estimate() {
       outs() << " L CONFLICTS" << a << "\n";
   for (unsigned i = 0; i < CallerVarNames.size(); i++)
     if (CallerUseful[i])
-      outs() << " G Y_NEEDED_BY_X" << CallerVarNames[i] << "\n";
-  for (unsigned m = 0; m < NumCalleesUsedDirectly; m++)
-    if (CalleeNeededForCaller[m])
-      outs() << " G REFINES_Y" << CalleeVarNames[m] << "\n";
+      outs() << " G Z_NEEDED_BY_X" << CallerVarNames[i] << "\n";
   outs() << "COLUMNS\n";
   for (unsigned i = 0; i < CallerVarNames.size(); i++) {
     if (!CallerUseful[i])
       continue;
     outs() << " X" << CallerVarNames[i] << " SIZE " << -(int)CallerSavings[i]
            << "\n";
-    outs() << " X" << CallerVarNames[i] << " Y_NEEDED_BY_X" << CallerVarNames[i]
+    outs() << " X" << CallerVarNames[i] << " Z_NEEDED_BY_X" << CallerVarNames[i]
            << " -1\n";
     for (unsigned conflict_a : CallerNodeConflicts[i])
       if (ConflictGroupUsage[conflict_a] >= 2)
         outs() << " X" << CallerVarNames[i] << " CONFLICTS" << conflict_a
                << " 1\n";
-  }
-  for (unsigned m = 0; m < NumCalleesUsedDirectly; m++) {
-    if (!CalleeNeededForCaller[m])
-      continue;
-    for (unsigned caller_i : CalleeToCaller[m])
-      if (CallerUseful[caller_i])
-        outs() << " Y" << CalleeVarNames[m] << " Y_NEEDED_BY_X"
-               << CallerVarNames[caller_i] << " 1\n";
-    outs() << " Y" << CalleeVarNames[m] << " REFINES_Y" << CalleeVarNames[m]
-           << " -1\n";
   }
   for (unsigned m = 0; m < RefinedCallees.size(); m++) {
     if (!CalleeUseful[m])
@@ -920,8 +893,10 @@ static int Estimate() {
     outs() << " Z" << CalleeVarNames[m] << " SIZE " << CalleeSizes[m] << "\n";
     for (unsigned callee_m : RefinedCallees[m])
       if (callee_m < NumCalleesUsedDirectly)
-        outs() << " Z" << CalleeVarNames[m] << " REFINES_Y"
-               << CalleeVarNames[callee_m] << " 1\n";
+        for (unsigned caller_i : CalleeToCaller[callee_m])
+          if (CallerUseful[caller_i])
+            outs() << " Z" << CalleeVarNames[m] << " Z_NEEDED_BY_X"
+                   << CallerVarNames[caller_i] << " 1\n";
   }
   outs() << "RHS\n";
   for (unsigned a = 0; a < NextNodeConflictIndex; a++)
@@ -932,9 +907,6 @@ static int Estimate() {
   for (unsigned i = 0; i < CallerVarNames.size(); i++)
     if (CallerUseful[i])
       outs() << " BV BND1 X" << CallerVarNames[i] << "\n";
-  for (unsigned m = 0; m < NumCalleesUsedDirectly; m++)
-    if (CalleeNeededForCaller[m])
-      outs() << " BV BND1 Y" << CalleeVarNames[m] << "\n";
   for (unsigned m = 0; m < CalleeVarNames.size(); m++)
     if (CalleeUseful[m])
       outs() << " BV BND1 Z" << CalleeVarNames[m] << "\n";
