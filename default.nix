@@ -32,6 +32,9 @@ let
   nng = pkgs.callPackage ./nix/nng {};
   nngpp = pkgs.callPackage ./nix/nngpp { inherit nng; };
 
+  coinutils = pkgs.callPackage ./nix/coinutils {};
+  cgl = pkgs.callPackage ./nix/cgl { inherit coinutils; };
+
 in rec {
   bcdb-llvm7 = pkgs.callPackage ./nix/bcdb {
     inherit nng nngpp;
@@ -71,4 +74,6 @@ in rec {
   };
 
   bcdb = bcdb-llvm11;
+
+  symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
 }
