@@ -859,11 +859,13 @@ static int Estimate() {
          << " considered callees potentially useful\n";
 
   // Print the ILP problem (as described above) in free MPS format. Free MPS
-  // format (described in the GLPK manual) is supported by multiple free
-  // solvers, including GLPK and lp_solve:
+  // format (described in the GLPK manual) is supported by most ILP solvers,
+  // such as Symphony, GLPK, and lp_solve. Symphony is recommended for fastest
+  // solving.
   //
-  // glpsol --min out.mps -o out.sol
-  // lp_solve -ia -R -min -fmps out.mps > out.sol
+  // symphony -F out.mps -a 0 > out.sol
+  // glpsol --pcost --cuts --min out.mps -o out.sol
+  // lp_solve -B3 -Bc -R -min -fmps out.mps > out.sol
 
   outs() << "NAME SMOUT\n";
   outs() << "ROWS\n";
