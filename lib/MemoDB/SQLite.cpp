@@ -25,13 +25,22 @@ enum ValueType {
 
 // Errors when running these statements are ignored.
 static const std::vector<const char *> SQLITE_PRAGMAS = {
-    "PRAGMA foreign_keys = ON;\n",
+    // Don't enforce foreign key constraints.
+    "PRAGMA foreign_keys = OFF;\n",
+
+    // Use a WAL file instead of a journal, for efficiency.
     "PRAGMA journal_mode = WAL;\n",
-    "PRAGMA synchronous = 1;\n",
+
+    // Prevent corruption, but allow recent data to be lost if the computer
+    // crashes.
+    "PRAGMA synchronous = NORMAL;\n",
+
+    // At checkpoints, truncate the WAL file if it's larger than 512 MiB.
+    // The wal_hook() function will normally keep it smaller than that.
+    "PRAGMA journal_size_limit = 536870912;\n",
 };
 
 const unsigned int CURRENT_VERSION = 5;
-const unsigned long APPLICATION_ID = 1111704642;
 
 static const char SQLITE_INIT_STMTS[] =
     "PRAGMA user_version = 5;\n"
@@ -225,6 +234,25 @@ static int busy_callback(void *, int count) {
   return 1; // keep trying
 }
 
+static int wal_hook(void *, sqlite3 *db, const char *DatabaseName,
+                    int NumPages) {
+  // There are often so many concurrent readers that we get checkpoint
+  // starvation, and the WAL file grows continuously:
+  // https://sqlite.org/wal.html#avoiding_excessively_large_wal_files
+  //
+  // To prevent this, we use SQLITE_CHECKPOINT_RESTART, which causes readers to
+  // block until the WAL file is completely flushed and we can restart from the
+  // beginning.
+
+  if (NumPages < 16384) // 64 MiB with default page size
+    return SQLITE_OK;
+  int rc = sqlite3_wal_checkpoint_v2(
+      db, DatabaseName, SQLITE_CHECKPOINT_RESTART, nullptr, nullptr);
+  if (rc == SQLITE_BUSY)
+    return SQLITE_OK; // Another thread is already running a checkpoint.
+  return rc;
+}
+
 sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
   sqlite3 *&result = thread_connections[this];
 
@@ -240,6 +268,8 @@ sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
     rc = sqlite3_busy_handler(result, busy_callback, nullptr);
     if (rc != SQLITE_OK)
       fatal_error();
+
+    sqlite3_wal_hook(result, wal_hook, nullptr);
 
     for (const char *stmt : SQLITE_PRAGMAS) {
       rc = sqlite3_exec(result, stmt, nullptr, nullptr, nullptr);
