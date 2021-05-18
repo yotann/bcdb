@@ -9,6 +9,8 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
                                           bool create_if_missing) {
   if (uri.startswith("sqlite:")) {
     return memodb_sqlite_open(uri.substr(7), create_if_missing);
+  } else if (uri.startswith("leveldb:")) {
+    return memodb_leveldb_open(uri, create_if_missing);
   } else {
     llvm::report_fatal_error(llvm::Twine("unsupported URI ") + uri);
   }

@@ -104,6 +104,12 @@ find_package(Threads REQUIRED) # needed by nng
 find_package(nng REQUIRED)
 find_package(nngpp REQUIRED)
 
+find_library(LEVELDB_LIBRARIES leveldb)
+find_path(LEVELDB_INCLUDE_DIRS leveldb/db.h)
+if(NOT (LEVELDB_LIBRARIES AND LEVELDB_INCLUDE_DIRS))
+  message(FATAL_ERROR "Could not find LevelDB library.")
+endif(NOT (LEVELDB_LIBRARIES AND LEVELDB_INCLUDE_DIRS))
+
 
 
 set(LLVM_BUILD_TOOLS ON)

@@ -6,6 +6,9 @@
 
 #include "memodb/memodb.h"
 
+std::unique_ptr<memodb_db> memodb_leveldb_open(llvm::StringRef path,
+                                               bool create_if_missing);
+
 std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
                                               bool create_if_missing);
 

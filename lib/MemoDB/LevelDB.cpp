@@ -1,0 +1,504 @@
+#include "memodb_internal.h"
+
+#include <array>
+#include <cstdint>
+#include <cstdlib>
+#include <leveldb/db.h>
+#include <leveldb/filter_policy.h>
+#include <leveldb/options.h>
+#include <leveldb/write_batch.h>
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/Optional.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Base64.h>
+#include <memory>
+#include <sodium.h>
+#include <string>
+#include <tuple>
+#include <vector>
+
+typedef std::array<uint8_t, crypto_generichash_BYTES> Hash;
+
+typedef std::array<uint8_t, 4> KeyType;
+
+static const Hash HASH_NONE = {};
+
+static const KeyType KEY_CALL = {0xff, 0x09, 0xa9, 0x65};
+static const KeyType KEY_CBOR = {0xff, 0x08, 0x13, 0x91};
+static const KeyType KEY_FUNC = {0xff, 0x16, 0xe9, 0xdc};
+static const KeyType KEY_HEAD = {0xff, 0x1d, 0xe6, 0x9d};
+static const KeyType KEY_REF = {0xff, 0x45, 0xe7, 0xff};
+static const KeyType KEY_RETURN = {0xff, 0x45, 0xeb, 0x67};
+
+static const leveldb::Slice MAGIC_VALUE("MemoDB v0");
+
+// clang-format off
+/* Key types:
+ *
+ * (empty)                            -> MAGIC_VALUE
+ * HASH_NONE + KEY_FUNC   + name      -> (empty)
+ * HASH_NONE + KEY_HEAD   + name      -> CBOR ref
+ * hash      + KEY_CBOR               -> CBOR value
+ * hash      + KEY_REF    + key       -> (empty)
+ * name_hash + KEY_CALL   + args_hash -> CBOR [name, args...]
+ * name_hash + KEY_RETURN + args_hash -> CBOR ref
+ */
+// clang-format on
+
+static llvm::ArrayRef<uint8_t> makeBytes(const llvm::StringRef &Str) {
+  return llvm::ArrayRef(reinterpret_cast<const uint8_t *>(Str.data()),
+                        Str.size());
+}
+
+static leveldb::Slice makeSlice(const llvm::ArrayRef<uint8_t> &Bytes) {
+  return leveldb::Slice(reinterpret_cast<const char *>(Bytes.data()),
+                        Bytes.size());
+}
+
+static Hash calculateHash(const llvm::ArrayRef<uint8_t> &Bytes) {
+  Hash Result;
+  crypto_generichash(Result.data(), Result.size(), Bytes.data(), Bytes.size(),
+                     nullptr, 0);
+  return Result;
+}
+
+namespace {
+struct ParsedURI {
+  ParsedURI(llvm::StringRef URI);
+
+  llvm::StringRef Scheme, Authority, Path, Query, Fragment;
+};
+} // end anonymous namespace
+
+ParsedURI::ParsedURI(llvm::StringRef URI) {
+  std::tie(Scheme, URI) = URI.split(':');
+  if (URI.empty())
+    std::swap(Scheme, URI);
+  if (URI.startswith("//")) {
+    size_t i = URI.find_first_of("/?#", 2);
+    if (i == llvm::StringRef::npos) {
+      Authority = URI;
+      URI = "";
+    } else {
+      Authority = URI.substr(2, i);
+      URI = URI.substr(i);
+    }
+  }
+  std::tie(URI, Fragment) = URI.split('#');
+  std::tie(Path, Query) = URI.split('?');
+
+  if (Authority.contains('%') || Path.contains('%') || Query.contains('%') ||
+      Fragment.contains('%'))
+    llvm::report_fatal_error("Percent-encoding in URIs is not supported yet");
+}
+
+namespace {
+class LevelDBMemo : public memodb_db {
+  std::unique_ptr<const leveldb::FilterPolicy> FilterPolicy;
+  std::unique_ptr<leveldb::DB> DB;
+
+  std::tuple<Hash, KeyType, leveldb::Slice> breakKey(const leveldb::Slice &Key);
+  void checkStatus(leveldb::Status Status);
+  bool checkFound(leveldb::Status Status);
+  memodb_ref hashToRef(const Hash &Hash);
+  std::string makeKey(const Hash &Hash, const KeyType &KeyType,
+                      const leveldb::Slice &Extra = {});
+  Hash refToHash(const memodb_ref &Ref);
+
+  void addRefs(leveldb::WriteBatch &Batch, const leveldb::Slice &Key,
+               const memodb_value &Value);
+  void deleteRefs(leveldb::WriteBatch &Batch, const leveldb::Slice &Key,
+                  const memodb_value &Value);
+
+  llvm::Optional<memodb_value> getCBORByKey(const leveldb::Slice &Key);
+
+  memodb_value makeCall(llvm::StringRef Name, llvm::ArrayRef<memodb_ref> Args);
+
+public:
+  void open(llvm::StringRef uri, bool create_if_missing);
+  ~LevelDBMemo() override;
+
+  memodb_value get(const memodb_ref &ref) override;
+  memodb_ref put(const memodb_value &value) override;
+  std::vector<memodb_ref> list_refs_using(const memodb_ref &ref) override;
+
+  std::vector<std::string> list_heads() override;
+  std::vector<std::string> list_heads_using(const memodb_ref &ref) override;
+  memodb_ref head_get(llvm::StringRef name) override;
+  void head_set(llvm::StringRef name, const memodb_ref &ref) override;
+  void head_delete(llvm::StringRef name) override;
+
+  memodb_ref call_get(llvm::StringRef name,
+                      llvm::ArrayRef<memodb_ref> args) override;
+  void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
+                const memodb_ref &result) override;
+  void call_invalidate(llvm::StringRef name) override;
+};
+} // end anonymous namespace
+
+std::tuple<Hash, KeyType, leveldb::Slice>
+LevelDBMemo::breakKey(const leveldb::Slice &Key) {
+  Hash Hash;
+  KeyType KeyType;
+  leveldb::Slice Extra;
+  if (Key.size() < Hash.size() + KeyType.size())
+    llvm::report_fatal_error("LevelDB key too small");
+  std::memcpy(Hash.data(), Key.data(), Hash.size());
+  std::memcpy(KeyType.data(), Key.data() + Hash.size(), KeyType.size());
+  Extra = leveldb::Slice(Key.data() + Hash.size() + KeyType.size(),
+                         Key.size() - Hash.size() - KeyType.size());
+  return std::make_tuple(Hash, KeyType, Extra);
+}
+
+void LevelDBMemo::checkStatus(leveldb::Status Status) {
+  if (!Status.ok())
+    llvm::report_fatal_error("LevelDB error: " + Status.ToString());
+}
+
+bool LevelDBMemo::checkFound(leveldb::Status Status) {
+  if (Status.IsNotFound())
+    return false;
+  checkStatus(Status);
+  return true;
+}
+
+memodb_ref LevelDBMemo::hashToRef(const Hash &Hash) {
+  return memodb_ref(llvm::encodeBase64(Hash));
+}
+
+std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
+                                 const leveldb::Slice &Extra) {
+  std::string Result(Hash.size() + KeyType.size() + Extra.size(), '\0');
+  std::memcpy(Result.data(), Hash.data(), Hash.size());
+  std::memcpy(Result.data() + Hash.size(), KeyType.data(), KeyType.size());
+  std::memcpy(Result.data() + Hash.size() + KeyType.size(), Extra.data(),
+              Extra.size());
+  return Result;
+}
+
+Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
+  static const llvm::StringRef Table("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                     "abcdefghijklmnopqrstuvwxyz"
+                                     "0123456789+/");
+  llvm::StringRef Str = Ref;
+  if (Str.size() % 4)
+    llvm::report_fatal_error("invalid base64: wrong size");
+  auto Trimmed = Str.rtrim('=');
+  auto Padding = Str.size() - Trimmed.size();
+  if (Padding > 2)
+    llvm::report_fatal_error("invalid base64: too much padding");
+  for (char c : Trimmed)
+    if (Table.find(c) == llvm::StringRef::npos)
+      llvm::report_fatal_error("invalid base64: invalid character");
+
+  Hash Result;
+  auto ResultSize = Str.size() / 4 * 3 - Padding;
+  if (ResultSize != Result.size())
+    llvm::report_fatal_error("invalid base64: wrong size");
+
+  for (size_t i = 0; i < Str.size() / 4; i++) {
+    size_t x0 = Table.find(Str[4 * i + 0]);
+    size_t x1 = Table.find(Str[4 * i + 1]);
+    size_t x2 = Str[4 * i + 2] == '=' ? 0 : Table.find(Str[4 * i + 2]);
+    size_t x3 = Str[4 * i + 3] == '=' ? 0 : Table.find(Str[4 * i + 3]);
+    size_t x = x0 << 18 | x1 << 12 | x2 << 6 | x3;
+    Result[3 * i + 0] = x >> 16;
+    if (3 * i + 1 < Result.size())
+      Result[3 * i + 1] = (x >> 8) & 0xff;
+    if (3 * i + 2 < Result.size())
+      Result[3 * i + 2] = (x >> 0) & 0xff;
+  }
+  return Result;
+}
+
+void LevelDBMemo::addRefs(leveldb::WriteBatch &Batch, const leveldb::Slice &Key,
+                          const memodb_value &Value) {
+  if (Value.type() == memodb_value::REF) {
+    Hash Dest = refToHash(Value.as_ref());
+    std::string NewKey = makeKey(Dest, KEY_REF, Key);
+    Batch.Put(NewKey, leveldb::Slice());
+  } else if (Value.type() == memodb_value::ARRAY) {
+    for (const memodb_value &Item : Value.array_items())
+      addRefs(Batch, Key, Item);
+  } else if (Value.type() == memodb_value::MAP) {
+    for (const auto &Item : Value.map_items()) {
+      addRefs(Batch, Key, Item.first);
+      addRefs(Batch, Key, Item.second);
+    }
+  }
+}
+
+void LevelDBMemo::deleteRefs(leveldb::WriteBatch &Batch,
+                             const leveldb::Slice &Key,
+                             const memodb_value &Value) {
+  if (Value.type() == memodb_value::REF) {
+    Hash Dest = refToHash(Value.as_ref());
+    std::string NewKey = makeKey(Dest, KEY_REF, Key);
+    Batch.Delete(NewKey);
+  } else if (Value.type() == memodb_value::ARRAY) {
+    for (const memodb_value &Item : Value.array_items())
+      deleteRefs(Batch, Key, Item);
+  } else if (Value.type() == memodb_value::MAP) {
+    for (const auto &Item : Value.map_items()) {
+      deleteRefs(Batch, Key, Item.first);
+      deleteRefs(Batch, Key, Item.second);
+    }
+  }
+}
+
+llvm::Optional<memodb_value>
+LevelDBMemo::getCBORByKey(const leveldb::Slice &Key) {
+  leveldb::ReadOptions ReadOptions;
+  std::string Bytes;
+  bool Found = checkFound(DB->Get(ReadOptions, Key, &Bytes));
+  if (!Found)
+    return llvm::None;
+  return memodb_value::load_cbor(makeBytes(Bytes));
+}
+
+memodb_value LevelDBMemo::makeCall(llvm::StringRef Name,
+                                   llvm::ArrayRef<memodb_ref> Args) {
+  memodb_value Value = memodb_value::array({memodb_value::string(Name)});
+  for (const memodb_ref &Arg : Args)
+    Value.array_items().emplace_back(Arg);
+  return Value;
+}
+
+void LevelDBMemo::open(llvm::StringRef uri, bool create_if_missing) {
+  ParsedURI Parsed(uri);
+  if (Parsed.Scheme != "leveldb" || !Parsed.Authority.empty() ||
+      !Parsed.Query.empty() || !Parsed.Fragment.empty())
+    llvm::report_fatal_error("Unsupported LevelDB URI");
+
+  // Keep 10 bits per key in RAM, probably 0.1% the size of the database file.
+  FilterPolicy.reset(leveldb::NewBloomFilterPolicy(10));
+
+  leveldb::Options Options;
+  Options.create_if_missing = create_if_missing;
+  Options.write_buffer_size = 64 * 1024 * 1024;
+  Options.block_size = 16 * 1024;
+  Options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+  leveldb::DB *TmpDB;
+  checkStatus(leveldb::DB::Open(Options, Parsed.Path.str(), &TmpDB));
+  DB.reset(TmpDB);
+
+  leveldb::ReadOptions ReadOptions;
+  std::unique_ptr<leveldb::Iterator> I(DB->NewIterator(ReadOptions));
+  I->SeekToFirst();
+  if (!I->Valid()) {
+    // Empty DB, insert magic value
+    leveldb::WriteOptions WriteOptions;
+    WriteOptions.sync = true;
+    checkStatus(DB->Put(WriteOptions, leveldb::Slice(), MAGIC_VALUE));
+  } else {
+    // Existing DB, check magic value
+    std::string Magic;
+    bool Found = checkFound(DB->Get(ReadOptions, leveldb::Slice(), &Magic));
+    if (!Found || Magic != MAGIC_VALUE)
+      llvm::report_fatal_error("This is the wrong kind of LevelDB data");
+  }
+}
+
+LevelDBMemo::~LevelDBMemo() {}
+
+memodb_value LevelDBMemo::get(const memodb_ref &ref) {
+  std::string Key = makeKey(refToHash(ref), KEY_CBOR);
+  auto Value = getCBORByKey(Key);
+  if (!Value)
+    llvm::report_fatal_error("Missing key in database");
+  return *Value;
+}
+
+memodb_ref LevelDBMemo::put(const memodb_value &value) {
+  std::vector<std::uint8_t> Buffer;
+  value.save_cbor(Buffer);
+  Hash Hash = calculateHash(Buffer);
+  std::string Key = makeKey(Hash, KEY_CBOR);
+  std::string FetchedValue;
+  leveldb::ReadOptions ReadOptions;
+  if (checkFound(DB->Get(ReadOptions, Key, &FetchedValue))) {
+    assert(makeSlice(Buffer) == FetchedValue);
+    return hashToRef(Hash);
+  }
+
+  leveldb::WriteBatch Batch;
+  Batch.Put(Key, makeSlice(Buffer));
+  addRefs(Batch, Key, value);
+  leveldb::WriteOptions WriteOptions;
+  checkStatus(DB->Write(WriteOptions, &Batch));
+  return hashToRef(Hash);
+}
+
+std::vector<memodb_ref> LevelDBMemo::list_refs_using(const memodb_ref &ref) {
+  std::vector<memodb_ref> Result;
+  std::string Key = makeKey(refToHash(ref), KEY_REF);
+  leveldb::ReadOptions ReadOptions;
+  std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
+  for (Iter->Seek(Key);
+       Iter->Valid() && llvm::StringRef(Iter->key().ToString()).startswith(Key);
+       Iter->Next()) {
+    leveldb::Slice RefKey = std::get<2>(breakKey(Iter->key()));
+    auto RefBroken = breakKey(RefKey);
+    if (std::get<1>(RefBroken) == KEY_CBOR) {
+      // Stray refs can be left dangling, so double-check that it actually
+      // still exists.
+      if (getCBORByKey(RefKey))
+        Result.emplace_back(hashToRef(std::get<0>(RefBroken)));
+    }
+  }
+  return Result;
+}
+
+std::vector<std::string> LevelDBMemo::list_heads() {
+  std::vector<std::string> Result;
+  std::string Key = makeKey(HASH_NONE, KEY_HEAD);
+  leveldb::ReadOptions ReadOptions;
+  std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
+  for (Iter->Seek(Key);
+       Iter->Valid() && llvm::StringRef(Iter->key().ToString()).startswith(Key);
+       Iter->Next()) {
+    auto Item = llvm::StringRef(Iter->key().ToString()).substr(Key.size());
+    Result.emplace_back(Item);
+  }
+  return Result;
+}
+
+std::vector<std::string> LevelDBMemo::list_heads_using(const memodb_ref &ref) {
+  std::vector<std::string> Result;
+  std::string Key = makeKey(refToHash(ref), KEY_REF);
+  leveldb::ReadOptions ReadOptions;
+  std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
+  for (Iter->Seek(Key);
+       Iter->Valid() && llvm::StringRef(Iter->key().ToString()).startswith(Key);
+       Iter->Next()) {
+    leveldb::Slice RefKey = std::get<2>(breakKey(Iter->key()));
+    auto RefBroken = breakKey(RefKey);
+    if (std::get<0>(RefBroken) == HASH_NONE &&
+        std::get<1>(RefBroken) == KEY_HEAD) {
+      // Stray refs can be left dangling, so double-check that it actually
+      // still exists.
+      if (getCBORByKey(RefKey))
+        Result.emplace_back(std::get<2>(RefBroken).ToString());
+    }
+  }
+  return Result;
+}
+
+memodb_ref LevelDBMemo::head_get(llvm::StringRef name) {
+  std::string Key =
+      makeKey(HASH_NONE, KEY_HEAD, leveldb::Slice(name.data(), name.size()));
+  return getCBORByKey(Key)->as_ref();
+}
+
+void LevelDBMemo::head_set(llvm::StringRef name, const memodb_ref &ref) {
+  std::string Key =
+      makeKey(HASH_NONE, KEY_HEAD, leveldb::Slice(name.data(), name.size()));
+  auto OldValue = getCBORByKey(Key);
+  // XXX race condition: another thread can change the head at this point, and
+  // the ref that thread creates will be left dangling.
+
+  memodb_value value(ref);
+  std::vector<std::uint8_t> Buffer;
+  value.save_cbor(Buffer);
+
+  leveldb::WriteBatch Batch;
+  if (OldValue)
+    deleteRefs(Batch, Key, *OldValue);
+  Batch.Put(Key, makeSlice(Buffer));
+  addRefs(Batch, Key, value);
+  leveldb::WriteOptions WriteOptions;
+  WriteOptions.sync = true;
+  checkStatus(DB->Write(WriteOptions, &Batch));
+}
+
+void LevelDBMemo::head_delete(llvm::StringRef name) {
+  std::string Key =
+      makeKey(HASH_NONE, KEY_HEAD, leveldb::Slice(name.data(), name.size()));
+  auto OldValue = getCBORByKey(Key);
+  // XXX race condition: another thread can change the head at this point, and
+  // the ref that thread creates will be left dangling.
+
+  leveldb::WriteBatch Batch;
+  if (OldValue)
+    deleteRefs(Batch, Key, *OldValue);
+  Batch.Delete(Key);
+  leveldb::WriteOptions WriteOptions;
+  WriteOptions.sync = true;
+  checkStatus(DB->Write(WriteOptions, &Batch));
+}
+
+memodb_ref LevelDBMemo::call_get(llvm::StringRef name,
+                                 llvm::ArrayRef<memodb_ref> args) {
+  Hash NameHash = calculateHash(makeBytes(name));
+  memodb_value Value = makeCall(name, args);
+  std::vector<std::uint8_t> Buffer;
+  Value.save_cbor(Buffer);
+  Hash ArgsHash = calculateHash(Buffer);
+
+  std::string Key = makeKey(NameHash, KEY_RETURN, makeSlice(ArgsHash));
+  auto Result = getCBORByKey(Key);
+  if (!Result)
+    return memodb_ref{};
+  return Result->as_ref();
+}
+
+void LevelDBMemo::call_set(llvm::StringRef name,
+                           llvm::ArrayRef<memodb_ref> args,
+                           const memodb_ref &result) {
+  // TODO: remove backwards references if we're replacing an older value.
+  Hash NameHash = calculateHash(makeBytes(name));
+
+  leveldb::WriteBatch Batch;
+  std::string Key =
+      makeKey(HASH_NONE, KEY_FUNC, leveldb::Slice(name.data(), name.size()));
+  Batch.Put(Key, leveldb::Slice());
+
+  memodb_value Value = makeCall(name, args);
+  std::vector<std::uint8_t> Buffer;
+  Value.save_cbor(Buffer);
+  Hash ArgsHash = calculateHash(Buffer);
+  Key = makeKey(NameHash, KEY_CALL, makeSlice(ArgsHash));
+  Batch.Put(Key, makeSlice(Buffer));
+  addRefs(Batch, Key, Value);
+
+  Buffer.clear();
+  Value = result;
+  Value.save_cbor(Buffer);
+  Key = makeKey(NameHash, KEY_RETURN, makeSlice(ArgsHash));
+  Batch.Put(Key, makeSlice(Buffer));
+  addRefs(Batch, Key, Value);
+
+  leveldb::WriteOptions WriteOptions;
+  checkStatus(DB->Write(WriteOptions, &Batch));
+}
+
+void LevelDBMemo::call_invalidate(llvm::StringRef name) {
+  // TODO: remove backwards references.
+  Hash NameHash = calculateHash(makeBytes(name));
+  std::string Key = makeSlice(NameHash).ToString();
+  leveldb::WriteBatch Batch;
+  size_t NumBatched = 0;
+  leveldb::ReadOptions ReadOptions;
+  leveldb::WriteOptions WriteOptions;
+  WriteOptions.sync = true;
+  std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
+  for (Iter->Seek(Key);
+       Iter->Valid() && llvm::StringRef(Iter->key().ToString()).startswith(Key);
+       Iter->Next()) {
+    Batch.Delete(Iter->key());
+    NumBatched++;
+    if (NumBatched >= 1 * 1024 * 1024) {
+      checkStatus(DB->Write(WriteOptions, &Batch));
+      Batch.Clear();
+      NumBatched = 0;
+    }
+  }
+  checkStatus(DB->Write(WriteOptions, &Batch));
+}
+
+std::unique_ptr<memodb_db> memodb_leveldb_open(llvm::StringRef path,
+                                               bool create_if_missing) {
+  auto db = std::make_unique<LevelDBMemo>();
+  db->open(path, create_if_missing);
+  return db;
+}
