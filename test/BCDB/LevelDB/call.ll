@@ -1,4 +1,4 @@
-; RUN: rm -r %t
+; RUN: rm -rf %t
 ; RUN: bcdb init -uri leveldb:%t
 ; RUN: llvm-as < %s | bcdb add -uri leveldb:%t -name a -
 
