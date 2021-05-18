@@ -10,7 +10,6 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/StringRef.h>
-#include <llvm/Support/Base64.h>
 #include <memory>
 #include <sodium.h>
 #include <string>
@@ -31,6 +30,10 @@ static const KeyType KEY_REF = {0xff, 0x45, 0xe7, 0xff};
 static const KeyType KEY_RETURN = {0xff, 0x45, 0xeb, 0x67};
 
 static const leveldb::Slice MAGIC_VALUE("MemoDB v0");
+
+static const llvm::StringRef BASE64_TABLE("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                          "abcdefghijklmnopqrstuvwxyz"
+                                          "0123456789+/");
 
 // clang-format off
 /* Key types:
@@ -163,7 +166,23 @@ bool LevelDBMemo::checkFound(leveldb::Status Status) {
 }
 
 memodb_ref LevelDBMemo::hashToRef(const Hash &Hash) {
-  return memodb_ref(llvm::encodeBase64(Hash));
+  // Encode in base64
+  auto ResultSize = (Hash.size() + 2) / 3 * 4;
+  std::string Result(ResultSize, '\0');
+  for (size_t i = 0; i < ResultSize / 4; i++) {
+    size_t x = size_t(Hash[3 * i + 0]) << 16;
+    if (3 * i + 1 < Hash.size())
+      x |= size_t(Hash[3 * i + 1]) << 8;
+    if (3 * i + 2 < Hash.size())
+      x |= size_t(Hash[3 * i + 2]) << 0;
+    Result[4 * i + 0] = BASE64_TABLE[(x >> 18) & 0x3f];
+    Result[4 * i + 1] = BASE64_TABLE[(x >> 12) & 0x3f];
+    Result[4 * i + 2] =
+        3 * i + 1 < Hash.size() ? BASE64_TABLE[(x >> 6) & 0x3f] : '=';
+    Result[4 * i + 3] =
+        3 * i + 2 < Hash.size() ? BASE64_TABLE[(x >> 0) & 0x3f] : '=';
+  }
+  return memodb_ref(Result);
 }
 
 std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
@@ -177,9 +196,7 @@ std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
 }
 
 Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
-  static const llvm::StringRef Table("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                     "abcdefghijklmnopqrstuvwxyz"
-                                     "0123456789+/");
+  // Decode from base64
   llvm::StringRef Str = Ref;
   if (Str.size() % 4)
     llvm::report_fatal_error("invalid base64: wrong size");
@@ -188,7 +205,7 @@ Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
   if (Padding > 2)
     llvm::report_fatal_error("invalid base64: too much padding");
   for (char c : Trimmed)
-    if (Table.find(c) == llvm::StringRef::npos)
+    if (BASE64_TABLE.find(c) == llvm::StringRef::npos)
       llvm::report_fatal_error("invalid base64: invalid character");
 
   Hash Result;
@@ -197,10 +214,10 @@ Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
     llvm::report_fatal_error("invalid base64: wrong size");
 
   for (size_t i = 0; i < Str.size() / 4; i++) {
-    size_t x0 = Table.find(Str[4 * i + 0]);
-    size_t x1 = Table.find(Str[4 * i + 1]);
-    size_t x2 = Str[4 * i + 2] == '=' ? 0 : Table.find(Str[4 * i + 2]);
-    size_t x3 = Str[4 * i + 3] == '=' ? 0 : Table.find(Str[4 * i + 3]);
+    size_t x0 = BASE64_TABLE.find(Str[4 * i + 0]);
+    size_t x1 = BASE64_TABLE.find(Str[4 * i + 1]);
+    size_t x2 = Str[4 * i + 2] == '=' ? 0 : BASE64_TABLE.find(Str[4 * i + 2]);
+    size_t x3 = Str[4 * i + 3] == '=' ? 0 : BASE64_TABLE.find(Str[4 * i + 3]);
     size_t x = x0 << 18 | x1 << 12 | x2 << 6 | x3;
     Result[3 * i + 0] = x >> 16;
     if (3 * i + 1 < Result.size())
