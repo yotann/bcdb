@@ -75,5 +75,7 @@ in rec {
 
   bcdb = bcdb-llvm11;
 
+  bcdb-sqlite-only = bcdb.override { leveldb = null; };
+
   symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
 }

@@ -1,4 +1,2 @@
-add_lit_testsuite(check-bcdb "Running bcdb tests"
-  ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS bcdb
-)
+add_subdirectory(LevelDB)
+add_subdirectory(SQLite)

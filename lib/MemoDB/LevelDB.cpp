@@ -1,5 +1,7 @@
 #include "memodb_internal.h"
 
+#if BCDB_WITH_LEVELDB
+
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -519,3 +521,12 @@ std::unique_ptr<memodb_db> memodb_leveldb_open(llvm::StringRef path,
   db->open(path, create_if_missing);
   return db;
 }
+
+#else // BCDB_WITH_LEVELDB
+
+std::unique_ptr<memodb_db> memodb_leveldb_open(llvm::StringRef path,
+                                               bool create_if_missing) {
+  llvm::report_fatal_error("LevelDB support was not compiled in");
+}
+
+#endif // BCDB_WITH_LEVELDB

@@ -7,12 +7,15 @@ add_llvm_library(MemoDB
   SQLite.cpp
 )
 target_include_directories(MemoDB PRIVATE
-  ${LEVELDB_INCLUDE_DIRS}
   ${LIBSODIUM_INCLUDE_DIRS}
   ${SQLITE3_INCLUDE_DIRS}
 )
 target_link_libraries(MemoDB PRIVATE
-  ${LEVELDB_LIBRARIES}
   ${LIBSODIUM_LIBRARIES}
   ${SQLITE3_LIBRARIES}
 )
+if(WITH_LEVELDB)
+  target_include_directories(MemoDB PRIVATE ${LEVELDB_INCLUDE_DIRS})
+  target_link_libraries(MemoDB PRIVATE ${LEVELDB_LIBRARIES})
+  add_compile_definitions(BCDB_WITH_LEVELDB=1)
+endif(WITH_LEVELDB)
