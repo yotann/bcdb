@@ -40,7 +40,7 @@ static const std::vector<const char *> SQLITE_PRAGMAS = {
     "PRAGMA journal_size_limit = 536870912;\n",
 };
 
-const unsigned int CURRENT_VERSION = 5;
+static const unsigned int CURRENT_VERSION = 5;
 
 static const char SQLITE_INIT_STMTS[] =
     "PRAGMA user_version = 5;\n"
