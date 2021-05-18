@@ -137,7 +137,7 @@ Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
 
   auto SaveModule = [&](Module &M) {
     SmallVector<char, 0> Buffer;
-    WriteUnalignedModule(M, Buffer);
+    WriteAlignedModule(M, Buffer);
     auto value = memodb_value(ArrayRef<uint8_t>(
         reinterpret_cast<uint8_t *>(Buffer.data()), Buffer.size()));
     return db->put(value);
