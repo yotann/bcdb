@@ -15,6 +15,7 @@ jobs:
         - bcdb-llvmAlive
         - bcdb-clang
         - bcdb-sqlite-only
+        - bcdb-without-nng
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2

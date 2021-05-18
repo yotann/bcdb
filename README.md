@@ -53,8 +53,6 @@ You will need the following dependencies:
 - [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
-- [nng](https://github.com/nanomsg/nng), at least 1.4.
-- [nngpp](https://github.com/cwzx/nngpp), at least 1.3.
 - [Python](https://www.python.org/), at least 2.7.
 - [LLVM](https://llvm.org/) version 7 through 12 (development versions up to 13
   may work, but this is not guaranteed). When working on the BCDB code, you
@@ -62,7 +60,9 @@ You will need the following dependencies:
 - [Clang](https://clang.llvm.org/), same version as LLVM.
 - `xxd`, which is usually included with [Vim](https://www.vim.org/)
 - Optional dependencies:
-  - [LevelDB](https://github.com/google/leveldb), as an alternative to SQLite
+  - [LevelDB](https://github.com/google/leveldb), as an alternative to SQLite.
+  - [nng](https://github.com/nanomsg/nng), tested with 1.4, for outlining.
+  - [nngpp](https://github.com/cwzx/nngpp), tested with 1.3, for outlining.
 
 You should then be able to build normally with CMake, like this:
 

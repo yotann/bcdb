@@ -1,4 +1,5 @@
-{ stdenv, nix-gitignore, clang, cmake, leveldb, libsodium, llvm, nng, nngpp, pkgconfig, python2, sqlite, xxd }:
+{ stdenv, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd,
+leveldb ? null, nng ? null, nngpp ? null }:
 
 let
   gitFilter = patterns: root: with nix-gitignore;

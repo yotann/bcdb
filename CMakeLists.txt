@@ -100,9 +100,18 @@ pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 link_directories(${SQLITE3_LIBRARY_DIRS})
 find_program(CLANG clang)
 find_program(XXD xxd)
-find_package(Threads REQUIRED) # needed by nng
-find_package(nng REQUIRED)
-find_package(nngpp REQUIRED)
+
+find_package(Threads) # needed by nng
+find_package(nng)
+find_package(nngpp)
+if(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
+  set(WITH_NNG ON)
+  set(ENABLE_SMOUT ON)
+else(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
+  message(WARNING "Could not find nng and nngpp libraries; disabling smout.")
+  set(WITH_NNG OFF)
+  set(ENABLE_SMOUT OFF)
+endif(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
 
 find_library(LEVELDB_LIBRARIES leveldb)
 find_path(LEVELDB_INCLUDE_DIRS leveldb/db.h)
