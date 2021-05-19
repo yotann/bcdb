@@ -31,11 +31,11 @@ static const KeyType KEY_HEAD = {0xff, 0x1d, 0xe6, 0x9d};
 static const KeyType KEY_REF = {0xff, 0x45, 0xe7, 0xff};
 static const KeyType KEY_RETURN = {0xff, 0x45, 0xeb, 0x67};
 
-static const leveldb::Slice MAGIC_VALUE("MemoDB v0");
+static const leveldb::Slice MAGIC_VALUE("MemoDB v1");
 
-static const llvm::StringRef BASE64_TABLE("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                          "abcdefghijklmnopqrstuvwxyz"
-                                          "0123456789+/");
+static const llvm::StringRef BASE64URL_TABLE("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                             "abcdefghijklmnopqrstuvwxyz"
+                                             "0123456789-_");
 
 // clang-format off
 /* Key types:
@@ -171,12 +171,12 @@ memodb_ref LevelDBMemo::hashToRef(const Hash &Hash) {
       x |= size_t(Hash[3 * i + 1]) << 8;
     if (3 * i + 2 < Hash.size())
       x |= size_t(Hash[3 * i + 2]) << 0;
-    Result[4 * i + 0] = BASE64_TABLE[(x >> 18) & 0x3f];
-    Result[4 * i + 1] = BASE64_TABLE[(x >> 12) & 0x3f];
+    Result[4 * i + 0] = BASE64URL_TABLE[(x >> 18) & 0x3f];
+    Result[4 * i + 1] = BASE64URL_TABLE[(x >> 12) & 0x3f];
     Result[4 * i + 2] =
-        3 * i + 1 < Hash.size() ? BASE64_TABLE[(x >> 6) & 0x3f] : '=';
+        3 * i + 1 < Hash.size() ? BASE64URL_TABLE[(x >> 6) & 0x3f] : '=';
     Result[4 * i + 3] =
-        3 * i + 2 < Hash.size() ? BASE64_TABLE[(x >> 0) & 0x3f] : '=';
+        3 * i + 2 < Hash.size() ? BASE64URL_TABLE[(x >> 0) & 0x3f] : '=';
   }
   return memodb_ref(Result);
 }
@@ -201,7 +201,7 @@ Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
   if (Padding > 2)
     llvm::report_fatal_error("invalid base64: too much padding");
   for (char c : Trimmed)
-    if (BASE64_TABLE.find(c) == llvm::StringRef::npos)
+    if (BASE64URL_TABLE.find(c) == llvm::StringRef::npos)
       llvm::report_fatal_error("invalid base64: invalid character");
 
   Hash Result;
@@ -210,10 +210,12 @@ Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
     llvm::report_fatal_error("invalid base64: wrong size");
 
   for (size_t i = 0; i < Str.size() / 4; i++) {
-    size_t x0 = BASE64_TABLE.find(Str[4 * i + 0]);
-    size_t x1 = BASE64_TABLE.find(Str[4 * i + 1]);
-    size_t x2 = Str[4 * i + 2] == '=' ? 0 : BASE64_TABLE.find(Str[4 * i + 2]);
-    size_t x3 = Str[4 * i + 3] == '=' ? 0 : BASE64_TABLE.find(Str[4 * i + 3]);
+    size_t x0 = BASE64URL_TABLE.find(Str[4 * i + 0]);
+    size_t x1 = BASE64URL_TABLE.find(Str[4 * i + 1]);
+    size_t x2 =
+        Str[4 * i + 2] == '=' ? 0 : BASE64URL_TABLE.find(Str[4 * i + 2]);
+    size_t x3 =
+        Str[4 * i + 3] == '=' ? 0 : BASE64URL_TABLE.find(Str[4 * i + 3]);
     size_t x = x0 << 18 | x1 << 12 | x2 << 6 | x3;
     Result[3 * i + 0] = x >> 16;
     if (3 * i + 1 < Result.size())

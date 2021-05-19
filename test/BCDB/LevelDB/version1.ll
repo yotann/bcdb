@@ -1,4 +1,5 @@
-; RUN: cp -r %p/Inputs/version0 %t
+; RUN: rm -rf %t
+; RUN: cp -r %p/Inputs/version1 %t
 ; RUN: bcdb get -uri leveldb:%t -name - | opt -verify -S | FileCheck %s
 ; RUN: bcdb get-function -uri leveldb:%t -id $(bcdb list-function-ids -uri leveldb:%t) | opt -verify -S | FileCheck --check-prefix=FUNC %s
 ; RUN: bcdb refs -uri leveldb:%t $(bcdb list-function-ids -uri leveldb:%t) | FileCheck --check-prefix=REFS %s

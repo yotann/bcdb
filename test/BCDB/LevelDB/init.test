@@ -1,1 +1,2 @@
+; RUN: rm -rf %t
 ; RUN: bcdb init -uri leveldb:%t
