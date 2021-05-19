@@ -84,24 +84,25 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_head &head) {
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_call &call) {
-  llvm::raw_os_ostream(os) << call;
+  os << "call:" << call.Name;
+  for (const memodb_ref &Arg : call.Args)
+    os << "/" << Arg;
   return os;
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call) {
-  os << call.Name << "(";
-  bool first = true;
-  for (const memodb_ref &Arg : call.Args) {
-    if (!first)
-      os << ", ";
-    first = false;
-    os << Arg;
-  }
-  return os << ")";
+  os << "call:" << call.Name;
+  for (const memodb_ref &Arg : call.Args)
+    os << "/" << Arg;
+  return os;
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_name &name) {
-  llvm::raw_os_ostream(os) << name;
+  if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
+    os << "heads[" << memodb_value(Head->Name) << "]";
+  } else {
+    name.visit([&](auto X) { os << X; });
+  }
   return os;
 }
 
