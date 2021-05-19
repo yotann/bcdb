@@ -24,6 +24,16 @@ class raw_ostream;
 template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
+struct ParsedURI {
+public:
+  ParsedURI(llvm::StringRef URI);
+
+  // If input is "x:/foo%2Fbar", Path will be "/foo/bar" and PathSegments will
+  // be ["", "foo%2Fbar"].
+  std::string Scheme, Authority, Path, Query, Fragment;
+  std::vector<std::string> PathSegments;
+};
+
 class memodb_ref {
 private:
   std::string id_;

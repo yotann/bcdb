@@ -6,6 +6,56 @@
 #include <llvm/Support/raw_os_ostream.h>
 #include <sstream>
 
+ParsedURI::ParsedURI(llvm::StringRef URI) {
+  llvm::StringRef AuthorityRef, PathRef, QueryRef, FragmentRef;
+
+  if (URI.contains(':'))
+    std::tie(Scheme, URI) = URI.split(':');
+  if (URI.startswith("//")) {
+    size_t i = URI.find_first_of("/?#", 2);
+    if (i == llvm::StringRef::npos) {
+      AuthorityRef = URI.substr(2);
+      URI = "";
+    } else {
+      AuthorityRef = URI.substr(2, i - 2);
+      URI = URI.substr(i);
+    }
+  }
+  std::tie(URI, FragmentRef) = URI.split('#');
+  std::tie(PathRef, QueryRef) = URI.split('?');
+
+  auto percentDecode = [](llvm::StringRef Str) -> std::string {
+    if (!Str.contains('%'))
+      return Str.str();
+    std::string Result;
+    while (!Str.empty()) {
+      size_t i = Str.find('%');
+      Result.append(Str.take_front(i));
+      Str = Str.substr(i);
+      if (Str.empty())
+        break;
+      unsigned Code;
+      if (Str.size() >= 3 && !Str.substr(1, 2).getAsInteger(16, Code)) {
+        Result.push_back((char)Code);
+        Str = Str.substr(3);
+      } else {
+        llvm::report_fatal_error("invalid percent encoding in URI");
+      }
+    }
+    return Result;
+  };
+
+  Authority = percentDecode(AuthorityRef);
+  Path = percentDecode(PathRef);
+  Query = percentDecode(QueryRef);
+  Fragment = percentDecode(FragmentRef);
+
+  llvm::SmallVector<llvm::StringRef, 8> Segments;
+  PathRef.split(Segments, '/');
+  for (const auto &Segment : Segments)
+    PathSegments.emplace_back(percentDecode(Segment));
+}
+
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
                                           bool create_if_missing) {
   if (uri.startswith("sqlite:")) {

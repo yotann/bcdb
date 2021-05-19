@@ -68,36 +68,6 @@ static Hash calculateHash(const llvm::ArrayRef<uint8_t> &Bytes) {
 }
 
 namespace {
-struct ParsedURI {
-  ParsedURI(llvm::StringRef URI);
-
-  llvm::StringRef Scheme, Authority, Path, Query, Fragment;
-};
-} // end anonymous namespace
-
-ParsedURI::ParsedURI(llvm::StringRef URI) {
-  std::tie(Scheme, URI) = URI.split(':');
-  if (URI.empty())
-    std::swap(Scheme, URI);
-  if (URI.startswith("//")) {
-    size_t i = URI.find_first_of("/?#", 2);
-    if (i == llvm::StringRef::npos) {
-      Authority = URI;
-      URI = "";
-    } else {
-      Authority = URI.substr(2, i);
-      URI = URI.substr(i);
-    }
-  }
-  std::tie(URI, Fragment) = URI.split('#');
-  std::tie(Path, Query) = URI.split('?');
-
-  if (Authority.contains('%') || Path.contains('%') || Query.contains('%') ||
-      Fragment.contains('%'))
-    llvm::report_fatal_error("Percent-encoding in URIs is not supported yet");
-}
-
-namespace {
 class LevelDBMemo : public memodb_db {
   std::unique_ptr<const leveldb::FilterPolicy> FilterPolicy;
   std::unique_ptr<leveldb::DB> DB;
@@ -294,7 +264,7 @@ void LevelDBMemo::open(llvm::StringRef uri, bool create_if_missing) {
   Options.block_size = 16 * 1024;
   Options.filter_policy = leveldb::NewBloomFilterPolicy(10);
   leveldb::DB *TmpDB;
-  checkStatus(leveldb::DB::Open(Options, Parsed.Path.str(), &TmpDB));
+  checkStatus(leveldb::DB::Open(Options, Parsed.Path, &TmpDB));
   DB.reset(TmpDB);
 
   leveldb::ReadOptions ReadOptions;
