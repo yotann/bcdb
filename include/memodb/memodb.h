@@ -11,7 +11,10 @@
 #include <vector>
 
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace llvm {
 class raw_ostream;
@@ -36,6 +39,52 @@ public:
 
 std::ostream &operator<<(std::ostream &os, const memodb_ref &ref);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_ref &ref);
+
+struct memodb_head {
+  std::string Name;
+
+  explicit memodb_head(const char *Name) : Name(Name) {}
+  explicit memodb_head(std::string &&Name) : Name(Name) {}
+  explicit memodb_head(llvm::StringRef Name) : Name(Name) {}
+};
+
+std::ostream &operator<<(std::ostream &os, const memodb_head &head);
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_head &head);
+
+struct memodb_call {
+  std::string Name;
+  std::vector<memodb_ref> Args;
+
+  memodb_call(llvm::StringRef Name, llvm::ArrayRef<memodb_ref> Args)
+      : Name(Name), Args(Args) {}
+};
+
+std::ostream &operator<<(std::ostream &os, const memodb_call &call);
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call);
+
+struct memodb_name : public std::variant<memodb_ref, memodb_head, memodb_call> {
+  typedef std::variant<memodb_ref, memodb_head, memodb_call> BaseType;
+
+  constexpr memodb_name(const memodb_ref &Ref) : variant(Ref) {}
+  constexpr memodb_name(const memodb_head &Head) : variant(Head) {}
+  constexpr memodb_name(const memodb_call &Call) : variant(Call) {}
+  constexpr memodb_name(memodb_ref &&Ref) : variant(Ref) {}
+  constexpr memodb_name(memodb_head &&Head) : variant(Head) {}
+  constexpr memodb_name(memodb_call &&Call) : variant(Call) {}
+
+  template <class Visitor> constexpr void visit(Visitor &&vis) {
+    BaseType &Base = *this;
+    return std::visit(vis, Base);
+  }
+
+  template <class Visitor> constexpr void visit(Visitor &&vis) const {
+    const BaseType &Base = *this;
+    return std::visit(vis, Base);
+  }
+};
+
+std::ostream &operator<<(std::ostream &os, const memodb_name &name);
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_name &name);
 
 class memodb_value {
 public:
@@ -258,27 +307,45 @@ public:
 std::ostream &operator<<(std::ostream &os, const memodb_value &value);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_value &value);
 
-using memodb_path = std::vector<memodb_value>;
+using memodb_path = std::pair<memodb_name, std::vector<memodb_value>>;
 
 class memodb_db {
 public:
   virtual ~memodb_db() {}
 
-  virtual memodb_value get(const memodb_ref &ref) = 0;
+  virtual llvm::Optional<memodb_value> getOptional(const memodb_name &name) = 0;
   virtual memodb_ref put(const memodb_value &value) = 0;
-  virtual std::vector<memodb_ref> list_refs_using(const memodb_ref &ref) = 0;
-
-  virtual std::vector<std::string> list_heads() = 0;
-  virtual std::vector<std::string> list_heads_using(const memodb_ref &ref) = 0;
-  virtual memodb_ref head_get(llvm::StringRef name) = 0;
-  virtual void head_set(llvm::StringRef name, const memodb_ref &ref) = 0;
-  virtual void head_delete(llvm::StringRef name) = 0;
-
-  virtual memodb_ref call_get(llvm::StringRef name,
-                              llvm::ArrayRef<memodb_ref> args) = 0;
-  virtual void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
-                        const memodb_ref &result) = 0;
+  virtual void set(const memodb_name &Name, const memodb_ref &ref) = 0;
+  virtual std::vector<memodb_name> list_names_using(const memodb_ref &ref) = 0;
+  virtual std::vector<memodb_head> list_heads() = 0;
+  virtual void head_delete(const memodb_head &Head) = 0;
   virtual void call_invalidate(llvm::StringRef name) = 0;
+
+  virtual bool has(const memodb_name &name) {
+    return getOptional(name).hasValue();
+  }
+
+  memodb_value get(const memodb_name &name) { return *getOptional(name); }
+
+  memodb_ref head_get(llvm::StringRef name) {
+    return get(memodb_head(name)).as_ref();
+  }
+
+  void head_set(llvm::StringRef name, const memodb_ref &ref) {
+    set(memodb_head(name), ref);
+  }
+
+  memodb_ref call_get(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args) {
+    auto Value = getOptional(memodb_call(name, args));
+    if (!Value)
+      return memodb_ref();
+    return Value->as_ref();
+  }
+
+  void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
+                const memodb_ref &result) {
+    set(memodb_call(name, args), result);
+  }
 
   virtual std::vector<memodb_path> list_paths_to(const memodb_ref &ref);
 

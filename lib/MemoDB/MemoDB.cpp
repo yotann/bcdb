@@ -3,6 +3,7 @@
 #include "memodb_internal.h"
 
 #include <llvm/Support/ErrorHandling.h>
+#include <llvm/Support/raw_os_ostream.h>
 #include <sstream>
 
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
@@ -22,6 +23,45 @@ std::ostream &operator<<(std::ostream &os, const memodb_ref &ref) {
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_ref &ref) {
   return os << llvm::StringRef(ref);
+}
+
+std::ostream &operator<<(std::ostream &os, const memodb_head &head) {
+  return os << head.Name;
+}
+
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_head &head) {
+  return os << head.Name;
+}
+
+std::ostream &operator<<(std::ostream &os, const memodb_call &call) {
+  llvm::raw_os_ostream(os) << call;
+  return os;
+}
+
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call) {
+  os << call.Name << "(";
+  bool first = true;
+  for (const memodb_ref &Arg : call.Args) {
+    if (!first)
+      os << ", ";
+    first = false;
+    os << Arg;
+  }
+  return os << ")";
+}
+
+std::ostream &operator<<(std::ostream &os, const memodb_name &name) {
+  llvm::raw_os_ostream(os) << name;
+  return os;
+}
+
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_name &name) {
+  if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
+    os << "heads[" << memodb_value(Head->Name) << "]";
+  } else {
+    name.visit([&](auto X) { os << X; });
+  }
+  return os;
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
@@ -410,53 +450,54 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
 }
 
 std::vector<memodb_path> memodb_db::list_paths_to(const memodb_ref &ref) {
-  auto list_paths_within =
-      [](const memodb_value &value,
-         const memodb_ref &ref) -> std::vector<memodb_path> {
-    std::vector<memodb_path> result;
-    memodb_path cur_path;
+  auto listPathsWithin =
+      [](const memodb_value &Value,
+         const memodb_ref &Ref) -> std::vector<std::vector<memodb_value>> {
+    std::vector<std::vector<memodb_value>> Result;
+    std::vector<memodb_value> CurPath;
     std::function<void(const memodb_value &)> recurse =
-        [&](const memodb_value &value) {
-          if (value.type() == memodb_value::REF) {
-            if (value.as_ref() == ref)
-              result.push_back(cur_path);
-          } else if (value.type() == memodb_value::ARRAY) {
-            for (size_t i = 0; i < value.array_items().size(); i++) {
-              cur_path.push_back(i);
-              recurse(value[i]);
-              cur_path.pop_back();
+        [&](const memodb_value &Value) {
+          if (Value.type() == memodb_value::REF) {
+            if (Value.as_ref() == Ref)
+              Result.push_back(CurPath);
+          } else if (Value.type() == memodb_value::ARRAY) {
+            for (size_t i = 0; i < Value.array_items().size(); i++) {
+              CurPath.push_back(i);
+              recurse(Value[i]);
+              CurPath.pop_back();
             }
-          } else if (value.type() == memodb_value::MAP) {
-            for (const auto &item : value.map_items()) {
-              cur_path.push_back(item.first);
+          } else if (Value.type() == memodb_value::MAP) {
+            for (const auto &item : Value.map_items()) {
+              CurPath.push_back(item.first);
               recurse(item.second);
-              cur_path.pop_back();
+              CurPath.pop_back();
             }
           }
         };
-    recurse(value);
-    return result;
+    recurse(Value);
+    return Result;
   };
 
-  std::vector<memodb_path> result;
-  memodb_path backwards_path;
-  std::function<void(const memodb_ref &)> recurse = [&](const memodb_ref &ref) {
-    for (const auto &head : list_heads_using(ref)) {
-      backwards_path.push_back(memodb_value::string(head));
-      result.emplace_back(backwards_path.rbegin(), backwards_path.rend());
-      backwards_path.pop_back();
-    }
-    for (const auto &parent : list_refs_using(ref)) {
-      const memodb_value value = get(parent);
-      for (const memodb_path &subpath : list_paths_within(value, ref)) {
-        backwards_path.insert(backwards_path.end(), subpath.rbegin(),
-                              subpath.rend());
-        recurse(parent);
-        backwards_path.erase(backwards_path.end() - subpath.size(),
-                             backwards_path.end());
+  std::vector<memodb_path> Result;
+  std::vector<memodb_value> BackwardsPath;
+  std::function<void(const memodb_ref &)> recurse = [&](const memodb_ref &Ref) {
+    for (const auto &Parent : list_names_using(Ref)) {
+      if (const memodb_ref *ParentRef = std::get_if<memodb_ref>(&Parent)) {
+        const memodb_value Value = get(*ParentRef);
+        for (const auto &Subpath : listPathsWithin(Value, Ref)) {
+          BackwardsPath.insert(BackwardsPath.end(), Subpath.rbegin(),
+                               Subpath.rend());
+          recurse(*ParentRef);
+          BackwardsPath.erase(BackwardsPath.end() - Subpath.size(),
+                              BackwardsPath.end());
+        }
+      } else {
+        Result.emplace_back(Parent,
+                            std::vector<memodb_value>(BackwardsPath.rbegin(),
+                                                      BackwardsPath.rend()));
       }
     }
   };
   recurse(ref);
-  return result;
+  return Result;
 }

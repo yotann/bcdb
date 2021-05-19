@@ -123,20 +123,14 @@ public:
   void open(llvm::StringRef uri, bool create_if_missing);
   ~LevelDBMemo() override;
 
-  memodb_value get(const memodb_ref &ref) override;
+  llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
   memodb_ref put(const memodb_value &value) override;
-  std::vector<memodb_ref> list_refs_using(const memodb_ref &ref) override;
+  void set(const memodb_name &Name, const memodb_ref &ref) override;
+  std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
 
-  std::vector<std::string> list_heads() override;
-  std::vector<std::string> list_heads_using(const memodb_ref &ref) override;
-  memodb_ref head_get(llvm::StringRef name) override;
-  void head_set(llvm::StringRef name, const memodb_ref &ref) override;
-  void head_delete(llvm::StringRef name) override;
+  std::vector<memodb_head> list_heads() override;
+  void head_delete(const memodb_head &Head) override;
 
-  memodb_ref call_get(llvm::StringRef name,
-                      llvm::ArrayRef<memodb_ref> args) override;
-  void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
-                const memodb_ref &result) override;
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
@@ -320,12 +314,27 @@ void LevelDBMemo::open(llvm::StringRef uri, bool create_if_missing) {
 
 LevelDBMemo::~LevelDBMemo() {}
 
-memodb_value LevelDBMemo::get(const memodb_ref &ref) {
-  std::string Key = makeKey(refToHash(ref), KEY_CBOR);
-  auto Value = getCBORByKey(Key);
-  if (!Value)
-    llvm::report_fatal_error("Missing key in database");
-  return *Value;
+llvm::Optional<memodb_value> LevelDBMemo::getOptional(const memodb_name &name) {
+  if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
+    std::string Key = makeKey(refToHash(*Ref), KEY_CBOR);
+    return getCBORByKey(Key);
+  } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
+    std::string Key =
+        makeKey(HASH_NONE, KEY_HEAD,
+                leveldb::Slice(Head->Name.data(), Head->Name.size()));
+    return getCBORByKey(Key);
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
+    Hash NameHash = calculateHash(makeBytes(Call->Name));
+    memodb_value Value = makeCall(Call->Name, Call->Args);
+    std::vector<std::uint8_t> Buffer;
+    Value.save_cbor(Buffer);
+    Hash ArgsHash = calculateHash(Buffer);
+
+    std::string Key = makeKey(NameHash, KEY_RETURN, makeSlice(ArgsHash));
+    return getCBORByKey(Key);
+  } else {
+    llvm_unreachable("impossible memodb_name type");
+  }
 }
 
 memodb_ref LevelDBMemo::put(const memodb_value &value) {
@@ -348,8 +357,56 @@ memodb_ref LevelDBMemo::put(const memodb_value &value) {
   return hashToRef(Hash);
 }
 
-std::vector<memodb_ref> LevelDBMemo::list_refs_using(const memodb_ref &ref) {
-  std::vector<memodb_ref> Result;
+void LevelDBMemo::set(const memodb_name &Name, const memodb_ref &ref) {
+  leveldb::WriteOptions WriteOptions;
+  leveldb::WriteBatch Batch;
+  std::vector<std::uint8_t> Buffer;
+  if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+    std::string Key =
+        makeKey(HASH_NONE, KEY_HEAD,
+                leveldb::Slice(Head->Name.data(), Head->Name.size()));
+    auto OldValue = getCBORByKey(Key);
+    // XXX race condition: another thread can change the head at this point, and
+    // the ref that thread creates will be left dangling.
+
+    memodb_value value(ref);
+    value.save_cbor(Buffer);
+
+    if (OldValue)
+      deleteRefs(Batch, Key, *OldValue);
+    Batch.Put(Key, makeSlice(Buffer));
+    addRefs(Batch, Key, value);
+    WriteOptions.sync = true;
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+    // TODO: remove backwards references if we're replacing an older value.
+    Hash NameHash = calculateHash(makeBytes(Call->Name));
+
+    std::string Key =
+        makeKey(HASH_NONE, KEY_FUNC,
+                leveldb::Slice(Call->Name.data(), Call->Name.size()));
+    Batch.Put(Key, leveldb::Slice());
+
+    memodb_value Value = makeCall(Call->Name, Call->Args);
+    Value.save_cbor(Buffer);
+    Hash ArgsHash = calculateHash(Buffer);
+    Key = makeKey(NameHash, KEY_CALL, makeSlice(ArgsHash));
+    Batch.Put(Key, makeSlice(Buffer));
+    addRefs(Batch, Key, Value);
+
+    Buffer.clear();
+    Value = ref;
+    Value.save_cbor(Buffer);
+    Key = makeKey(NameHash, KEY_RETURN, makeSlice(ArgsHash));
+    Batch.Put(Key, makeSlice(Buffer));
+    addRefs(Batch, Key, Value);
+  } else {
+    llvm::report_fatal_error("can't set a memodb_ref");
+  }
+  checkStatus(DB->Write(WriteOptions, &Batch));
+}
+
+std::vector<memodb_name> LevelDBMemo::list_names_using(const memodb_ref &ref) {
+  std::vector<memodb_name> Result;
   std::string Key = makeKey(refToHash(ref), KEY_REF);
   leveldb::ReadOptions ReadOptions;
   std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
@@ -358,18 +415,26 @@ std::vector<memodb_ref> LevelDBMemo::list_refs_using(const memodb_ref &ref) {
        Iter->Next()) {
     leveldb::Slice RefKey = std::get<2>(breakKey(Iter->key()));
     auto RefBroken = breakKey(RefKey);
+    auto RefValue = getCBORByKey(RefKey);
+    // Stray refs can be left dangling, so double-check that it actually still
+    // exists.
+    if (!RefValue)
+      continue;
     if (std::get<1>(RefBroken) == KEY_CBOR) {
-      // Stray refs can be left dangling, so double-check that it actually
-      // still exists.
-      if (getCBORByKey(RefKey))
-        Result.emplace_back(hashToRef(std::get<0>(RefBroken)));
+      Result.emplace_back(hashToRef(std::get<0>(RefBroken)));
+    } else if (std::get<1>(RefBroken) == KEY_HEAD) {
+      Result.emplace_back(memodb_head(std::get<2>(RefBroken).ToString()));
+    } else if (std::get<1>(RefBroken) == KEY_CALL) {
+      // FIXME
+    } else if (std::get<1>(RefBroken) == KEY_RETURN) {
+      // FIXME
     }
   }
   return Result;
 }
 
-std::vector<std::string> LevelDBMemo::list_heads() {
-  std::vector<std::string> Result;
+std::vector<memodb_head> LevelDBMemo::list_heads() {
+  std::vector<memodb_head> Result;
   std::string Key = makeKey(HASH_NONE, KEY_HEAD);
   leveldb::ReadOptions ReadOptions;
   std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
@@ -382,57 +447,9 @@ std::vector<std::string> LevelDBMemo::list_heads() {
   return Result;
 }
 
-std::vector<std::string> LevelDBMemo::list_heads_using(const memodb_ref &ref) {
-  std::vector<std::string> Result;
-  std::string Key = makeKey(refToHash(ref), KEY_REF);
-  leveldb::ReadOptions ReadOptions;
-  std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
-  for (Iter->Seek(Key);
-       Iter->Valid() && llvm::StringRef(Iter->key().ToString()).startswith(Key);
-       Iter->Next()) {
-    leveldb::Slice RefKey = std::get<2>(breakKey(Iter->key()));
-    auto RefBroken = breakKey(RefKey);
-    if (std::get<0>(RefBroken) == HASH_NONE &&
-        std::get<1>(RefBroken) == KEY_HEAD) {
-      // Stray refs can be left dangling, so double-check that it actually
-      // still exists.
-      if (getCBORByKey(RefKey))
-        Result.emplace_back(std::get<2>(RefBroken).ToString());
-    }
-  }
-  return Result;
-}
-
-memodb_ref LevelDBMemo::head_get(llvm::StringRef name) {
-  std::string Key =
-      makeKey(HASH_NONE, KEY_HEAD, leveldb::Slice(name.data(), name.size()));
-  return getCBORByKey(Key)->as_ref();
-}
-
-void LevelDBMemo::head_set(llvm::StringRef name, const memodb_ref &ref) {
-  std::string Key =
-      makeKey(HASH_NONE, KEY_HEAD, leveldb::Slice(name.data(), name.size()));
-  auto OldValue = getCBORByKey(Key);
-  // XXX race condition: another thread can change the head at this point, and
-  // the ref that thread creates will be left dangling.
-
-  memodb_value value(ref);
-  std::vector<std::uint8_t> Buffer;
-  value.save_cbor(Buffer);
-
-  leveldb::WriteBatch Batch;
-  if (OldValue)
-    deleteRefs(Batch, Key, *OldValue);
-  Batch.Put(Key, makeSlice(Buffer));
-  addRefs(Batch, Key, value);
-  leveldb::WriteOptions WriteOptions;
-  WriteOptions.sync = true;
-  checkStatus(DB->Write(WriteOptions, &Batch));
-}
-
-void LevelDBMemo::head_delete(llvm::StringRef name) {
-  std::string Key =
-      makeKey(HASH_NONE, KEY_HEAD, leveldb::Slice(name.data(), name.size()));
+void LevelDBMemo::head_delete(const memodb_head &Head) {
+  std::string Key = makeKey(HASH_NONE, KEY_HEAD,
+                            leveldb::Slice(Head.Name.data(), Head.Name.size()));
   auto OldValue = getCBORByKey(Key);
   // XXX race condition: another thread can change the head at this point, and
   // the ref that thread creates will be left dangling.
@@ -443,51 +460,6 @@ void LevelDBMemo::head_delete(llvm::StringRef name) {
   Batch.Delete(Key);
   leveldb::WriteOptions WriteOptions;
   WriteOptions.sync = true;
-  checkStatus(DB->Write(WriteOptions, &Batch));
-}
-
-memodb_ref LevelDBMemo::call_get(llvm::StringRef name,
-                                 llvm::ArrayRef<memodb_ref> args) {
-  Hash NameHash = calculateHash(makeBytes(name));
-  memodb_value Value = makeCall(name, args);
-  std::vector<std::uint8_t> Buffer;
-  Value.save_cbor(Buffer);
-  Hash ArgsHash = calculateHash(Buffer);
-
-  std::string Key = makeKey(NameHash, KEY_RETURN, makeSlice(ArgsHash));
-  auto Result = getCBORByKey(Key);
-  if (!Result)
-    return memodb_ref{};
-  return Result->as_ref();
-}
-
-void LevelDBMemo::call_set(llvm::StringRef name,
-                           llvm::ArrayRef<memodb_ref> args,
-                           const memodb_ref &result) {
-  // TODO: remove backwards references if we're replacing an older value.
-  Hash NameHash = calculateHash(makeBytes(name));
-
-  leveldb::WriteBatch Batch;
-  std::string Key =
-      makeKey(HASH_NONE, KEY_FUNC, leveldb::Slice(name.data(), name.size()));
-  Batch.Put(Key, leveldb::Slice());
-
-  memodb_value Value = makeCall(name, args);
-  std::vector<std::uint8_t> Buffer;
-  Value.save_cbor(Buffer);
-  Hash ArgsHash = calculateHash(Buffer);
-  Key = makeKey(NameHash, KEY_CALL, makeSlice(ArgsHash));
-  Batch.Put(Key, makeSlice(Buffer));
-  addRefs(Batch, Key, Value);
-
-  Buffer.clear();
-  Value = result;
-  Value.save_cbor(Buffer);
-  Key = makeKey(NameHash, KEY_RETURN, makeSlice(ArgsHash));
-  Batch.Put(Key, makeSlice(Buffer));
-  addRefs(Batch, Key, Value);
-
-  leveldb::WriteOptions WriteOptions;
   checkStatus(DB->Write(WriteOptions, &Batch));
 }
 

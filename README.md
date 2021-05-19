@@ -49,6 +49,7 @@ cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
 
 You will need the following dependencies:
 
+- C++ compiler with C++17 support.
 - [CMake](https://cmake.org/), a recent version.
 - [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [Libsodium](https://libsodium.org/)

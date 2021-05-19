@@ -56,7 +56,10 @@ BCDB::BCDB(memodb_db &db) : Context(new LLVMContext()), db(&db) {}
 BCDB::~BCDB() {}
 
 Expected<std::vector<std::string>> BCDB::ListModules() {
-  return db->list_heads();
+  std::vector<std::string> Result;
+  for (memodb_head &Head : db->list_heads())
+    Result.emplace_back(std::move(Head.Name));
+  return Result;
 }
 
 Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
@@ -89,7 +92,7 @@ Expected<std::vector<std::string>> BCDB::ListAllFunctions() {
 }
 
 Error BCDB::Delete(llvm::StringRef Name) {
-  db->head_delete(Name);
+  db->head_delete(memodb_head(Name));
   return Error::success();
 }
 

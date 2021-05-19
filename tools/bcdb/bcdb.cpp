@@ -423,8 +423,8 @@ static int Refs() {
 
   memodb_ref ref(RefsValue);
   for (const auto &path : db->get_db().list_paths_to(ref)) {
-    outs() << "heads";
-    for (const auto &item : path) {
+    outs() << path.first;
+    for (const auto &item : path.second) {
       outs() << "[" << item << "]";
     }
     outs() << "\n";

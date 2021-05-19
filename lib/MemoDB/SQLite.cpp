@@ -125,20 +125,14 @@ public:
   void open(const char *uri, bool create_if_missing);
   ~sqlite_db() override;
 
-  memodb_value get(const memodb_ref &ref) override;
+  llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
   memodb_ref put(const memodb_value &value) override;
-  std::vector<memodb_ref> list_refs_using(const memodb_ref &ref) override;
+  void set(const memodb_name &Name, const memodb_ref &ref) override;
+  std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
 
-  std::vector<std::string> list_heads() override;
-  std::vector<std::string> list_heads_using(const memodb_ref &ref) override;
-  memodb_ref head_get(llvm::StringRef name) override;
-  void head_set(llvm::StringRef name, const memodb_ref &ref) override;
-  void head_delete(llvm::StringRef name) override;
+  std::vector<memodb_head> list_heads() override;
+  void head_delete(const memodb_head &Head) override;
 
-  memodb_ref call_get(llvm::StringRef name,
-                      llvm::ArrayRef<memodb_ref> args) override;
-  void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
-                const memodb_ref &result) override;
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
@@ -569,6 +563,58 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
   return id_to_ref(new_id);
 }
 
+void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
+  sqlite3 *db = get_db();
+  if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+    Stmt insert_stmt(db,
+                     "INSERT OR REPLACE INTO head(name, vid) VALUES(?1,?2)");
+    insert_stmt.bind_text(1, Head->Name);
+    insert_stmt.bind_int(2, ref_to_id(ref));
+    if (insert_stmt.step() != SQLITE_DONE)
+      fatal_error();
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+    auto fid = get_fid(Call->Name, /* create_if_missing */ true);
+
+    Transaction transaction(*this);
+
+    Stmt select_stmt(
+        db,
+        "SELECT cid FROM call WHERE fid = ?1 AND parent IS ?2 AND arg = ?3");
+    Stmt insert_stmt(db, "INSERT INTO call(fid, parent, arg) VALUES(?1,?2,?3)");
+    select_stmt.bind_int(1, fid);
+    insert_stmt.bind_int(1, fid);
+    sqlite3_int64 parent = -1;
+    for (const memodb_ref &arg : Call->Args) {
+      select_stmt.reset();
+      insert_stmt.reset();
+      if (parent != -1) {
+        select_stmt.bind_int(2, parent);
+        insert_stmt.bind_int(2, parent);
+      }
+      select_stmt.bind_int(3, ref_to_id(arg));
+      insert_stmt.bind_int(3, ref_to_id(arg));
+      if (select_stmt.step() == SQLITE_ROW) {
+        parent = sqlite3_column_int64(select_stmt.stmt, 0);
+        assert(parent);
+      } else {
+        if (insert_stmt.step() != SQLITE_DONE)
+          fatal_error();
+        parent = sqlite3_last_insert_rowid(db);
+        assert(parent);
+      }
+    }
+
+    Stmt update_stmt(db, "UPDATE call SET result = ?1 WHERE cid = ?2");
+    update_stmt.bind_int(1, ref_to_id(ref));
+    update_stmt.bind_int(2, parent);
+    if (update_stmt.step() != SQLITE_DONE)
+      fatal_error();
+    transaction.commit();
+  } else {
+    llvm::report_fatal_error("can't set a memodb_ref");
+  }
+}
+
 void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   sqlite3 *db = get_db();
   if (value.type() == memodb_value::REF) {
@@ -589,26 +635,62 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   }
 }
 
-memodb_value sqlite_db::get(const memodb_ref &ref) {
+llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
   sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
-  stmt.bind_int(1, ref_to_id(ref));
-  int rc = stmt.step();
-  if (rc != SQLITE_ROW)
-    fatal_error();
+  if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
+    Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
+    stmt.bind_int(1, ref_to_id(*Ref));
+    int rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      return llvm::None;
+    if (rc != SQLITE_ROW)
+      fatal_error();
 
-  int value_type = sqlite3_column_int64(stmt.stmt, 1);
-  const char *data =
-      reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
-  int size = sqlite3_column_bytes(stmt.stmt, 0);
-  switch (value_type) {
-  case BYTES_BLOB:
-    return memodb_value::bytes(llvm::StringRef(data, size));
-  case CBOR_BLOB:
-    return memodb_value::load_cbor(llvm::ArrayRef<std::uint8_t>(
-        reinterpret_cast<const std::uint8_t *>(data), size));
-  default:
-    llvm_unreachable("impossible blob type");
+    int value_type = sqlite3_column_int64(stmt.stmt, 1);
+    const char *data =
+        reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
+    int size = sqlite3_column_bytes(stmt.stmt, 0);
+    switch (value_type) {
+    case BYTES_BLOB:
+      return memodb_value::bytes(llvm::StringRef(data, size));
+    case CBOR_BLOB:
+      return memodb_value::load_cbor(llvm::ArrayRef<std::uint8_t>(
+          reinterpret_cast<const std::uint8_t *>(data), size));
+    default:
+      llvm_unreachable("impossible blob type");
+    }
+  } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
+    Stmt stmt(db, "SELECT vid FROM head WHERE name = ?1");
+    stmt.bind_text(1, Head->Name);
+    int rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      return llvm::None;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    return memodb_value(id_to_ref(sqlite3_column_int64(stmt.stmt, 0)));
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
+    auto fid = get_fid(Call->Name);
+    if (fid == -1)
+      return llvm::None;
+
+    Stmt stmt(db,
+              "SELECT cid, result FROM call WHERE fid = ?1 AND parent IS ?2 "
+              "AND arg = ?3");
+    stmt.bind_int(1, fid);
+    sqlite3_int64 parent = -1;
+    for (const memodb_ref &arg : Call->Args) {
+      stmt.reset();
+      if (parent != -1)
+        stmt.bind_int(2, parent);
+      stmt.bind_int(3, ref_to_id(arg));
+      if (stmt.step() != SQLITE_ROW)
+        return llvm::None;
+      parent = sqlite3_column_int64(stmt.stmt, 0);
+    }
+
+    return memodb_value(id_to_ref(sqlite3_column_int64(stmt.stmt, 1)));
+  } else {
+    llvm_unreachable("impossible memodb_name type");
   }
 }
 
@@ -664,25 +746,45 @@ memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
   return result;
 }
 
-std::vector<memodb_ref> sqlite_db::list_refs_using(const memodb_ref &ref) {
+std::vector<memodb_name> sqlite_db::list_names_using(const memodb_ref &ref) {
   sqlite3 *db = get_db();
-  std::vector<memodb_ref> result;
-  Stmt stmt(db, "SELECT src FROM refs WHERE dest = ?1");
-  stmt.bind_int(1, ref_to_id(ref));
-  while (true) {
-    auto rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      break;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    result.push_back(id_to_ref(sqlite3_column_int64(stmt.stmt, 0)));
+  std::vector<memodb_name> Result;
+
+  {
+    Stmt stmt(db, "SELECT src FROM refs WHERE dest = ?1");
+    stmt.bind_int(1, ref_to_id(ref));
+    while (true) {
+      auto rc = stmt.step();
+      if (rc == SQLITE_DONE)
+        break;
+      if (rc != SQLITE_ROW)
+        fatal_error();
+      Result.push_back(id_to_ref(sqlite3_column_int64(stmt.stmt, 0)));
+    }
   }
-  return result;
+
+  {
+    Stmt stmt(db, "SELECT name FROM head WHERE vid = ?1");
+    stmt.bind_int(1, ref_to_id(ref));
+    while (true) {
+      auto rc = stmt.step();
+      if (rc == SQLITE_DONE)
+        break;
+      if (rc != SQLITE_ROW)
+        fatal_error();
+      Result.emplace_back(memodb_head(
+          reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0))));
+    }
+  }
+
+  // FIXME: check call arguments and return values
+
+  return Result;
 }
 
-std::vector<std::string> sqlite_db::list_heads() {
+std::vector<memodb_head> sqlite_db::list_heads() {
   sqlite3 *db = get_db();
-  std::vector<std::string> result;
+  std::vector<memodb_head> result;
   Stmt stmt(db, "SELECT name FROM head");
   while (true) {
     auto rc = stmt.step();
@@ -696,45 +798,10 @@ std::vector<std::string> sqlite_db::list_heads() {
   return result;
 }
 
-std::vector<std::string> sqlite_db::list_heads_using(const memodb_ref &ref) {
-  sqlite3 *db = get_db();
-  std::vector<std::string> result;
-  Stmt stmt(db, "SELECT name FROM head WHERE vid = ?1");
-  stmt.bind_int(1, ref_to_id(ref));
-  while (true) {
-    auto rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      break;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    result.emplace_back(
-        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
-  }
-  return result;
-}
-
-memodb_ref sqlite_db::head_get(llvm::StringRef name) {
-  sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT vid FROM head WHERE name = ?1");
-  stmt.bind_text(1, name);
-  if (stmt.step() != SQLITE_ROW)
-    return {};
-  return id_to_ref(sqlite3_column_int64(stmt.stmt, 0));
-}
-
-void sqlite_db::head_set(llvm::StringRef name, const memodb_ref &value) {
-  sqlite3 *db = get_db();
-  Stmt insert_stmt(db, "INSERT OR REPLACE INTO head(name, vid) VALUES(?1,?2)");
-  insert_stmt.bind_text(1, name);
-  insert_stmt.bind_int(2, ref_to_id(value));
-  if (insert_stmt.step() != SQLITE_DONE)
-    fatal_error();
-}
-
-void sqlite_db::head_delete(llvm::StringRef name) {
+void sqlite_db::head_delete(const memodb_head &Head) {
   sqlite3 *db = get_db();
   Stmt delete_stmt(db, "DELETE FROM head WHERE name = ?1");
-  delete_stmt.bind_text(1, name);
+  delete_stmt.bind_text(1, Head.Name);
   if (delete_stmt.step() != SQLITE_DONE)
     fatal_error();
 }
@@ -761,71 +828,6 @@ sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
   assert(newid);
   transaction.commit();
   return newid;
-}
-
-memodb_ref sqlite_db::call_get(llvm::StringRef name,
-                               llvm::ArrayRef<memodb_ref> args) {
-  sqlite3 *db = get_db();
-  auto fid = get_fid(name);
-  if (fid == -1)
-    return {};
-
-  Stmt stmt(db, "SELECT cid, result FROM call WHERE fid = ?1 AND parent IS ?2 "
-                "AND arg = ?3");
-  stmt.bind_int(1, fid);
-  sqlite3_int64 parent = -1;
-  for (const memodb_ref &arg : args) {
-    stmt.reset();
-    if (parent != -1)
-      stmt.bind_int(2, parent);
-    stmt.bind_int(3, ref_to_id(arg));
-    if (stmt.step() != SQLITE_ROW)
-      return {};
-    parent = sqlite3_column_int64(stmt.stmt, 0);
-  }
-
-  return id_to_ref(sqlite3_column_int64(stmt.stmt, 1));
-}
-
-void sqlite_db::call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
-                         const memodb_ref &result) {
-  sqlite3 *db = get_db();
-  auto fid = get_fid(name, /* create_if_missing */ true);
-
-  Transaction transaction(*this);
-
-  Stmt select_stmt(
-      db, "SELECT cid FROM call WHERE fid = ?1 AND parent IS ?2 AND arg = ?3");
-  Stmt insert_stmt(db, "INSERT INTO call(fid, parent, arg) VALUES(?1,?2,?3)");
-  select_stmt.bind_int(1, fid);
-  insert_stmt.bind_int(1, fid);
-  sqlite3_int64 parent = -1;
-  for (const memodb_ref &arg : args) {
-    select_stmt.reset();
-    insert_stmt.reset();
-    if (parent != -1) {
-      select_stmt.bind_int(2, parent);
-      insert_stmt.bind_int(2, parent);
-    }
-    select_stmt.bind_int(3, ref_to_id(arg));
-    insert_stmt.bind_int(3, ref_to_id(arg));
-    if (select_stmt.step() == SQLITE_ROW) {
-      parent = sqlite3_column_int64(select_stmt.stmt, 0);
-      assert(parent);
-    } else {
-      if (insert_stmt.step() != SQLITE_DONE)
-        fatal_error();
-      parent = sqlite3_last_insert_rowid(db);
-      assert(parent);
-    }
-  }
-
-  Stmt update_stmt(db, "UPDATE call SET result = ?1 WHERE cid = ?2");
-  update_stmt.bind_int(1, ref_to_id(result));
-  update_stmt.bind_int(2, parent);
-  if (update_stmt.step() != SQLITE_DONE)
-    fatal_error();
-  transaction.commit();
 }
 
 void sqlite_db::call_invalidate(llvm::StringRef name) {
