@@ -117,6 +117,9 @@ class sqlite_db : public memodb_db {
 
   void add_refs_from(sqlite3_int64 id, const memodb_value &value);
 
+  memodb_call identifyCall(sqlite3_int64 CID);
+  void identifyCalls(std::vector<memodb_call> &Result, sqlite3_int64 CID);
+
   void upgrade_schema();
 
   friend class Transaction;
@@ -129,7 +132,8 @@ public:
   memodb_ref put(const memodb_value &value) override;
   void set(const memodb_name &Name, const memodb_ref &ref) override;
   std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
-
+  std::vector<memodb_call> list_calls(llvm::StringRef Func) override;
+  std::vector<std::string> list_funcs() override;
   std::vector<memodb_head> list_heads() override;
   void head_delete(const memodb_head &Head) override;
 
@@ -635,6 +639,67 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   }
 }
 
+memodb_call sqlite_db::identifyCall(sqlite3_int64 CID) {
+  sqlite3_int64 FID;
+  std::vector<memodb_ref> ArgsReversed;
+  sqlite3 *db = get_db();
+  while (true) {
+    Stmt stmt(db, "SELECT fid, parent, arg FROM call WHERE cid = ?");
+    stmt.bind_int(1, CID);
+    int rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    FID = sqlite3_column_int64(stmt.stmt, 0);
+    ArgsReversed.emplace_back(id_to_ref(sqlite3_column_int64(stmt.stmt, 2)));
+    if (sqlite3_column_type(stmt.stmt, 1) == SQLITE_NULL)
+      break;
+    CID = sqlite3_column_int64(stmt.stmt, 1);
+  }
+
+  std::string Name;
+  {
+    Stmt stmt(db, "SELECT name FROM func WHERE fid = ?");
+    stmt.bind_int(1, FID);
+    int rc = stmt.step();
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    Name = reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0));
+  }
+
+  memodb_call Call(Name, {});
+  Call.Args.assign(ArgsReversed.rbegin(), ArgsReversed.rend());
+  return Call;
+}
+
+void sqlite_db::identifyCalls(std::vector<memodb_call> &Result,
+                              sqlite3_int64 CID) {
+  sqlite3 *db = get_db();
+  {
+    Stmt stmt(db, "SELECT cid FROM call WHERE parent = ?");
+    stmt.bind_int(1, CID);
+    while (true) {
+      auto rc = stmt.step();
+      if (rc == SQLITE_DONE)
+        break;
+      if (rc != SQLITE_ROW)
+        fatal_error();
+      identifyCalls(Result, sqlite3_column_int64(stmt.stmt, 0));
+    }
+  }
+  {
+    Stmt stmt(db, "SELECT 1 FROM call WHERE cid = ? AND result NOT NULL");
+    stmt.bind_int(1, CID);
+    int rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      return;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    Result.emplace_back(identifyCall(CID));
+  }
+}
+
 llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
   sqlite3 *db = get_db();
   if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
@@ -777,9 +842,57 @@ std::vector<memodb_name> sqlite_db::list_names_using(const memodb_ref &ref) {
     }
   }
 
-  // FIXME: check call arguments and return values
+  std::vector<sqlite3_int64> CIDs;
+  {
+    Stmt stmt(db, "SELECT cid FROM call WHERE arg = ?1 OR result = ?1");
+    stmt.bind_int(1, ref_to_id(ref));
+    while (true) {
+      auto rc = stmt.step();
+      if (rc == SQLITE_DONE)
+        break;
+      if (rc != SQLITE_ROW)
+        fatal_error();
+      std::vector<memodb_call> Calls;
+      identifyCalls(Calls, sqlite3_column_int64(stmt.stmt, 0));
+      for (memodb_call &Call : Calls)
+        Result.emplace_back(std::move(Call));
+    }
+  }
 
   return Result;
+}
+
+std::vector<memodb_call> sqlite_db::list_calls(llvm::StringRef Func) {
+  sqlite3 *db = get_db();
+  std::vector<memodb_call> Result;
+  sqlite3_int64 FID = get_fid(Func);
+  Stmt stmt(db, "SELECT cid FROM call WHERE fid = ?");
+  stmt.bind_int(1, FID);
+  while (true) {
+    int rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    Result.emplace_back(identifyCall(sqlite3_column_int64(stmt.stmt, 0)));
+  }
+  return Result;
+}
+
+std::vector<std::string> sqlite_db::list_funcs() {
+  sqlite3 *db = get_db();
+  std::vector<std::string> result;
+  Stmt stmt(db, "SELECT name FROM func");
+  while (true) {
+    auto rc = stmt.step();
+    if (rc == SQLITE_DONE)
+      break;
+    if (rc != SQLITE_ROW)
+      fatal_error();
+    result.emplace_back(
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
+  }
+  return result;
 }
 
 std::vector<memodb_head> sqlite_db::list_heads() {

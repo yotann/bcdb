@@ -22,6 +22,10 @@ using namespace llvm;
 cl::OptionCategory MemoDBCategory("MemoDB options");
 
 static cl::SubCommand GetCommand("get", "Get a value");
+static cl::SubCommand ListCallsCommand("list-calls",
+                                       "List all cached calls of a function");
+static cl::SubCommand ListFuncsCommand("list-funcs",
+                                       "List all cached functions");
 static cl::SubCommand ListHeadsCommand("list-heads", "List all heads");
 static cl::SubCommand
     PutCommand("put", "Put a value, or find ID of an existing value");
@@ -149,6 +153,34 @@ static int Get() {
   return 0;
 }
 
+// memodb list-calls
+
+static cl::opt<std::string> FuncName(cl::Positional, cl::Required,
+                                     cl::desc("<function name>"),
+                                     cl::value_desc("func"),
+                                     cl::cat(MemoDBCategory),
+                                     cl::sub(ListCallsCommand));
+
+static int ListCalls() {
+  auto Db = memodb_db_open(GetUri());
+  for (const memodb_call &Call : Db->list_calls(FuncName)) {
+    outs() << "call:" << Call.Name;
+    for (const auto &Arg : Call.Args)
+      outs() << "/" << Arg;
+    outs() << "\n";
+  }
+  return 0;
+}
+
+// memodb list-funcs
+
+static int ListFuncs() {
+  auto Db = memodb_db_open(GetUri());
+  for (llvm::StringRef Func : Db->list_funcs())
+    outs() << Func << "\n";
+  return 0;
+}
+
 // memodb list-heads
 
 static int ListHeads() {
@@ -216,6 +248,10 @@ int main(int argc, char **argv) {
 
   if (GetCommand) {
     return Get();
+  } else if (ListCallsCommand) {
+    return ListCalls();
+  } else if (ListFuncsCommand) {
+    return ListFuncs();
   } else if (ListHeadsCommand) {
     return ListHeads();
   } else if (PutCommand) {

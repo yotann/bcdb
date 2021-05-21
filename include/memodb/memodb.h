@@ -327,6 +327,8 @@ public:
   virtual memodb_ref put(const memodb_value &value) = 0;
   virtual void set(const memodb_name &Name, const memodb_ref &ref) = 0;
   virtual std::vector<memodb_name> list_names_using(const memodb_ref &ref) = 0;
+  virtual std::vector<memodb_call> list_calls(llvm::StringRef Func) = 0;
+  virtual std::vector<std::string> list_funcs() = 0;
   virtual std::vector<memodb_head> list_heads() = 0;
   virtual void head_delete(const memodb_head &Head) = 0;
   virtual void call_invalidate(llvm::StringRef name) = 0;

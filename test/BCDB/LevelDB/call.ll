@@ -7,6 +7,12 @@
 ; RUN: bcdb cache -uri leveldb:%t -result $(bcdb list-function-ids -uri leveldb:%t) myfunc $(bcdb list-function-ids -uri leveldb:%t)
 ; RUN: bcdb evaluate -uri leveldb:%t myfunc $(bcdb list-function-ids -uri leveldb:%t)
 
+; RUN: memodb refs-to -uri leveldb:%t id:$(bcdb list-function-ids -uri leveldb:%t) | FileCheck --check-prefix=REFS %s
+; REFS: call:myfunc/{{[-A-Za-z0-9_=]+$}}
+
+; RUN: memodb list-calls -uri leveldb:%t myfunc | FileCheck --check-prefix=CALLS %s
+; CALLS: call:myfunc/{{[-A-Za-z0-9_=]+$}}
+
 ; RUN: bcdb invalidate -uri leveldb:%t myfunc
 ; RUN: not bcdb evaluate -uri leveldb:%t myfunc $(bcdb list-function-ids -uri leveldb:%t)
 
