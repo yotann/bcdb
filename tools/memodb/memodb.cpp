@@ -32,6 +32,8 @@ static cl::SubCommand
 static cl::SubCommand RefsToCommand("refs-to",
                                     "Find names that reference a value");
 static cl::SubCommand SetCommand("set", "Set a head or a call result");
+static cl::SubCommand TransferCommand("transfer",
+                                      "Transfer data to a target database");
 
 static cl::opt<std::string> UriOrEmpty(
     "uri", cl::Optional, cl::desc("URI of the database"),
@@ -230,6 +232,89 @@ static int Set() {
   return 0;
 }
 
+// memodb transfer
+
+static cl::opt<std::string>
+    TargetDatabaseURI("target-uri", cl::Required,
+                      cl::desc("URI of the target database"),
+                      cl::cat(MemoDBCategory), cl::sub(TransferCommand));
+
+static cl::list<std::string> NamesToTransfer(cl::Positional, cl::ZeroOrMore,
+                                             cl::desc("<names to transfer>"),
+                                             cl::value_desc("names"),
+                                             cl::cat(MemoDBCategory),
+                                             cl::sub(TransferCommand));
+
+template <typename T>
+memodb_value transformRefs(const memodb_value &Value, T F) {
+  if (Value.type() == memodb_value::REF) {
+    return F(Value.as_ref());
+  } else if (Value.type() == memodb_value::ARRAY) {
+    memodb_value::array_t Result;
+    for (const memodb_value &Item : Value.array_items())
+      Result.push_back(transformRefs(Item, F));
+    return memodb_value(Result);
+  } else if (Value.type() == memodb_value::MAP) {
+    memodb_value::map_t Result;
+    for (const auto &Item : Value.map_items())
+      Result[transformRefs(Item.first, F)] = transformRefs(Item.second, F);
+    return memodb_value(Result);
+  } else {
+    return Value;
+  }
+}
+
+static int Transfer() {
+  auto SourceDb = memodb_db_open(GetUri());
+  auto TargetDb = memodb_db_open(TargetDatabaseURI);
+
+  std::map<memodb_ref, memodb_ref> RefMapping;
+
+  std::function<memodb_ref(const memodb_ref &)> transferRef =
+      [&](const memodb_ref &Ref) {
+        auto Inserted = RefMapping.insert(std::make_pair(Ref, memodb_ref()));
+        if (Inserted.second) {
+          memodb_value Value = SourceDb->get(Ref);
+          Value = transformRefs(Value, [&](const memodb_ref &SubRef) {
+            return transferRef(SubRef);
+          });
+          Inserted.first->second = TargetDb->put(Value);
+        }
+        return Inserted.first->second;
+      };
+
+  auto transferName = [&](const memodb_name &Name) {
+    errs() << "transferring " << Name << "\n";
+    if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name)) {
+      memodb_ref Result = transferRef(*Ref);
+      outs() << Result << "\n";
+    } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+      memodb_ref Result = transferRef(SourceDb->get(Name).as_ref());
+      TargetDb->set(Name, Result);
+    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+      memodb_call NewCall(Call->Name, {});
+      for (const memodb_ref &Arg : Call->Args)
+        NewCall.Args.emplace_back(transferRef(Arg));
+      memodb_ref Result = transferRef(SourceDb->get(Name).as_ref());
+      TargetDb->set(NewCall, Result);
+    } else {
+      llvm_unreachable("impossible memodb_name type");
+    }
+  };
+
+  if (NamesToTransfer.empty()) {
+    for (const memodb_head &Head : SourceDb->list_heads())
+      transferName(Head);
+    for (StringRef Func : SourceDb->list_funcs())
+      for (const memodb_call &Call : SourceDb->list_calls(Func))
+        transferName(Call);
+  } else {
+    for (StringRef NameURI : NamesToTransfer)
+      transferName(GetNameFromURI(NameURI));
+  }
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -260,6 +345,8 @@ int main(int argc, char **argv) {
     return RefsTo();
   } else if (SetCommand) {
     return Set();
+  } else if (TransferCommand) {
+    return Transfer();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

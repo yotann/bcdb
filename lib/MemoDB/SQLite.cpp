@@ -866,7 +866,7 @@ std::vector<memodb_call> sqlite_db::list_calls(llvm::StringRef Func) {
   sqlite3 *db = get_db();
   std::vector<memodb_call> Result;
   sqlite3_int64 FID = get_fid(Func);
-  Stmt stmt(db, "SELECT cid FROM call WHERE fid = ?");
+  Stmt stmt(db, "SELECT cid FROM call WHERE fid = ? AND result NOT NULL");
   stmt.bind_int(1, FID);
   while (true) {
     int rc = stmt.step();
