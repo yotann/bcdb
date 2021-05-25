@@ -110,6 +110,7 @@ class sqlite_db : public memodb_db {
   void fatal_error();
 
   memodb_ref id_to_ref(sqlite3_int64 id);
+  memodb_ref id_to_ref_obsolete(sqlite3_int64 id);
   sqlite3_int64 ref_to_id(const memodb_ref &ref);
   sqlite3_int64 get_fid(llvm::StringRef name, bool create_if_missing = false);
 
@@ -389,7 +390,7 @@ void sqlite_db::upgrade_schema() {
         fatal_error();
 
       sqlite3_int64 id = sqlite3_column_int64(stmt.stmt, 0);
-      memodb_value value = get_obsolete(id_to_ref(id));
+      memodb_value value = get_obsolete(id_to_ref_obsolete(id));
 
       // Ensure each value is unique. Otherwise, we would need to deduplicate
       // the new values and change their ID numbers, which is too much work.
@@ -484,14 +485,36 @@ void sqlite_db::upgrade_schema() {
 }
 
 memodb_ref sqlite_db::id_to_ref(sqlite3_int64 id) {
+  sqlite3 *db = get_db();
+  Stmt stmt(db, "SELECT hash FROM blob WHERE vid = ?1");
+  stmt.bind_int(1, id);
+  if (stmt.step() != SQLITE_ROW)
+    fatal_error();
+  auto Data =
+      reinterpret_cast<const std::uint8_t *>(sqlite3_column_blob(stmt.stmt, 0));
+  int Size = sqlite3_column_bytes(stmt.stmt, 0);
+  return memodb_ref::fromBlake2BMerkleDAG(llvm::ArrayRef(Data, Size));
+}
+
+memodb_ref sqlite_db::id_to_ref_obsolete(sqlite3_int64 id) {
   return memodb_ref(llvm::to_string(id));
 }
 
 sqlite3_int64 sqlite_db::ref_to_id(const memodb_ref &ref) {
-  sqlite3_int64 id;
-  if (llvm::StringRef(ref).getAsInteger(10, id))
-    fatal_error();
-  return id;
+  if (ref.isCID()) {
+    sqlite3 *db = get_db();
+    auto Hash = ref.asBlake2BMerkleDAG();
+    Stmt stmt(db, "SELECT vid FROM blob WHERE hash = ?1");
+    stmt.bind_blob(1, Hash.data(), Hash.size());
+    if (stmt.step() != SQLITE_ROW)
+      fatal_error();
+    return sqlite3_column_int64(stmt.stmt, 0);
+  } else {
+    sqlite3_int64 id;
+    if (llvm::StringRef(ref).getAsInteger(10, id))
+      fatal_error();
+    return id;
+  }
 }
 
 memodb_ref sqlite_db::put(const memodb_value &value) {
@@ -789,7 +812,7 @@ memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
         break;
       if (rc != SQLITE_ROW)
         fatal_error();
-      memodb_ref value = id_to_ref(sqlite3_column_int64(stmt.stmt, 1));
+      memodb_ref value = id_to_ref_obsolete(sqlite3_column_int64(stmt.stmt, 1));
       if (binary_keys) {
         const std::uint8_t *data = reinterpret_cast<const std::uint8_t *>(
             sqlite3_column_blob(stmt.stmt, 0));

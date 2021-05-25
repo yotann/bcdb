@@ -2,7 +2,7 @@
 ; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -rename-globals
 ; RUN: bcdb get -uri sqlite:%t -name - | opt -verify -S | FileCheck %s
 
-; CHECK: @__bcdb_alias_[[ID:[0-9]+]] = internal alias void (), void ()* @func
+; CHECK: @__bcdb_alias_[[ID:[0-9A-Za-z]+]] = internal alias void (), void ()* @func
 
 ; CHECK-LABEL: define void @func()
 define void @func() {
