@@ -10,4 +10,4 @@ define void @"\01\FF\7F"() {
   ret void
 }
 
-; REFS: heads["-"]["functions"][h'01ff7f']
+; REFS: heads["-"]["functions"]["\u0001ÿ\u007f"]

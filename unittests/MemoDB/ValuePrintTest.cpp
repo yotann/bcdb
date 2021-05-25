@@ -34,8 +34,6 @@ TEST(ValuePrintTest, Bool) {
 
 TEST(ValuePrintTest, Null) { test_print("null", memodb_value(nullptr)); }
 
-TEST(ValuePrintTest, Undefined) { test_print("undefined", memodb_value{}); }
-
 TEST(ValuePrintTest, Bytes) {
   using bytes = std::vector<uint8_t>;
   test_print("''", memodb_value(bytes{}));
@@ -71,7 +69,6 @@ TEST(ValuePrintTest, Array) {
 
 TEST(ValuePrintTest, Map) {
   test_print("{}", memodb_value::map());
-  test_print("{1: false}", memodb_value::map({{1, false}}));
   test_print("{\"x\": 1, \"y\": 2}", memodb_value::map({{"x", 1}, {"y", 2}}));
 }
 

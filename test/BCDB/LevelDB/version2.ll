@@ -15,4 +15,4 @@ define i32 @func(i32 %x, i32 %y) {
   ret i32 %z
 }
 
-; REFS: heads["-"]["functions"]['func']
+; REFS: heads["-"]["functions"]["func"]

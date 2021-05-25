@@ -162,7 +162,7 @@ Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
     for (auto &Item : Map) {
       GlobalObject *GO = Item.first;
       memodb_ref &Ref = Item.second;
-      function_map[memodb_value::bytes(GO->getName())] = Ref;
+      function_map[bytesToUTF8(GO->getName())] = Ref;
       if (RenameGlobals) {
         GlobalAlias *GA = GlobalAlias::create(
             GlobalValue::InternalLinkage, "__bcdb_alias_" + StringRef(Ref), GO);
@@ -210,7 +210,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
       LoadModuleFromValue(db, head["remainder"].as_ref(), Name, *Context);
 
   for (auto &Item : head["functions"].map_items()) {
-    auto Name = Item.first.as_bytestring();
+    auto Name = utf8ToByteString(Item.first);
     memodb_ref ref = Item.second.as_ref();
     PartIDs[std::string(Name)] = llvm::StringRef(ref);
   }
@@ -233,7 +233,7 @@ Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
                                *Context);
   Joiner Joiner(*M);
   for (auto &Item : head["functions"].map_items()) {
-    auto Name = Item.first.as_bytestring();
+    auto Name = utf8ToByteString(Item.first);
     auto MPart = LoadModuleFromValue(db, Item.second.as_ref(), Name, *Context);
     Joiner.JoinGlobal(Name, std::move(MPart));
   }

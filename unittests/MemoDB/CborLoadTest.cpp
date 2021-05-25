@@ -132,8 +132,6 @@ TEST(CborLoadTest, Array) {
 
 TEST(CborLoadTest, Map) {
   test_load(memodb_value::map(), {0xa0});
-  test_load(memodb_value::map({{1, 2}, {3, 4}}),
-            {0xa2, 0x01, 0x02, 0x03, 0x04});
   test_load(memodb_value::map(
                 {{"a", "A"}, {"b", "B"}, {"c", "C"}, {"d", "D"}, {"e", "E"}}),
             {0xa5, 0x61, 0x61, 0x61, 0x41, 0x61, 0x62, 0x61, 0x42, 0x61, 0x63,

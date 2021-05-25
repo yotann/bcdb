@@ -173,7 +173,7 @@ static memodb_value evaluate_refines_alive2(memodb_db &db,
     report_fatal_error("error from worker");
   }
 
-  return Result[1][memodb_value::bytes()]["forward"];
+  return Result[1][""]["forward"];
 }
 
 static int Alive2() {
@@ -370,9 +370,9 @@ static memodb_value evaluate_candidates(memodb_db &db,
     Result.array_items().push_back(memodb_value::map({
         {"nodes", std::move(NodesValues[i])},
         {"callee",
-         std::move(Functions.map_items()[memodb_value::bytes(CalleeNames[i])])},
+         std::move(Functions.map_items()[bytesToUTF8(CalleeNames[i])])},
         {"caller",
-         std::move(Functions.map_items()[memodb_value::bytes(CallerNames[i])])},
+         std::move(Functions.map_items()[bytesToUTF8(CallerNames[i])])},
     }));
   }
   return Result;
@@ -584,10 +584,12 @@ static int Collate() {
     auto M = Err(parseBitcodeFile(
         MemoryBufferRef(db.get(ref).as_bytestring(), StringRef(ref)), Context));
     Function &Def = getSoleDefinition(*M);
+    memodb_value Key = memodb_value::array(
+        {GroupForType(Def.getFunctionType()), GroupForGlobals(*M)});
+    std::vector<std::uint8_t> KeyBytes;
+    Key.save_cbor(KeyBytes);
     return memodb_value::map(
-        {{memodb_value::array(
-              {GroupForType(Def.getFunctionType()), GroupForGlobals(*M)}),
-          memodb_value::array({ref})}});
+        {{bytesToUTF8(KeyBytes), memodb_value::array({ref})}});
   };
   memodb_value Groups = parallel_transform_reduce(
       UniqueCandidatesVec, memodb_value::map(), Reduce, Transform);

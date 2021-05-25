@@ -791,10 +791,10 @@ memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
         fatal_error();
       memodb_ref value = id_to_ref(sqlite3_column_int64(stmt.stmt, 1));
       if (binary_keys) {
-        const char *data =
-            reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
+        const std::uint8_t *data = reinterpret_cast<const std::uint8_t *>(
+            sqlite3_column_blob(stmt.stmt, 0));
         int size = sqlite3_column_bytes(stmt.stmt, 0);
-        result[memodb_value::bytes(llvm::StringRef(data, size))] = value;
+        result[bytesToUTF8(llvm::ArrayRef(data, size))] = value;
       } else {
         const char *key =
             reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0));

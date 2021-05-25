@@ -257,7 +257,7 @@ memodb_value transformRefs(const memodb_value &Value, T F) {
   } else if (Value.type() == memodb_value::MAP) {
     memodb_value::map_t Result;
     for (const auto &Item : Value.map_items())
-      Result[transformRefs(Item.first, F)] = transformRefs(Item.second, F);
+      Result[Item.first] = transformRefs(Item.second, F);
     return memodb_value(Result);
   } else {
     return Value;

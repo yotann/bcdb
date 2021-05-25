@@ -2,6 +2,7 @@
 
 #include "memodb_internal.h"
 
+#include <llvm/Support/ConvertUTF.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_os_ostream.h>
 #include <sstream>
@@ -54,6 +55,42 @@ ParsedURI::ParsedURI(llvm::StringRef URI) {
   PathRef.split(Segments, '/');
   for (const auto &Segment : Segments)
     PathSegments.emplace_back(percentDecode(Segment));
+}
+
+std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes) {
+  std::string Result;
+  for (std::uint8_t Byte : Bytes) {
+    if (Byte < 0x80) {
+      Result.push_back((char)Byte);
+    } else {
+      Result.push_back((char)(0xc0 | (Byte >> 6)));
+      Result.push_back((char)(0x80 | (Byte & 0x3f)));
+    }
+  }
+  return Result;
+}
+
+std::string bytesToUTF8(llvm::StringRef Bytes) {
+  return bytesToUTF8(llvm::ArrayRef(
+      reinterpret_cast<const std::uint8_t *>(Bytes.data()), Bytes.size()));
+}
+
+std::string utf8ToByteString(llvm::StringRef Str) {
+  std::string Result;
+  while (!Str.empty()) {
+    std::uint8_t x = (std::uint8_t)Str[0];
+    if (x < 0x80) {
+      Result.push_back((char)x);
+      Str = Str.drop_front(1);
+    } else {
+      std::uint8_t y = Str.size() >= 2 ? (std::uint8_t)Str[1] : 0;
+      if ((x & 0xfc) != 0xc0 || (y & 0xc0) != 0x80)
+        llvm::report_fatal_error("invalid UTF-8 bytes");
+      Result.push_back((char)((x & 3) << 6 | (y & 0x3f)));
+      Str = Str.drop_front(2);
+    }
+  }
+  return Result;
 }
 
 std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
@@ -228,6 +265,13 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_name &name) {
   return os;
 }
 
+void memodb_value::validateUTF8() const {
+  auto Str = as<string_t>();
+  auto Ptr = reinterpret_cast<const llvm::UTF8 *>(Str.data());
+  if (!llvm::isLegalUTF8String(&Ptr, Ptr + Str.size()))
+    llvm::report_fatal_error("invalid UTF-8 in string value");
+}
+
 std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
   // Print the value in CBOR extended diagnostic notation.
   // https://tools.ietf.org/html/rfc8610#appendix-G
@@ -253,7 +297,6 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
 
   std::visit(
       overloaded{
-          [&](const memodb_value::undefined_t &) { os << "undefined"; },
           [&](const memodb_value::null_t &) { os << "null"; },
           [&](const memodb_value::bool_t &x) { os << (x ? "true" : "false"); },
           [&](const memodb_value::integer_t &x) { os << x; },
@@ -323,7 +366,9 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
               if (!first)
                 os << ", ";
               first = false;
-              os << item.first << ": " << item.second;
+              os << '"';
+              print_escaped(item.first, '"');
+              os << "\": " << item.second;
             }
             os << '}';
           },
@@ -518,7 +563,19 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     map_t result;
     while (next_item()) {
       memodb_value key = load_cbor_from_sequence(in);
-      result[key] = load_cbor_from_sequence(in);
+      std::string KeyString;
+      if (key.type() == memodb_value::STRING)
+        KeyString = key.as_string();
+      else if (key.type() == memodb_value::BYTES)
+        KeyString = bytesToUTF8(key.as_bytes());
+      else if (key.type() == memodb_value::ARRAY) {
+        // Needed for legacy smout.collated values.
+        std::vector<std::uint8_t> KeyBytes;
+        key.save_cbor(KeyBytes);
+        KeyString = bytesToUTF8(KeyBytes);
+      } else
+        llvm::report_fatal_error("Map keys must be strings");
+      result[KeyString] = load_cbor_from_sequence(in);
     }
     return result;
   }
@@ -533,7 +590,7 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     case 22:
       return nullptr;
     case 23: // undefined
-      return {};
+      return nullptr;
     case 25:
       return decode_float(additional, 16, 10, 15);
     case 26:
@@ -548,8 +605,8 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
 }
 
 void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
-  // Save the value in deterministically encoded CBOR format.
-  // https://www.rfc-editor.org/rfc/rfc8949.html#name-deterministically-encoded-c
+  // Save the value in DAG-CBOR format.
+  // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
 
   auto start = [&](int major_type, std::uint64_t additional,
                    int force_minor = 0) {
@@ -575,7 +632,6 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
   };
 
   std::visit(overloaded{
-                 [&](const undefined_t &) { start(7, 23); },
                  [&](const null_t &) { start(7, 22); },
                  [&](const bool_t &x) { start(7, x ? 21 : 20); },
                  [&](const integer_t &x) {
@@ -586,14 +642,8 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                  },
                  [&](const float_t &x) {
                    std::uint64_t additional;
-                   if (encode_float(additional, x, 16, 10, 15))
-                     start(7, additional, 25);
-                   else if (encode_float(additional, x, 32, 23, 127))
-                     start(7, additional, 26);
-                   else {
-                     encode_float(additional, x, 64, 52, 1023);
-                     start(7, additional, 27);
-                   }
+                   encode_float(additional, x, 64, 52, 1023);
+                   start(7, additional, 27);
                  },
                  [&](const bytes_t &x) {
                    start(2, x.size());
@@ -606,9 +656,7 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                  [&](const ref_t &x) {
                    if (x.isCID()) {
                      auto Bytes = x.asCID();
-                     // https://github.com/ipld/cid-cbor/
-                     // Insert identity multibase prefix (optional according to
-                     // spec, but required by Go-IPFS as of 0.8.0).
+                     // Insert identity multibase prefix (required by DAG-CBOR).
                      Bytes.insert(Bytes.begin(), 0x00);
                      start(6, 42); // CID tag
                      start(2, Bytes.size());
@@ -629,9 +677,14 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                    std::vector<std::pair<bytes_t, const memodb_value *>> items;
                    for (const auto &item : x) {
                      items.emplace_back(bytes_t(), &item.second);
-                     item.first.save_cbor(items.back().first);
+                     memodb_value(item.first).save_cbor(items.back().first);
                    }
-                   std::sort(items.begin(), items.end());
+                   std::sort(items.begin(), items.end(),
+                             [](const auto &A, const auto &B) {
+                               if (A.first.size() != B.first.size())
+                                 return A.first.size() < B.first.size();
+                               return A.first < B.first;
+                             });
                    start(5, items.size());
                    for (const auto &item : items) {
                      out.insert(out.end(), item.first.begin(),

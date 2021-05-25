@@ -34,6 +34,13 @@ public:
   std::vector<std::string> PathSegments;
 };
 
+// LLVM symbol names are usually ASCII, but can contain arbitrary bytes. We
+// interpret the bytes as ISO-8859-1 and convert them to UTF-8 for use in map
+// keys.
+std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes);
+std::string bytesToUTF8(llvm::StringRef Bytes);
+std::string utf8ToByteString(llvm::StringRef Str);
+
 class memodb_ref {
 private:
   std::string id_;
@@ -112,7 +119,6 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_name &name);
 class memodb_value {
 public:
   enum value_t {
-    UNDEFINED,
     NULL_TYPE,
     BOOL,
     INTEGER,
@@ -133,7 +139,6 @@ public:
   using const_pointer = const value_type *;
   // TODO: iterators
 
-  struct undefined_t : std::monostate {};
   struct null_t : std::monostate {};
   using bool_t = bool;
   using integer_t = std::int64_t;
@@ -142,12 +147,11 @@ public:
   using string_t = std::string;
   using ref_t = memodb_ref;
   using array_t = std::vector<memodb_value>;
-  using map_t = std::map<memodb_value, memodb_value>;
+  using map_t = std::map<string_t, memodb_value>;
 
 private:
-  using variant_type =
-      std::variant<undefined_t, null_t, bool_t, integer_t, float_t, bytes_t,
-                   string_t, ref_t, array_t, map_t>;
+  using variant_type = std::variant<null_t, bool_t, integer_t, float_t, bytes_t,
+                                    string_t, ref_t, array_t, map_t>;
 
   variant_type variant_;
 
@@ -162,24 +166,25 @@ private:
     return const_cast<memodb_value *>(this)->as<T>();
   }
 
+  void validateUTF8() const;
+
 public:
   memodb_value() : variant_() {}
   memodb_value(std::nullptr_t) : variant_(null_t()) {}
 
-  memodb_value(undefined_t val) : variant_(val) {}
   memodb_value(null_t val) : variant_(val) {}
   memodb_value(bool_t val) : variant_(val) {}
   memodb_value(integer_t val) : variant_(integer_t(val)) {}
   memodb_value(float_t val) : variant_(val) {}
 
   memodb_value(const bytes_t &val) : variant_(val) {}
-  memodb_value(const string_t &val) : variant_(val) {}
+  memodb_value(const string_t &val) : variant_(val) { validateUTF8(); }
   memodb_value(const ref_t &val) : variant_(val) {}
   memodb_value(const array_t &val) : variant_(val) {}
   memodb_value(const map_t &val) : variant_(val) {}
 
   memodb_value(bytes_t &&val) : variant_(std::move(val)) {}
-  memodb_value(string_t &&val) : variant_(std::move(val)) {}
+  memodb_value(string_t &&val) : variant_(std::move(val)) { validateUTF8(); }
   memodb_value(ref_t &&val) : variant_(std::move(val)) {}
   memodb_value(array_t &&val) : variant_(std::move(val)) {}
   memodb_value(map_t &&val) : variant_(std::move(val)) {}
@@ -202,12 +207,13 @@ public:
         llvm::ArrayRef<unsigned char>(val.bytes_begin(), val.bytes_end()));
   }
 
-  // TODO: verify that value is valid UTF-8.
   memodb_value(const char *val) : variant_(string_t(val)) {}
+
   // Explicit because strings are often not valid UTF-8.
   static memodb_value string(llvm::StringRef val) {
     memodb_value result;
     result.variant_ = string_t(val);
+    result.validateUTF8();
     return result;
   }
 
@@ -249,7 +255,6 @@ public:
 
   constexpr value_t type() const noexcept {
     return std::visit(overloaded{
-                          [](const undefined_t &) { return UNDEFINED; },
                           [](const null_t &) { return NULL_TYPE; },
                           [](const bool_t &) { return BOOL; },
                           [](const integer_t &) { return INTEGER; },
@@ -277,39 +282,19 @@ private:
   }
 
 public:
-  reference at(const value_type &idx) {
-    if (type() == ARRAY) {
-      return array_items().at(idx.as_integer());
-    } else {
-      return map_items().at(idx);
-    }
-  }
+  reference at(integer_t idx) { return array_items().at(idx); }
+  const_reference at(integer_t idx) const { return array_items().at(idx); }
+  reference operator[](integer_t idx) { return at(idx); }
+  const_reference operator[](integer_t idx) const { return at(idx); }
 
-  const_reference at(const value_type &idx) const {
-    if (type() == ARRAY) {
-      return array_items().at(idx.as_integer());
-    } else {
-      return map_items().at(idx);
-    }
-  }
-
-  reference operator[](const value_type &idx) {
-    if (type() == ARRAY) {
-      return at(idx);
-    } else {
-      return map_items()[idx];
-    }
-  }
-
-  const_reference operator[](const value_type &idx) const {
-    if (type() == ARRAY) {
-      return at(idx);
-    } else {
-      const map_t &map = map_items();
-      const auto iter = map.find(idx);
-      assert(iter != map.end());
-      return iter->second;
-    }
+  reference at(const string_t &idx) { return map_items().at(idx); }
+  const_reference at(const string_t &idx) const { return map_items().at(idx); }
+  reference operator[](const string_t &idx) { return map_items()[idx]; }
+  const_reference operator[](const string_t &idx) const {
+    const map_t &map = map_items();
+    const auto iter = map.find(idx);
+    assert(iter != map.end());
+    return iter->second;
   }
 
   bool operator<(const memodb_value &other) const {
