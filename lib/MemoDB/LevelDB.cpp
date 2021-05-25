@@ -20,22 +20,18 @@
 
 typedef std::array<uint8_t, crypto_generichash_BYTES> Hash;
 
-typedef std::array<uint8_t, 4> KeyType;
+typedef std::array<uint8_t, 3> KeyType;
 
 static const Hash HASH_NONE = {};
 
-static const KeyType KEY_CALL = {0xff, 0x09, 0xa9, 0x65};
-static const KeyType KEY_CBOR = {0xff, 0x08, 0x13, 0x91};
-static const KeyType KEY_FUNC = {0xff, 0x16, 0xe9, 0xdc};
-static const KeyType KEY_HEAD = {0xff, 0x1d, 0xe6, 0x9d};
-static const KeyType KEY_REF = {0xff, 0x45, 0xe7, 0xff};
-static const KeyType KEY_RETURN = {0xff, 0x45, 0xeb, 0x67};
+static const KeyType KEY_CALL = {0x01, 0x01, 0x6b};
+static const KeyType KEY_CBOR = {0x01, 0x05, 0xd1};
+static const KeyType KEY_FUNC = {0x02, 0xd1, 0xa2};
+static const KeyType KEY_HEAD = {0x03, 0x90, 0x03};
+static const KeyType KEY_REF = {0x08, 0x90, 0xb1};
+static const KeyType KEY_RETURN = {0x08, 0x92, 0x6d};
 
-static const leveldb::Slice MAGIC_VALUE("MemoDB v1");
-
-static const llvm::StringRef BASE64URL_TABLE("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                             "abcdefghijklmnopqrstuvwxyz"
-                                             "0123456789-_");
+static const leveldb::Slice MAGIC_VALUE("MemoDB v2");
 
 // clang-format off
 /* Key types:
@@ -146,23 +142,7 @@ bool LevelDBMemo::checkFound(leveldb::Status Status) {
 }
 
 memodb_ref LevelDBMemo::hashToRef(const Hash &Hash) {
-  // Encode in base64
-  auto ResultSize = (Hash.size() + 2) / 3 * 4;
-  std::string Result(ResultSize, '\0');
-  for (size_t i = 0; i < ResultSize / 4; i++) {
-    size_t x = size_t(Hash[3 * i + 0]) << 16;
-    if (3 * i + 1 < Hash.size())
-      x |= size_t(Hash[3 * i + 1]) << 8;
-    if (3 * i + 2 < Hash.size())
-      x |= size_t(Hash[3 * i + 2]) << 0;
-    Result[4 * i + 0] = BASE64URL_TABLE[(x >> 18) & 0x3f];
-    Result[4 * i + 1] = BASE64URL_TABLE[(x >> 12) & 0x3f];
-    Result[4 * i + 2] =
-        3 * i + 1 < Hash.size() ? BASE64URL_TABLE[(x >> 6) & 0x3f] : '=';
-    Result[4 * i + 3] =
-        3 * i + 2 < Hash.size() ? BASE64URL_TABLE[(x >> 0) & 0x3f] : '=';
-  }
-  return memodb_ref(Result);
+  return memodb_ref::fromBlake2BMerkleDAG(Hash);
 }
 
 std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
@@ -176,37 +156,12 @@ std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
 }
 
 Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
-  // Decode from base64
-  llvm::StringRef Str = Ref;
-  if (Str.size() % 4)
-    llvm::report_fatal_error("invalid base64: wrong size");
-  auto Trimmed = Str.rtrim('=');
-  auto Padding = Str.size() - Trimmed.size();
-  if (Padding > 2)
-    llvm::report_fatal_error("invalid base64: too much padding");
-  for (char c : Trimmed)
-    if (BASE64URL_TABLE.find(c) == llvm::StringRef::npos)
-      llvm::report_fatal_error("invalid base64: invalid character");
-
   Hash Result;
-  auto ResultSize = Str.size() / 4 * 3 - Padding;
-  if (ResultSize != Result.size())
-    llvm::report_fatal_error("invalid base64: wrong size");
-
-  for (size_t i = 0; i < Str.size() / 4; i++) {
-    size_t x0 = BASE64URL_TABLE.find(Str[4 * i + 0]);
-    size_t x1 = BASE64URL_TABLE.find(Str[4 * i + 1]);
-    size_t x2 =
-        Str[4 * i + 2] == '=' ? 0 : BASE64URL_TABLE.find(Str[4 * i + 2]);
-    size_t x3 =
-        Str[4 * i + 3] == '=' ? 0 : BASE64URL_TABLE.find(Str[4 * i + 3]);
-    size_t x = x0 << 18 | x1 << 12 | x2 << 6 | x3;
-    Result[3 * i + 0] = x >> 16;
-    if (3 * i + 1 < Result.size())
-      Result[3 * i + 1] = (x >> 8) & 0xff;
-    if (3 * i + 2 < Result.size())
-      Result[3 * i + 2] = (x >> 0) & 0xff;
-  }
+  auto Bytes = Ref.asBlake2BMerkleDAG();
+  if (Bytes.size() != Result.size())
+    llvm::report_fatal_error("invalid hash size");
+  for (size_t i = 0; i < Result.size(); i++)
+    Result[i] = Bytes[i];
   return Result;
 }
 

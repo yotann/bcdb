@@ -37,14 +37,27 @@ public:
 class memodb_ref {
 private:
   std::string id_;
+  enum { EMPTY, NUMERIC, BLAKE2B_MERKLEDAG } type_;
+  friend class memodb_value;
 
 public:
-  memodb_ref() : id_() {}
-  memodb_ref(llvm::StringRef value) : id_(value) {}
-  operator llvm::StringRef() const { return id_; }
-  operator bool() const { return !id_.empty(); }
-  bool operator<(const memodb_ref &other) const { return id_ < other.id_; }
-  bool operator==(const memodb_ref &other) const { return id_ == other.id_; }
+  memodb_ref() : id_(), type_(EMPTY) {}
+  memodb_ref(llvm::StringRef Text);
+  static memodb_ref fromCID(llvm::ArrayRef<std::uint8_t> Bytes);
+  static memodb_ref fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes);
+  bool isCID() const { return type_ == BLAKE2B_MERKLEDAG; }
+  llvm::ArrayRef<std::uint8_t> asBlake2BMerkleDAG() const;
+  std::vector<std::uint8_t> asCID() const;
+  operator std::string() const;
+  operator bool() const { return type_ != EMPTY; }
+  bool operator<(const memodb_ref &other) const {
+    if (type_ != other.type_)
+      return type_ < other.type_;
+    return id_ < other.id_;
+  }
+  bool operator==(const memodb_ref &other) const {
+    return type_ == other.type_ && id_ == other.id_;
+  }
 };
 
 std::ostream &operator<<(std::ostream &os, const memodb_ref &ref);

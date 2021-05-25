@@ -972,7 +972,8 @@ static memodb_value evaluate_compiled_size(memodb_db &db,
   memodb_ref FuncId = db.put(func);
   memodb_value Compiled =
       db.call_or_lookup_value("compiled", evaluate_compiled, FuncId);
-  MemoryBufferRef MB(Compiled.as_bytestring(), FuncId);
+  std::string FuncStr = FuncId;
+  MemoryBufferRef MB(Compiled.as_bytestring(), FuncStr);
   auto Binary = Err(createBinary(MB));
   if (ObjectFile *Obj = dyn_cast<ObjectFile>(Binary.get())) {
     memodb_value::integer_t Size = 0;

@@ -67,12 +67,125 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
   }
 }
 
+// IDs (except legacy numeric IDs) follow the CID specification:
+// https://github.com/multiformats/cid
+
+static const char *BASE32_PREFIX = "b";
+
+static const llvm::StringRef BASE32_TABLE("abcdefghijklmnopqrstuvwxyz234567");
+
+static const size_t HASH_SIZE = 32;
+
+static const std::array<std::uint8_t, 6> CID_PREFIX = {
+    0x01,             // CIDv1
+    0x71,             // content type: MerkleDAG CBOR
+    0xa0, 0xe4, 0x02, // multihash function: Blake2B-256
+    0x20,             // multihash size: 256 bits
+};
+
+static std::vector<std::uint8_t> decodeBase32(llvm::StringRef Str) {
+  std::vector<std::uint8_t> Result;
+  while (!Str.empty()) {
+    uint64_t Value = 0;
+    for (size_t i = 0; i < 8; i++) {
+      Value <<= 5;
+      if (i < Str.size()) {
+        size_t Pos = BASE32_TABLE.find(Str[i]);
+        if (Pos == llvm::StringRef::npos)
+          llvm::report_fatal_error("invalid character in base32");
+        Value |= Pos;
+      }
+    }
+
+    const size_t NumBytesArray[8] = {0, 0, 1, 0, 2, 3, 0, 4};
+    size_t NumBytes = Str.size() >= 8 ? 5 : NumBytesArray[Str.size()];
+    if (!NumBytes)
+      llvm::report_fatal_error("invalid length of base32");
+    for (size_t i = 0; i < NumBytes; i++)
+      Result.push_back((Value >> (32 - 8 * i)) & 0xff);
+    Str = Str.drop_front(Str.size() >= 8 ? 8 : Str.size());
+  }
+  return Result;
+}
+
+static std::string encodeBase32(llvm::ArrayRef<std::uint8_t> Bytes) {
+  std::string Result;
+  while (!Bytes.empty()) {
+    uint64_t Value = 0;
+    for (size_t i = 0; i < 5; i++)
+      Value = (Value << 8) | (i < Bytes.size() ? Bytes[i] : 0);
+    const size_t NumCharsArray[5] = {0, 2, 4, 5, 7};
+    size_t NumChars = Bytes.size() >= 5 ? 8 : NumCharsArray[Bytes.size()];
+    for (size_t i = 0; i < NumChars; i++)
+      Result.push_back(BASE32_TABLE[(Value >> (35 - 5 * i)) & 0x1f]);
+    Bytes = Bytes.drop_front(Bytes.size() >= 5 ? 5 : Bytes.size());
+  }
+  return Result;
+}
+
+memodb_ref::memodb_ref(llvm::StringRef Text) {
+  if (Text.startswith(BASE32_PREFIX)) {
+    *this = fromCID(decodeBase32(Text.drop_front()));
+  } else if (Text.find_first_not_of("0123456789") == llvm::StringRef::npos) {
+    id_ = Text;
+    type_ = NUMERIC;
+  } else {
+    llvm::report_fatal_error(llvm::Twine("invalid ID format ") + Text);
+  }
+}
+
+memodb_ref memodb_ref::fromCID(llvm::ArrayRef<std::uint8_t> Bytes) {
+  if (Bytes.take_front(CID_PREFIX.size()).equals(CID_PREFIX)) {
+    return fromBlake2BMerkleDAG(Bytes.drop_front(CID_PREFIX.size()));
+  } else {
+    llvm::report_fatal_error(llvm::Twine("invalid CID"));
+  }
+}
+
+memodb_ref
+memodb_ref::fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes) {
+  if (Bytes.size() != HASH_SIZE)
+    llvm::report_fatal_error("incorrect Blake2B hash size");
+  memodb_ref Result;
+  Result.id_ =
+      std::string(reinterpret_cast<const char *>(Bytes.data()), Bytes.size());
+  Result.type_ = BLAKE2B_MERKLEDAG;
+  return Result;
+}
+
+llvm::ArrayRef<std::uint8_t> memodb_ref::asBlake2BMerkleDAG() const {
+  if (type_ != BLAKE2B_MERKLEDAG)
+    llvm::report_fatal_error("incorrect type of ID");
+  return llvm::ArrayRef(reinterpret_cast<const std::uint8_t *>(id_.data()),
+                        id_.size());
+}
+
+std::vector<std::uint8_t> memodb_ref::asCID() const {
+  std::vector<std::uint8_t> Result(CID_PREFIX.begin(), CID_PREFIX.end());
+  Result.insert(Result.end(), id_.begin(), id_.end());
+  return Result;
+}
+
+memodb_ref::operator std::string() const {
+  if (type_ == EMPTY)
+    return "";
+  else if (type_ == NUMERIC)
+    return id_;
+  else if (type_ == BLAKE2B_MERKLEDAG) {
+    std::vector<std::uint8_t> Bytes(CID_PREFIX.begin(), CID_PREFIX.end());
+    Bytes.insert(Bytes.end(), id_.begin(), id_.end());
+    return BASE32_PREFIX + encodeBase32(Bytes);
+  } else {
+    llvm_unreachable("impossible memodb_ref type");
+  }
+}
+
 std::ostream &operator<<(std::ostream &os, const memodb_ref &ref) {
-  return os << llvm::StringRef(ref).str();
+  return os << std::string(ref);
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_ref &ref) {
-  return os << llvm::StringRef(ref);
+  return os << std::string(ref);
 }
 
 std::ostream &operator<<(std::ostream &os, const memodb_head &head) {
@@ -178,9 +291,19 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
             os << '"';
           },
           [&](const memodb_value::ref_t &x) {
-            os << "39(\"";
-            print_escaped(x, '"');
-            os << "\")";
+            if (x.isCID()) {
+              os << "42(h'00"; // include multibase prefix
+              for (std::uint8_t b : x.asCID()) {
+                char buf[3];
+                std::snprintf(buf, sizeof(buf), "%02x", b);
+                os << buf;
+              }
+              os << "')";
+            } else {
+              os << "39(\"";
+              print_escaped(std::string(x), '"');
+              os << "\")";
+            }
           },
           [&](const memodb_value::array_t &x) {
             bool first = true;
@@ -339,14 +462,18 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     }
   };
 
-  bool is_ref = false;
+  bool is_numeric_ref = false, is_cid = false;
   do {
     start(major_type, minor_type, additional, indefinite);
     if (major_type == 6 && additional == 39)
-      is_ref = true;
+      is_numeric_ref = true;
+    if (major_type == 6 && additional == 42)
+      is_cid = true;
   } while (major_type == 6);
 
-  if (is_ref && major_type != 3)
+  if (is_cid && major_type != 2)
+    llvm::report_fatal_error("Invalid CID type");
+  if (is_numeric_ref && major_type != 3)
     llvm::report_fatal_error("Invalid reference type");
 
   switch (major_type) {
@@ -364,6 +491,11 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
       result.insert(result.end(), in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
+    if (is_cid) {
+      if (result.empty() || result[0] != 0x00)
+        llvm::report_fatal_error("invalid encoded CID");
+      return memodb_ref::fromCID(llvm::ArrayRef(result).drop_front(1));
+    }
     return memodb_value(result);
   }
   case 3: {
@@ -372,7 +504,7 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
       result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
-    if (is_ref)
+    if (is_numeric_ref)
       return memodb_ref(std::move(result));
     return memodb_value::string(result);
   }
@@ -472,10 +604,21 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                    out.insert(out.end(), x.begin(), x.end());
                  },
                  [&](const ref_t &x) {
-                   start(6, 39); // "identifier" tag
-                   start(3, llvm::StringRef(x).size());
-                   out.insert(out.end(), llvm::StringRef(x).begin(),
-                              llvm::StringRef(x).end());
+                   if (x.isCID()) {
+                     auto Bytes = x.asCID();
+                     // https://github.com/ipld/cid-cbor/
+                     // Insert identity multibase prefix (optional according to
+                     // spec, but required by Go-IPFS as of 0.8.0).
+                     Bytes.insert(Bytes.begin(), 0x00);
+                     start(6, 42); // CID tag
+                     start(2, Bytes.size());
+                     out.insert(out.end(), Bytes.begin(), Bytes.end());
+                   } else {
+                     std::string Str = x;
+                     start(6, 39); // "identifier" tag
+                     start(3, Str.size());
+                     out.insert(out.end(), Str.begin(), Str.end());
+                   }
                  },
                  [&](const array_t &x) {
                    start(4, x.size());
