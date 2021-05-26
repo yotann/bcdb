@@ -186,7 +186,7 @@ memodb_value transformRefs(const memodb_value &Value, T F) {
 
 // memodb export
 
-static cl::list<std::string> NamesToExport(cl::Positional, cl::OneOrMore,
+static cl::list<std::string> NamesToExport(cl::Positional, cl::ZeroOrMore,
                                            cl::desc("<names to export>"),
                                            cl::value_desc("names"),
                                            cl::cat(MemoDBCategory),
@@ -198,59 +198,138 @@ static int Export() {
 
   auto OutputFile = GetOutputFile();
   if (!OutputFile)
-    return 0;
+    return 1;
+  if (!OutputFile->os().supportsSeeking()) {
+    errs() << "output file doesn't support seeking\n";
+    return 1;
+  }
 
+  auto getVarIntSize = [&](size_t Value) {
+    size_t Total = 1;
+    for (; Value >= 0x80; Value >>= 7)
+      Total++;
+    return Total;
+  };
   auto writeVarInt = [&](size_t Value) {
     for (; Value >= 0x80; Value >>= 7)
       OutputFile->os().write((Value & 0x7f) | 0x80);
     OutputFile->os().write(Value);
   };
+  auto getBlockSize =
+      [&](const std::pair<memodb_ref, memodb_value::bytes_t> &Block) {
+        size_t Result = Block.second.size() + Block.first.asCID().size();
+        Result += getVarIntSize(Result);
+        return Result;
+      };
+  auto writeBlock =
+      [&](const std::pair<memodb_ref, memodb_value::bytes_t> &Block) {
+        std::vector<std::uint8_t> Buffer = Block.first.asCID();
+        Buffer.insert(Buffer.end(), Block.second.begin(), Block.second.end());
+        writeVarInt(Buffer.size());
+        OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
+                               Buffer.size());
+      };
 
   auto Db = memodb_db_open(GetUri());
+
   memodb_value Root = memodb_value::map();
-  for (const std::string &NameStr : NamesToExport) {
-    memodb_name Name = GetNameFromURI(NameStr);
-    if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name))
-      Root[NameStr] = *Ref;
-    else
-      Root[NameStr] = Db->get(Name);
+  Root["format"] = "MemoDB CAR";
+  Root["version"] = 0;
+  memodb_value &Calls = Root["calls"] = memodb_value::map();
+  memodb_value &Heads = Root["heads"] = memodb_value::map();
+  memodb_value &IDs = Root["ids"] = memodb_value::array();
+  auto addName = [&](const memodb_name &Name) {
+    if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name)) {
+      IDs.array_items().emplace_back(*Ref);
+    } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+      Heads[Head->Name] = Db->get(Name);
+    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+      memodb_value &FuncCalls = Calls[Call->Name];
+      if (FuncCalls == memodb_value{})
+        FuncCalls = memodb_value::map();
+      memodb_value Args = memodb_value::array();
+      std::string Key;
+      for (const memodb_ref &Arg : Call->Args) {
+        Args.array_items().emplace_back(Arg);
+        Key += std::string(Arg) + "/";
+      }
+      Key.pop_back();
+      FuncCalls[Key] =
+          memodb_value::map({{"args", Args}, {"result", Db->get(Name)}});
+    } else {
+      llvm_unreachable("impossible memodb_name type");
+    }
+  };
+  if (!NamesToExport.empty()) {
+    for (const std::string &NameStr : NamesToExport)
+      addName(GetNameFromURI(NameStr));
+  } else {
+    for (const memodb_head &Head : Db->list_heads())
+      addName(Head);
+    for (StringRef Func : Db->list_funcs())
+      for (const memodb_call &Call : Db->list_calls(Func))
+        addName(Call);
   }
-  memodb_ref RootRef = Db->put(Root);
+
+  // We won't know what root CID to put in the header until after we've written
+  // everything. Leave an empty space which will be filled with header +
+  // padding later. The header is normally 0x3d bytes, so this gives us plenty
+  // of room.
+  OutputFile->os().write_zeros(0x200);
+  auto DataStartPos = OutputFile->os().tell();
+
+  std::map<memodb_ref, memodb_ref> RefMapping;
+  std::function<memodb_ref(const memodb_ref &)> exportRef;
+  std::function<memodb_ref(const memodb_value &)> exportValue;
+
+  exportRef = [&](const memodb_ref &Ref) {
+    auto Inserted = RefMapping.insert(std::make_pair(Ref, memodb_ref()));
+    if (Inserted.second)
+      Inserted.first->second = exportValue(Db->get(Ref));
+    return Inserted.first->second;
+  };
+
+  exportValue = [&](const memodb_value &Value) {
+    auto Block = transformRefs(Value, exportRef).saveAsIPLD();
+    if (!Block.first.isInline())
+      writeBlock(Block);
+    return Block.first;
+  };
+
+  memodb_ref RootRef = exportValue(Root);
 
   memodb_value Header = memodb_value::map(
       {{"roots", memodb_value::array({RootRef})}, {"version", 1}});
   std::vector<std::uint8_t> Buffer;
   Header.save_cbor(Buffer);
+  OutputFile->os().seek(0);
   writeVarInt(Buffer.size());
   OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
                          Buffer.size());
 
-  std::set<memodb_ref> AlreadySeen;
-  std::function<void(const memodb_ref &)> handleRef =
-      [&](const memodb_ref &Ref) {
-        if (!AlreadySeen.insert(Ref).second)
-          return;
-        if (Ref.isInline())
-          return;
-        if (!Ref.isCID())
-          report_fatal_error("This database is too old to export; transfer its "
-                             "data to a new database first.");
+  // Add padding between the header and the real data. This code can only
+  // generate padding of size 40...128 or 130... bytes, because of the way
+  // VarInts work. Note that the padding block may be a duplicate of another
+  // block later in the file; the CAR format does not specify whether this is
+  // allowed.
+  if (OutputFile->os().tell() < DataStartPos) {
+    size_t PaddingNeeded = DataStartPos - OutputFile->os().tell();
+    std::vector<std::uint8_t> Padding(PaddingNeeded);
+    for (size_t i = 0; i < PaddingNeeded; i++)
+      Padding[i] = "MemoDB CAR"[i % 11];
 
-        Buffer = Ref.asCID();
-        memodb_value Value = Db->get(Ref);
-        if (Ref.isBlake2BRaw())
-          Buffer.insert(Buffer.end(), Value.as_bytes().begin(),
-                        Value.as_bytes().end());
-        else
-          Value.save_cbor(Buffer);
-        writeVarInt(Buffer.size());
-        OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
-                               Buffer.size());
+    for (ssize_t Size = PaddingNeeded; Size >= 0; Size--) {
+      auto Block = memodb_value(llvm::ArrayRef(Padding).take_front(Size))
+                       .saveAsIPLD(true);
+      if (getBlockSize(Block) == PaddingNeeded) {
+        writeBlock(Block);
+        break;
+      }
+    }
+  }
+  if (OutputFile->os().tell() != DataStartPos)
+    llvm::report_fatal_error("CAR header too large to fit");
 
-        walkRefs(Value, handleRef);
-      };
-
-  handleRef(RootRef);
   OutputFile->keep();
   return 0;
 }
@@ -371,9 +450,7 @@ static int Transfer() {
         auto Inserted = RefMapping.insert(std::make_pair(Ref, memodb_ref()));
         if (Inserted.second) {
           memodb_value Value = SourceDb->get(Ref);
-          Value = transformRefs(Value, [&](const memodb_ref &SubRef) {
-            return transferRef(SubRef);
-          });
+          Value = transformRefs(Value, transferRef);
           Inserted.first->second = TargetDb->put(Value);
         }
         return Inserted.first->second;
