@@ -40,10 +40,10 @@ static const std::vector<const char *> SQLITE_PRAGMAS = {
     "PRAGMA journal_size_limit = 536870912;\n",
 };
 
-static const unsigned int CURRENT_VERSION = 5;
+static const unsigned int CURRENT_VERSION = 6;
 
 static const char SQLITE_INIT_STMTS[] =
-    "PRAGMA user_version = 5;\n"
+    "PRAGMA user_version = 6;\n"
     "PRAGMA application_id = 1111704642;\n"
     "CREATE TABLE value(\n"
     "  vid     INTEGER PRIMARY KEY,\n"
@@ -470,6 +470,14 @@ void sqlite_db::upgrade_schema() {
     static const char UPGRADE_STMTS[] =
         "CREATE INDEX call_by_fid ON call(fid);\n"
         "PRAGMA user_version = 5;\n";
+    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
+    if (rc != SQLITE_OK)
+      fatal_error();
+  }
+
+  // Version 6 adds optional CID support; no changes necessary.
+  if (user_version < 6) {
+    static const char UPGRADE_STMTS[] = "PRAGMA user_version = 6;\n";
     rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
     if (rc != SQLITE_OK)
       fatal_error();
