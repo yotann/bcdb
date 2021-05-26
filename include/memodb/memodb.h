@@ -41,18 +41,33 @@ std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes);
 std::string bytesToUTF8(llvm::StringRef Bytes);
 std::string utf8ToByteString(llvm::StringRef Str);
 
+class memodb_value;
+
 class memodb_ref {
 private:
-  std::string id_;
-  enum { EMPTY, NUMERIC, BLAKE2B_MERKLEDAG } type_;
+  std::vector<std::uint8_t> id_;
+  enum {
+    EMPTY,
+    NUMERIC,
+    INLINE_RAW,
+    INLINE_DAG,
+    BLAKE2B_RAW,
+    BLAKE2B_MERKLEDAG
+  } type_;
   friend class memodb_value;
 
 public:
   memodb_ref() : id_(), type_(EMPTY) {}
   memodb_ref(llvm::StringRef Text);
   static memodb_ref fromCID(llvm::ArrayRef<std::uint8_t> Bytes);
+  static memodb_ref fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes);
   static memodb_ref fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes);
-  bool isCID() const { return type_ == BLAKE2B_MERKLEDAG; }
+  bool isCID() const { return type_ != EMPTY && type_ != NUMERIC; }
+  bool isInline() const { return type_ == INLINE_RAW || type_ == INLINE_DAG; }
+  bool isBlake2BRaw() const { return type_ == BLAKE2B_RAW; }
+  bool isBlake2BMerkleDAG() const { return type_ == BLAKE2B_MERKLEDAG; }
+  memodb_value asInline() const;
+  llvm::ArrayRef<std::uint8_t> asBlake2BRaw() const;
   llvm::ArrayRef<std::uint8_t> asBlake2BMerkleDAG() const;
   std::vector<std::uint8_t> asCID() const;
   operator std::string() const;
@@ -273,6 +288,7 @@ public:
   }
   static memodb_value load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in);
   void save_cbor(std::vector<std::uint8_t> &out) const;
+  std::pair<memodb_ref, bytes_t> saveAsIPLD(bool noInline = false) const;
 
 private:
   void require_type(value_t type) const {

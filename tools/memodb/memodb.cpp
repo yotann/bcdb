@@ -230,13 +230,19 @@ static int Export() {
       [&](const memodb_ref &Ref) {
         if (!AlreadySeen.insert(Ref).second)
           return;
+        if (Ref.isInline())
+          return;
         if (!Ref.isCID())
           report_fatal_error("This database is too old to export; transfer its "
                              "data to a new database first.");
 
         Buffer = Ref.asCID();
         memodb_value Value = Db->get(Ref);
-        Value.save_cbor(Buffer);
+        if (Ref.isBlake2BRaw())
+          Buffer.insert(Buffer.end(), Value.as_bytes().begin(),
+                        Value.as_bytes().end());
+        else
+          Value.save_cbor(Buffer);
         writeVarInt(Buffer.size());
         OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
                                Buffer.size());

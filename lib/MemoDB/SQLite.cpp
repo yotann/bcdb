@@ -123,6 +123,10 @@ class sqlite_db : public memodb_db {
 
   void upgrade_schema();
 
+  sqlite3_int64 putInternal(const memodb_ref &Ref,
+                            const memodb_value::bytes_t &Bytes,
+                            const memodb_value &Value);
+
   friend class Transaction;
 
 public:
@@ -486,14 +490,18 @@ void sqlite_db::upgrade_schema() {
 
 memodb_ref sqlite_db::id_to_ref(sqlite3_int64 id) {
   sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT hash FROM blob WHERE vid = ?1");
+  Stmt stmt(db, "SELECT type, hash FROM blob WHERE vid = ?1");
   stmt.bind_int(1, id);
   if (stmt.step() != SQLITE_ROW)
     fatal_error();
   auto Data =
-      reinterpret_cast<const std::uint8_t *>(sqlite3_column_blob(stmt.stmt, 0));
-  int Size = sqlite3_column_bytes(stmt.stmt, 0);
-  return memodb_ref::fromBlake2BMerkleDAG(llvm::ArrayRef(Data, Size));
+      reinterpret_cast<const std::uint8_t *>(sqlite3_column_blob(stmt.stmt, 1));
+  int Size = sqlite3_column_bytes(stmt.stmt, 1);
+  auto Bytes = llvm::ArrayRef(Data, Size);
+  if (sqlite3_column_int64(stmt.stmt, 0) == BYTES_BLOB)
+    return memodb_ref::fromBlake2BRaw(Bytes);
+  else
+    return memodb_ref::fromBlake2BMerkleDAG(Bytes);
 }
 
 memodb_ref sqlite_db::id_to_ref_obsolete(sqlite3_int64 id) {
@@ -501,9 +509,14 @@ memodb_ref sqlite_db::id_to_ref_obsolete(sqlite3_int64 id) {
 }
 
 sqlite3_int64 sqlite_db::ref_to_id(const memodb_ref &ref) {
-  if (ref.isCID()) {
+  if (ref.isInline()) {
+    memodb_value Value = ref.asInline();
+    auto IPLD = Value.saveAsIPLD(true);
+    return putInternal(IPLD.first, IPLD.second, Value);
+  } else if (ref.isCID()) {
     sqlite3 *db = get_db();
-    auto Hash = ref.asBlake2BMerkleDAG();
+    auto Hash =
+        ref.isBlake2BRaw() ? ref.asBlake2BRaw() : ref.asBlake2BMerkleDAG();
     Stmt stmt(db, "SELECT vid FROM blob WHERE hash = ?1");
     stmt.bind_blob(1, Hash.data(), Hash.size());
     if (stmt.step() != SQLITE_ROW)
@@ -517,31 +530,30 @@ sqlite3_int64 sqlite_db::ref_to_id(const memodb_ref &ref) {
   }
 }
 
-memodb_ref sqlite_db::put(const memodb_value &value) {
+sqlite3_int64 sqlite_db::putInternal(const memodb_ref &Ref,
+                                     const memodb_value::bytes_t &Bytes,
+                                     const memodb_value &Value) {
   sqlite3 *db = get_db();
 
-  std::vector<std::uint8_t> buffer;
   int value_type;
-  if (value.type() == memodb_value::BYTES) {
+  llvm::ArrayRef<std::uint8_t> hash;
+  if (Ref.isBlake2BRaw()) {
     value_type = BYTES_BLOB;
-    buffer = value.as_bytes();
-  } else {
+    hash = Ref.asBlake2BRaw();
+  } else if (Ref.isBlake2BMerkleDAG()) {
     value_type = CBOR_BLOB;
-    value.save_cbor(buffer);
-  }
-
-  unsigned char hash[crypto_generichash_BYTES];
-  crypto_generichash(hash, sizeof hash, buffer.data(), buffer.size(), nullptr,
-                     0);
+    hash = Ref.asBlake2BMerkleDAG();
+  } else
+    llvm::report_fatal_error("invalid CID type for put");
 
   // Optimistically check for an existing entry (without a transaction).
   {
     Stmt select_stmt(db, "SELECT vid FROM blob WHERE hash = ?1 AND type = ?2");
-    select_stmt.bind_blob(1, hash, sizeof hash);
+    select_stmt.bind_blob(1, hash.data(), hash.size());
     select_stmt.bind_int(2, value_type);
     int step = select_stmt.step();
     if (step == SQLITE_ROW)
-      return id_to_ref(sqlite3_column_int64(select_stmt.stmt, 0));
+      return sqlite3_column_int64(select_stmt.stmt, 0);
     if (step != SQLITE_DONE)
       fatal_error();
   }
@@ -551,11 +563,11 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
   Transaction transaction(*this);
   {
     Stmt select_stmt(db, "SELECT vid FROM blob WHERE hash = ?1 AND type = ?2");
-    select_stmt.bind_blob(1, hash, sizeof hash);
+    select_stmt.bind_blob(1, hash.data(), hash.size());
     select_stmt.bind_int(2, value_type);
     int step = select_stmt.step();
     if (step == SQLITE_ROW)
-      return id_to_ref(sqlite3_column_int64(select_stmt.stmt, 0));
+      return sqlite3_column_int64(select_stmt.stmt, 0);
     if (step != SQLITE_DONE)
       fatal_error();
   }
@@ -577,17 +589,24 @@ memodb_ref sqlite_db::put(const memodb_value &value) {
                   "(?1,?2,?3,?4)");
     stmt.bind_int(1, new_id);
     stmt.bind_int(2, value_type);
-    stmt.bind_blob(3, hash, sizeof hash);
-    stmt.bind_blob(4, buffer.data(), buffer.size());
+    stmt.bind_blob(3, hash.data(), hash.size());
+    stmt.bind_blob(4, Bytes.data(), Bytes.size());
     if (stmt.step() != SQLITE_DONE)
       fatal_error();
   }
 
   // Update the refs table.
-  add_refs_from(new_id, value);
+  add_refs_from(new_id, Value);
 
   transaction.commit();
-  return id_to_ref(new_id);
+  return new_id;
+}
+
+memodb_ref sqlite_db::put(const memodb_value &value) {
+  auto IPLD = value.saveAsIPLD();
+  if (!IPLD.first.isInline())
+    putInternal(IPLD.first, IPLD.second, value);
+  return IPLD.first;
 }
 
 void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
@@ -645,6 +664,8 @@ void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
 void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   sqlite3 *db = get_db();
   if (value.type() == memodb_value::REF) {
+    if (value.as_ref().isInline())
+      return;
     auto dest = ref_to_id(value.as_ref());
     Stmt stmt(db, "INSERT OR IGNORE INTO refs(src, dest) VALUES (?1,?2)");
     stmt.bind_int(1, id);
@@ -726,6 +747,9 @@ void sqlite_db::identifyCalls(std::vector<memodb_call> &Result,
 llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
   sqlite3 *db = get_db();
   if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
+    if (Ref->isInline())
+      return Ref->asInline();
+
     Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
     stmt.bind_int(1, ref_to_id(*Ref));
     int rc = stmt.step();

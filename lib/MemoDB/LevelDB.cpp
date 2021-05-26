@@ -18,12 +18,13 @@
 #include <tuple>
 #include <vector>
 
-typedef std::array<uint8_t, crypto_generichash_BYTES> Hash;
+typedef std::array<uint8_t, 32> Hash;
 
 typedef std::array<uint8_t, 3> KeyType;
 
 static const Hash HASH_NONE = {};
 
+static const KeyType KEY_BYTES = {0x00, 0xe2, 0x64};
 static const KeyType KEY_CALL = {0x01, 0x01, 0x6b};
 static const KeyType KEY_CBOR = {0x01, 0x05, 0xd1};
 static const KeyType KEY_FUNC = {0x02, 0xd1, 0xa2};
@@ -39,6 +40,7 @@ static const leveldb::Slice MAGIC_VALUE("MemoDB v2");
  * (empty)                            -> MAGIC_VALUE
  * HASH_NONE + KEY_FUNC   + name      -> (empty)
  * HASH_NONE + KEY_HEAD   + name      -> CBOR ref
+ * hash      + KEY_BYTES              -> raw value
  * hash      + KEY_CBOR               -> CBOR value
  * hash      + KEY_REF    + key       -> (empty)
  * name_hash + KEY_CALL   + args_hash -> CBOR [name, args...]
@@ -84,7 +86,6 @@ class LevelDBMemo : public memodb_db {
   std::tuple<Hash, KeyType, leveldb::Slice> breakKey(const leveldb::Slice &Key);
   void checkStatus(leveldb::Status Status);
   bool checkFound(leveldb::Status Status);
-  memodb_ref hashToRef(const Hash &Hash);
   std::string makeKey(const Hash &Hash, const KeyType &KeyType,
                       const leveldb::Slice &Extra = {});
   Hash refToHash(const memodb_ref &Ref);
@@ -94,6 +95,7 @@ class LevelDBMemo : public memodb_db {
   void deleteRefs(leveldb::WriteBatch &Batch, const leveldb::Slice &Key,
                   const memodb_value &Value);
 
+  llvm::Optional<memodb_value> getBytesByKey(const leveldb::Slice &Key);
   llvm::Optional<memodb_value> getCBORByKey(const leveldb::Slice &Key);
 
   memodb_value makeCall(llvm::StringRef Name, llvm::ArrayRef<memodb_ref> Args);
@@ -141,10 +143,6 @@ bool LevelDBMemo::checkFound(leveldb::Status Status) {
   return true;
 }
 
-memodb_ref LevelDBMemo::hashToRef(const Hash &Hash) {
-  return memodb_ref::fromBlake2BMerkleDAG(Hash);
-}
-
 std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
                                  const leveldb::Slice &Extra) {
   std::string Result(Hash.size() + KeyType.size() + Extra.size(), '\0');
@@ -157,7 +155,13 @@ std::string LevelDBMemo::makeKey(const Hash &Hash, const KeyType &KeyType,
 
 Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
   Hash Result;
-  auto Bytes = Ref.asBlake2BMerkleDAG();
+  llvm::ArrayRef<std::uint8_t> Bytes;
+  if (Ref.isBlake2BMerkleDAG())
+    Bytes = Ref.asBlake2BMerkleDAG();
+  else if (Ref.isBlake2BRaw())
+    Bytes = Ref.asBlake2BRaw();
+  else
+    llvm::report_fatal_error("invalid ID type");
   if (Bytes.size() != Result.size())
     llvm::report_fatal_error("invalid hash size");
   for (size_t i = 0; i < Result.size(); i++)
@@ -168,6 +172,8 @@ Hash LevelDBMemo::refToHash(const memodb_ref &Ref) {
 void LevelDBMemo::addRefs(leveldb::WriteBatch &Batch, const leveldb::Slice &Key,
                           const memodb_value &Value) {
   if (Value.type() == memodb_value::REF) {
+    if (Value.as_ref().isInline())
+      return;
     Hash Dest = refToHash(Value.as_ref());
     std::string NewKey = makeKey(Dest, KEY_REF, Key);
     Batch.Put(NewKey, leveldb::Slice());
@@ -186,6 +192,8 @@ void LevelDBMemo::deleteRefs(leveldb::WriteBatch &Batch,
                              const leveldb::Slice &Key,
                              const memodb_value &Value) {
   if (Value.type() == memodb_value::REF) {
+    if (Value.as_ref().isInline())
+      return;
     Hash Dest = refToHash(Value.as_ref());
     std::string NewKey = makeKey(Dest, KEY_REF, Key);
     Batch.Delete(NewKey);
@@ -198,6 +206,16 @@ void LevelDBMemo::deleteRefs(leveldb::WriteBatch &Batch,
       deleteRefs(Batch, Key, Item.second);
     }
   }
+}
+
+llvm::Optional<memodb_value>
+LevelDBMemo::getBytesByKey(const leveldb::Slice &Key) {
+  leveldb::ReadOptions ReadOptions;
+  std::string Bytes;
+  bool Found = checkFound(DB->Get(ReadOptions, Key, &Bytes));
+  if (!Found)
+    return llvm::None;
+  return memodb_value(memodb_value::bytes_t(makeBytes(Bytes)));
 }
 
 llvm::Optional<memodb_value>
@@ -257,8 +275,12 @@ LevelDBMemo::~LevelDBMemo() {}
 
 llvm::Optional<memodb_value> LevelDBMemo::getOptional(const memodb_name &name) {
   if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
-    std::string Key = makeKey(refToHash(*Ref), KEY_CBOR);
-    return getCBORByKey(Key);
+    if (Ref->isInline())
+      return Ref->asInline();
+    if (Ref->isBlake2BRaw())
+      return getBytesByKey(makeKey(refToHash(*Ref), KEY_BYTES));
+    else
+      return getCBORByKey(makeKey(refToHash(*Ref), KEY_CBOR));
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
     std::string Key =
         makeKey(HASH_NONE, KEY_HEAD,
@@ -279,23 +301,26 @@ llvm::Optional<memodb_value> LevelDBMemo::getOptional(const memodb_name &name) {
 }
 
 memodb_ref LevelDBMemo::put(const memodb_value &value) {
-  std::vector<std::uint8_t> Buffer;
-  value.save_cbor(Buffer);
-  Hash Hash = calculateHash(Buffer);
-  std::string Key = makeKey(Hash, KEY_CBOR);
+  auto IPLD = value.saveAsIPLD();
+  if (IPLD.first.isInline())
+    return IPLD.first;
+
+  Hash Hash = refToHash(IPLD.first);
+  const KeyType &KeyType = IPLD.first.isBlake2BRaw() ? KEY_BYTES : KEY_CBOR;
+  std::string Key = makeKey(Hash, KeyType);
   std::string FetchedValue;
   leveldb::ReadOptions ReadOptions;
   if (checkFound(DB->Get(ReadOptions, Key, &FetchedValue))) {
-    assert(makeSlice(Buffer) == FetchedValue);
-    return hashToRef(Hash);
+    assert(makeSlice(IPLD.second) == FetchedValue);
+    return IPLD.first;
   }
 
   leveldb::WriteBatch Batch;
-  Batch.Put(Key, makeSlice(Buffer));
+  Batch.Put(Key, makeSlice(IPLD.second));
   addRefs(Batch, Key, value);
   leveldb::WriteOptions WriteOptions;
   checkStatus(DB->Write(WriteOptions, &Batch));
-  return hashToRef(Hash);
+  return IPLD.first;
 }
 
 void LevelDBMemo::set(const memodb_name &Name, const memodb_ref &ref) {
@@ -361,7 +386,8 @@ std::vector<memodb_name> LevelDBMemo::list_names_using(const memodb_ref &ref) {
     if (!RefValue)
       continue;
     if (std::get<1>(RefBroken) == KEY_CBOR) {
-      Result.emplace_back(hashToRef(std::get<0>(RefBroken)));
+      Result.emplace_back(
+          memodb_ref::fromBlake2BMerkleDAG(std::get<0>(RefBroken)));
     } else if (std::get<1>(RefBroken) == KEY_HEAD) {
       Result.emplace_back(memodb_head(std::get<2>(RefBroken).ToString()));
     } else if (std::get<1>(RefBroken) == KEY_CALL ||

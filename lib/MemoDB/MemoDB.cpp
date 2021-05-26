@@ -5,6 +5,7 @@
 #include <llvm/Support/ConvertUTF.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_os_ostream.h>
+#include <sodium.h>
 #include <sstream>
 
 ParsedURI::ParsedURI(llvm::StringRef URI) {
@@ -111,13 +112,32 @@ static const char *BASE32_PREFIX = "b";
 
 static const llvm::StringRef BASE32_TABLE("abcdefghijklmnopqrstuvwxyz234567");
 
-static const size_t HASH_SIZE = 32;
+static const size_t HASH_SIZE = crypto_generichash_BYTES;
 
-static const std::array<std::uint8_t, 6> CID_PREFIX = {
-    0x01,             // CIDv1
-    0x71,             // content type: MerkleDAG CBOR
-    0xa0, 0xe4, 0x02, // multihash function: Blake2B-256
-    0x20,             // multihash size: 256 bits
+static const std::array<std::uint8_t, 3> CID_PREFIX_INLINE_RAW = {
+    0x01, // CIDv1
+    0x55, // content type: raw
+    0x00, // multihash function: identity
+};
+
+static const std::array<std::uint8_t, 3> CID_PREFIX_INLINE_DAG = {
+    0x01, // CIDv1
+    0x71, // content type: MerkleDAG CBOR
+    0x00, // multihash function: identity
+};
+
+static const std::array<std::uint8_t, 6> CID_PREFIX_RAW = {
+    0x01,                  // CIDv1
+    0x55,                  // content type: raw
+    0xa0,      0xe4, 0x02, // multihash function: Blake2B-256
+    HASH_SIZE,             // multihash size
+};
+
+static const std::array<std::uint8_t, 6> CID_PREFIX_DAG = {
+    0x01,                  // CIDv1
+    0x71,                  // content type: MerkleDAG CBOR
+    0xa0,      0xe4, 0x02, // multihash function: Blake2B-256
+    HASH_SIZE,             // multihash size
 };
 
 static std::vector<std::uint8_t> decodeBase32(llvm::StringRef Str) {
@@ -164,7 +184,8 @@ memodb_ref::memodb_ref(llvm::StringRef Text) {
   if (Text.startswith(BASE32_PREFIX)) {
     *this = fromCID(decodeBase32(Text.drop_front()));
   } else if (Text.find_first_not_of("0123456789") == llvm::StringRef::npos) {
-    id_ = Text;
+    id_ = llvm::ArrayRef(reinterpret_cast<const std::uint8_t *>(Text.data()),
+                         Text.size());
     type_ = NUMERIC;
   } else {
     llvm::report_fatal_error(llvm::Twine("invalid ID format ") + Text);
@@ -172,11 +193,41 @@ memodb_ref::memodb_ref(llvm::StringRef Text) {
 }
 
 memodb_ref memodb_ref::fromCID(llvm::ArrayRef<std::uint8_t> Bytes) {
-  if (Bytes.take_front(CID_PREFIX.size()).equals(CID_PREFIX)) {
-    return fromBlake2BMerkleDAG(Bytes.drop_front(CID_PREFIX.size()));
+  auto startsWith = [&](const auto &Prefix) {
+    return Bytes.take_front(Prefix.size()).equals(Prefix);
+  };
+  if (startsWith(CID_PREFIX_RAW)) {
+    return fromBlake2BRaw(Bytes.drop_front(CID_PREFIX_RAW.size()));
+  } else if (startsWith(CID_PREFIX_DAG)) {
+    return fromBlake2BMerkleDAG(Bytes.drop_front(CID_PREFIX_DAG.size()));
+  } else if (startsWith(CID_PREFIX_INLINE_RAW)) {
+    Bytes = Bytes.drop_front(CID_PREFIX_INLINE_RAW.size());
+    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] != Bytes.size() - 1)
+      llvm::report_fatal_error("invalid inline CID");
+    memodb_ref Result;
+    Result.id_ = Bytes.drop_front(1);
+    Result.type_ = INLINE_RAW;
+    return Result;
+  } else if (startsWith(CID_PREFIX_INLINE_DAG)) {
+    Bytes = Bytes.drop_front(CID_PREFIX_INLINE_DAG.size());
+    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] != Bytes.size() - 1)
+      llvm::report_fatal_error("invalid inline CID");
+    memodb_ref Result;
+    Result.id_ = Bytes.drop_front(1);
+    Result.type_ = INLINE_DAG;
+    return Result;
   } else {
     llvm::report_fatal_error(llvm::Twine("invalid CID"));
   }
+}
+
+memodb_ref memodb_ref::fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes) {
+  if (Bytes.size() != HASH_SIZE)
+    llvm::report_fatal_error("incorrect Blake2B hash size");
+  memodb_ref Result;
+  Result.id_ = Bytes;
+  Result.type_ = BLAKE2B_RAW;
+  return Result;
 }
 
 memodb_ref
@@ -184,21 +235,46 @@ memodb_ref::fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes) {
   if (Bytes.size() != HASH_SIZE)
     llvm::report_fatal_error("incorrect Blake2B hash size");
   memodb_ref Result;
-  Result.id_ =
-      std::string(reinterpret_cast<const char *>(Bytes.data()), Bytes.size());
+  Result.id_ = Bytes;
   Result.type_ = BLAKE2B_MERKLEDAG;
   return Result;
+}
+
+memodb_value memodb_ref::asInline() const {
+  if (type_ == INLINE_RAW)
+    return memodb_value(id_);
+  else if (type_ == INLINE_DAG)
+    return memodb_value::load_cbor(id_);
+  else
+    llvm::report_fatal_error("incorrect type of ID");
+}
+
+llvm::ArrayRef<std::uint8_t> memodb_ref::asBlake2BRaw() const {
+  if (type_ != BLAKE2B_RAW)
+    llvm::report_fatal_error("incorrect type of ID");
+  return id_;
 }
 
 llvm::ArrayRef<std::uint8_t> memodb_ref::asBlake2BMerkleDAG() const {
   if (type_ != BLAKE2B_MERKLEDAG)
     llvm::report_fatal_error("incorrect type of ID");
-  return llvm::ArrayRef(reinterpret_cast<const std::uint8_t *>(id_.data()),
-                        id_.size());
+  return id_;
 }
 
 std::vector<std::uint8_t> memodb_ref::asCID() const {
-  std::vector<std::uint8_t> Result(CID_PREFIX.begin(), CID_PREFIX.end());
+  std::vector<std::uint8_t> Result;
+  if (type_ == BLAKE2B_RAW)
+    Result.assign(CID_PREFIX_RAW.begin(), CID_PREFIX_RAW.end());
+  else if (type_ == BLAKE2B_MERKLEDAG)
+    Result.assign(CID_PREFIX_DAG.begin(), CID_PREFIX_DAG.end());
+  else if (type_ == INLINE_RAW) {
+    Result.assign(CID_PREFIX_INLINE_RAW.begin(), CID_PREFIX_INLINE_RAW.end());
+    Result.push_back(id_.size());
+  } else if (type_ == INLINE_DAG) {
+    Result.assign(CID_PREFIX_INLINE_DAG.begin(), CID_PREFIX_INLINE_DAG.end());
+    Result.push_back(id_.size());
+  } else
+    llvm::report_fatal_error("ID not a CID");
   Result.insert(Result.end(), id_.begin(), id_.end());
   return Result;
 }
@@ -207,13 +283,10 @@ memodb_ref::operator std::string() const {
   if (type_ == EMPTY)
     return "";
   else if (type_ == NUMERIC)
-    return id_;
-  else if (type_ == BLAKE2B_MERKLEDAG) {
-    std::vector<std::uint8_t> Bytes(CID_PREFIX.begin(), CID_PREFIX.end());
-    Bytes.insert(Bytes.end(), id_.begin(), id_.end());
+    return std::string(reinterpret_cast<const char *>(id_.data()), id_.size());
+  else {
+    auto Bytes = asCID();
     return BASE32_PREFIX + encodeBase32(Bytes);
-  } else {
-    llvm_unreachable("impossible memodb_ref type");
   }
 }
 
@@ -694,6 +767,30 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                  },
              },
              variant_);
+}
+
+std::pair<memodb_ref, memodb_value::bytes_t>
+memodb_value::saveAsIPLD(bool noInline) const {
+  bool raw = type() == BYTES;
+  bytes_t Bytes;
+  if (raw)
+    Bytes = as_bytes();
+  else
+    save_cbor(Bytes);
+  if (!noInline && CID_PREFIX_INLINE_DAG.size() + 1 + Bytes.size() <=
+                       CID_PREFIX_DAG.size() + HASH_SIZE) {
+    memodb_ref Ref;
+    Ref.id_ = std::move(Bytes);
+    Ref.type_ = raw ? memodb_ref::INLINE_RAW : memodb_ref::INLINE_DAG;
+    return {Ref, {}};
+  } else {
+    memodb_ref Ref;
+    Ref.id_.resize(HASH_SIZE);
+    Ref.type_ = raw ? memodb_ref::BLAKE2B_RAW : memodb_ref::BLAKE2B_MERKLEDAG;
+    crypto_generichash(Ref.id_.data(), Ref.id_.size(), Bytes.data(),
+                       Bytes.size(), nullptr, 0);
+    return {std::move(Ref), std::move(Bytes)};
+  }
 }
 
 std::vector<memodb_path> memodb_db::list_paths_to(const memodb_ref &ref) {
