@@ -12,7 +12,9 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 #include <memory>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "bcdb/LLVMCompat.h"
 #include "memodb/memodb.h"
@@ -21,6 +23,7 @@ using namespace llvm;
 
 cl::OptionCategory MemoDBCategory("MemoDB options");
 
+static cl::SubCommand ExportCommand("export", "Export values to a CAR file");
 static cl::SubCommand GetCommand("get", "Get a value");
 static cl::SubCommand ListCallsCommand("list-calls",
                                        "List all cached calls of a function");
@@ -117,27 +120,133 @@ static memodb_ref ReadRef(memodb_db &Db, llvm::StringRef URI) {
 // output options
 
 static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"),
-                           cl::sub(GetCommand));
+                           cl::sub(ExportCommand), cl::sub(GetCommand));
 
 static cl::opt<std::string> OutputFilename("o", cl::desc("<output file>"),
                                            cl::init("-"),
                                            cl::value_desc("filename"),
+                                           cl::sub(ExportCommand),
                                            cl::sub(GetCommand));
 
-static void WriteValue(const memodb_value &Value) {
+static std::unique_ptr<ToolOutputFile> GetOutputFile() {
   ExitOnError Err("value write: ");
   std::error_code EC;
   auto OutputFile =
       std::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::F_None);
   if (EC)
     Err(errorCodeToError(EC));
-  if (Force || !CheckBitcodeOutputToConsole(OutputFile->os())) {
+  if (Force || !CheckBitcodeOutputToConsole(OutputFile->os()))
+    return OutputFile;
+  return nullptr;
+}
+
+static void WriteValue(const memodb_value &Value) {
+  auto OutputFile = GetOutputFile();
+  if (OutputFile) {
     std::vector<std::uint8_t> Buffer;
     Value.save_cbor(Buffer);
     OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
                            Buffer.size());
     OutputFile->keep();
   }
+}
+
+// helper functions
+
+template <typename T> void walkRefs(const memodb_value &Value, T F) {
+  if (Value.type() == memodb_value::REF) {
+    F(Value.as_ref());
+  } else if (Value.type() == memodb_value::ARRAY) {
+    for (const memodb_value &Item : Value.array_items())
+      walkRefs(Item, F);
+  } else if (Value.type() == memodb_value::MAP) {
+    for (const auto &Item : Value.map_items())
+      walkRefs(Item.second, F);
+  }
+}
+
+template <typename T>
+memodb_value transformRefs(const memodb_value &Value, T F) {
+  if (Value.type() == memodb_value::REF) {
+    return F(Value.as_ref());
+  } else if (Value.type() == memodb_value::ARRAY) {
+    memodb_value::array_t Result;
+    for (const memodb_value &Item : Value.array_items())
+      Result.push_back(transformRefs(Item, F));
+    return memodb_value(Result);
+  } else if (Value.type() == memodb_value::MAP) {
+    memodb_value::map_t Result;
+    for (const auto &Item : Value.map_items())
+      Result[Item.first] = transformRefs(Item.second, F);
+    return memodb_value(Result);
+  } else {
+    return Value;
+  }
+}
+
+// memodb export
+
+static cl::list<std::string> NamesToExport(cl::Positional, cl::OneOrMore,
+                                           cl::desc("<names to export>"),
+                                           cl::value_desc("names"),
+                                           cl::cat(MemoDBCategory),
+                                           cl::sub(ExportCommand));
+
+static int Export() {
+  // Create a CAR file:
+  // https://github.com/ipld/specs/blob/master/block-layer/content-addressable-archives.md
+
+  auto OutputFile = GetOutputFile();
+  if (!OutputFile)
+    return 0;
+
+  auto writeVarInt = [&](size_t Value) {
+    for (; Value >= 0x80; Value >>= 7)
+      OutputFile->os().write((Value & 0x7f) | 0x80);
+    OutputFile->os().write(Value);
+  };
+
+  auto Db = memodb_db_open(GetUri());
+  memodb_value Root = memodb_value::map();
+  for (const std::string &NameStr : NamesToExport) {
+    memodb_name Name = GetNameFromURI(NameStr);
+    if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name))
+      Root[NameStr] = *Ref;
+    else
+      Root[NameStr] = Db->get(Name);
+  }
+  memodb_ref RootRef = Db->put(Root);
+
+  memodb_value Header = memodb_value::map(
+      {{"roots", memodb_value::array({RootRef})}, {"version", 1}});
+  std::vector<std::uint8_t> Buffer;
+  Header.save_cbor(Buffer);
+  writeVarInt(Buffer.size());
+  OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
+                         Buffer.size());
+
+  std::set<memodb_ref> AlreadySeen;
+  std::function<void(const memodb_ref &)> handleRef =
+      [&](const memodb_ref &Ref) {
+        if (!AlreadySeen.insert(Ref).second)
+          return;
+        if (!Ref.isCID())
+          report_fatal_error("This database is too old to export; transfer its "
+                             "data to a new database first.");
+
+        Buffer = Ref.asCID();
+        memodb_value Value = Db->get(Ref);
+        Value.save_cbor(Buffer);
+        writeVarInt(Buffer.size());
+        OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
+                               Buffer.size());
+
+        walkRefs(Value, handleRef);
+      };
+
+  handleRef(RootRef);
+  OutputFile->keep();
+  return 0;
 }
 
 // memodb get
@@ -245,25 +354,6 @@ static cl::list<std::string> NamesToTransfer(cl::Positional, cl::ZeroOrMore,
                                              cl::cat(MemoDBCategory),
                                              cl::sub(TransferCommand));
 
-template <typename T>
-memodb_value transformRefs(const memodb_value &Value, T F) {
-  if (Value.type() == memodb_value::REF) {
-    return F(Value.as_ref());
-  } else if (Value.type() == memodb_value::ARRAY) {
-    memodb_value::array_t Result;
-    for (const memodb_value &Item : Value.array_items())
-      Result.push_back(transformRefs(Item, F));
-    return memodb_value(Result);
-  } else if (Value.type() == memodb_value::MAP) {
-    memodb_value::map_t Result;
-    for (const auto &Item : Value.map_items())
-      Result[Item.first] = transformRefs(Item.second, F);
-    return memodb_value(Result);
-  } else {
-    return Value;
-  }
-}
-
 static int Transfer() {
   auto SourceDb = memodb_db_open(GetUri());
   auto TargetDb = memodb_db_open(TargetDatabaseURI);
@@ -331,7 +421,9 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Tools");
 
-  if (GetCommand) {
+  if (ExportCommand) {
+    return Export();
+  } else if (GetCommand) {
     return Get();
   } else if (ListCallsCommand) {
     return ListCalls();
