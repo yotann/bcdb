@@ -560,7 +560,11 @@ sqlite3_int64 sqlite_db::putInternal(const memodb_ref &Ref,
 
   // We may need to add a new entry. Start an exclusive transaction and check
   // again (an entry may have been added since the previous check).
-  Transaction transaction(*this);
+  std::unique_ptr<Transaction> transaction;
+  if (sqlite3_txn_state(db, nullptr) == SQLITE_TXN_NONE) {
+    transaction.reset(new Transaction(*this));
+  }
+
   {
     Stmt select_stmt(db, "SELECT vid FROM blob WHERE hash = ?1 AND type = ?2");
     select_stmt.bind_blob(1, hash.data(), hash.size());
@@ -598,7 +602,8 @@ sqlite3_int64 sqlite_db::putInternal(const memodb_ref &Ref,
   // Update the refs table.
   add_refs_from(new_id, Value);
 
-  transaction.commit();
+  if (transaction)
+    transaction->commit();
   return new_id;
 }
 
