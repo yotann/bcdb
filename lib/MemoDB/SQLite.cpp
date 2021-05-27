@@ -707,7 +707,7 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
 }
 
 memodb_call sqlite_db::identifyCall(sqlite3_int64 CID) {
-  sqlite3_int64 FID;
+  sqlite3_int64 FID = -1;
   std::vector<memodb_ref> ArgsReversed;
   sqlite3 *db = get_db();
   while (true) {
