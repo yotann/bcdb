@@ -243,14 +243,20 @@ void LevelDBMemo::open(llvm::StringRef uri, bool create_if_missing) {
       !Parsed.Query.empty() || !Parsed.Fragment.empty())
     llvm::report_fatal_error("Unsupported LevelDB URI");
 
-  // Keep 10 bits per key in RAM, probably 0.1% the size of the database file.
-  FilterPolicy.reset(leveldb::NewBloomFilterPolicy(10));
-
   leveldb::Options Options;
   Options.create_if_missing = create_if_missing;
+
+  // Keep up to 2*64MiB written data in RAM before flushing to disk.
   Options.write_buffer_size = 64 * 1024 * 1024;
-  Options.block_size = 16 * 1024;
-  Options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+
+  // Snappy compression gets significantly better results with larger blocks,
+  // but levels off after 64KiB.
+  Options.block_size = 64 * 1024;
+
+  // Keep 10 bits per key in RAM, probably 0.1% the size of the database file.
+  FilterPolicy.reset(leveldb::NewBloomFilterPolicy(10));
+  Options.filter_policy = FilterPolicy.get();
+
   leveldb::DB *TmpDB;
   checkStatus(leveldb::DB::Open(Options, Parsed.Path, &TmpDB));
   DB.reset(TmpDB);
