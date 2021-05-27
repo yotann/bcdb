@@ -123,6 +123,7 @@ class sqlite_db : public memodb_db {
 
   void upgrade_schema();
 
+  llvm::Optional<memodb_value> getInternal(sqlite3_int64 id);
   sqlite3_int64 putInternal(const memodb_ref &Ref,
                             const memodb_value::bytes_t &Bytes,
                             const memodb_value &Value);
@@ -497,6 +498,15 @@ void sqlite_db::upgrade_schema() {
 }
 
 memodb_ref sqlite_db::id_to_ref(sqlite3_int64 id) {
+  // We can't just look up the hash because the content might be small enough
+  // that we should use an inline CID instead. On the other hand, we can't just
+  // use the hash calculated with saveAsIPLD() because it might use the wrong
+  // canonicalization of CBOR.
+  memodb_value Value = *getInternal(id);
+  auto Block = Value.saveAsIPLD();
+  if (Block.first.isInline())
+    return Block.first;
+
   sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT type, hash FROM blob WHERE vid = ?1");
   stmt.bind_int(1, id);
@@ -757,33 +767,37 @@ void sqlite_db::identifyCalls(std::vector<memodb_call> &Result,
   }
 }
 
+llvm::Optional<memodb_value> sqlite_db::getInternal(sqlite3_int64 id) {
+  sqlite3 *db = get_db();
+  Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
+  stmt.bind_int(1, id);
+  int rc = stmt.step();
+  if (rc == SQLITE_DONE)
+    return llvm::None;
+  if (rc != SQLITE_ROW)
+    fatal_error();
+
+  int value_type = sqlite3_column_int64(stmt.stmt, 1);
+  const char *data =
+      reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
+  int size = sqlite3_column_bytes(stmt.stmt, 0);
+  switch (value_type) {
+  case BYTES_BLOB:
+    return memodb_value::bytes(llvm::StringRef(data, size));
+  case CBOR_BLOB:
+    return memodb_value::load_cbor(llvm::ArrayRef<std::uint8_t>(
+        reinterpret_cast<const std::uint8_t *>(data), size));
+  default:
+    llvm_unreachable("impossible blob type");
+  }
+}
+
 llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
   sqlite3 *db = get_db();
   if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
     if (Ref->isInline())
       return Ref->asInline();
-
-    Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
-    stmt.bind_int(1, ref_to_id(*Ref));
-    int rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      return llvm::None;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-
-    int value_type = sqlite3_column_int64(stmt.stmt, 1);
-    const char *data =
-        reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
-    int size = sqlite3_column_bytes(stmt.stmt, 0);
-    switch (value_type) {
-    case BYTES_BLOB:
-      return memodb_value::bytes(llvm::StringRef(data, size));
-    case CBOR_BLOB:
-      return memodb_value::load_cbor(llvm::ArrayRef<std::uint8_t>(
-          reinterpret_cast<const std::uint8_t *>(data), size));
-    default:
-      llvm_unreachable("impossible blob type");
-    }
+    return getInternal(ref_to_id(*Ref));
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
     Stmt stmt(db, "SELECT vid FROM head WHERE name = ?1");
     stmt.bind_text(1, Head->Name);
