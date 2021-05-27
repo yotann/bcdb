@@ -138,11 +138,11 @@ public:
   memodb_ref put(const memodb_value &value) override;
   void set(const memodb_name &Name, const memodb_ref &ref) override;
   std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
-  std::vector<memodb_call> list_calls(llvm::StringRef Func) override;
   std::vector<std::string> list_funcs() override;
-  std::vector<memodb_head> list_heads() override;
+  void eachHead(std::function<bool(const memodb_head &)> F) override;
+  void eachCall(llvm::StringRef Func,
+                std::function<bool(const memodb_call &)> F) override;
   void head_delete(const memodb_head &Head) override;
-
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
@@ -936,9 +936,9 @@ std::vector<memodb_name> sqlite_db::list_names_using(const memodb_ref &ref) {
   return Result;
 }
 
-std::vector<memodb_call> sqlite_db::list_calls(llvm::StringRef Func) {
+void sqlite_db::eachCall(llvm::StringRef Func,
+                         std::function<bool(const memodb_call &)> F) {
   sqlite3 *db = get_db();
-  std::vector<memodb_call> Result;
   sqlite3_int64 FID = get_fid(Func);
   Stmt stmt(db, "SELECT cid FROM call WHERE fid = ? AND result NOT NULL");
   stmt.bind_int(1, FID);
@@ -948,9 +948,9 @@ std::vector<memodb_call> sqlite_db::list_calls(llvm::StringRef Func) {
       break;
     if (rc != SQLITE_ROW)
       fatal_error();
-    Result.emplace_back(identifyCall(sqlite3_column_int64(stmt.stmt, 0)));
+    if (F(identifyCall(sqlite3_column_int64(stmt.stmt, 0))))
+      break;
   }
-  return Result;
 }
 
 std::vector<std::string> sqlite_db::list_funcs() {
@@ -969,9 +969,8 @@ std::vector<std::string> sqlite_db::list_funcs() {
   return result;
 }
 
-std::vector<memodb_head> sqlite_db::list_heads() {
+void sqlite_db::eachHead(std::function<bool(const memodb_head &)> F) {
   sqlite3 *db = get_db();
-  std::vector<memodb_head> result;
   Stmt stmt(db, "SELECT name FROM head");
   while (true) {
     auto rc = stmt.step();
@@ -979,10 +978,11 @@ std::vector<memodb_head> sqlite_db::list_heads() {
       break;
     if (rc != SQLITE_ROW)
       fatal_error();
-    result.emplace_back(
-        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
+    auto Name =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0));
+    if (F(memodb_head(Name)))
+      break;
   }
-  return result;
 }
 
 void sqlite_db::head_delete(const memodb_head &Head) {

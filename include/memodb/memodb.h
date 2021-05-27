@@ -1,6 +1,7 @@
 #ifndef MEMODB_MEMODB_H
 #define MEMODB_MEMODB_H
 
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <memory>
@@ -341,9 +342,11 @@ public:
   virtual memodb_ref put(const memodb_value &value) = 0;
   virtual void set(const memodb_name &Name, const memodb_ref &ref) = 0;
   virtual std::vector<memodb_name> list_names_using(const memodb_ref &ref) = 0;
-  virtual std::vector<memodb_call> list_calls(llvm::StringRef Func) = 0;
   virtual std::vector<std::string> list_funcs() = 0;
-  virtual std::vector<memodb_head> list_heads() = 0;
+  // F should not modify the database. F can return true to stop iteration.
+  virtual void eachHead(std::function<bool(const memodb_head &)> F) = 0;
+  virtual void eachCall(llvm::StringRef Func,
+                        std::function<bool(const memodb_call &)> F) = 0;
   virtual void head_delete(const memodb_head &Head) = 0;
   virtual void call_invalidate(llvm::StringRef name) = 0;
 
@@ -371,6 +374,24 @@ public:
   void call_set(llvm::StringRef name, llvm::ArrayRef<memodb_ref> args,
                 const memodb_ref &result) {
     set(memodb_call(name, args), result);
+  }
+
+  std::vector<memodb_head> list_heads() {
+    std::vector<memodb_head> Result;
+    eachHead([&](const memodb_head &Head) {
+      Result.emplace_back(Head);
+      return false;
+    });
+    return Result;
+  }
+
+  std::vector<memodb_call> list_calls(llvm::StringRef Func) {
+    std::vector<memodb_call> Result;
+    eachCall(Func, [&](const memodb_call &Call) {
+      Result.emplace_back(Call);
+      return false;
+    });
+    return Result;
   }
 
   virtual std::vector<memodb_path> list_paths_to(const memodb_ref &ref);

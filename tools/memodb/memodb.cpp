@@ -232,45 +232,6 @@ static int Export() {
 
   auto Db = memodb_db_open(GetUri());
 
-  memodb_value Root = memodb_value::map();
-  Root["format"] = "MemoDB CAR";
-  Root["version"] = 0;
-  memodb_value &Calls = Root["calls"] = memodb_value::map();
-  memodb_value &Heads = Root["heads"] = memodb_value::map();
-  memodb_value &IDs = Root["ids"] = memodb_value::array();
-  auto addName = [&](const memodb_name &Name) {
-    if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name)) {
-      IDs.array_items().emplace_back(*Ref);
-    } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-      Heads[Head->Name] = Db->get(Name);
-    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-      memodb_value &FuncCalls = Calls[Call->Name];
-      if (FuncCalls == memodb_value{})
-        FuncCalls = memodb_value::map();
-      memodb_value Args = memodb_value::array();
-      std::string Key;
-      for (const memodb_ref &Arg : Call->Args) {
-        Args.array_items().emplace_back(Arg);
-        Key += std::string(Arg) + "/";
-      }
-      Key.pop_back();
-      FuncCalls[Key] =
-          memodb_value::map({{"args", Args}, {"result", Db->get(Name)}});
-    } else {
-      llvm_unreachable("impossible memodb_name type");
-    }
-  };
-  if (!NamesToExport.empty()) {
-    for (const std::string &NameStr : NamesToExport)
-      addName(GetNameFromURI(NameStr));
-  } else {
-    for (const memodb_head &Head : Db->list_heads())
-      addName(Head);
-    for (StringRef Func : Db->list_funcs())
-      for (const memodb_call &Call : Db->list_calls(Func))
-        addName(Call);
-  }
-
   // We won't know what root CID to put in the header until after we've written
   // everything. Leave an empty space which will be filled with header +
   // padding later. The header is normally 0x3d bytes, so this gives us plenty
@@ -291,10 +252,62 @@ static int Export() {
 
   exportValue = [&](const memodb_value &Value) {
     auto Block = transformRefs(Value, exportRef).saveAsIPLD();
-    if (!Block.first.isInline())
-      writeBlock(Block);
+    if (!Block.first.isInline()) {
+      if (RefMapping[Block.first] != Block.first) {
+        writeBlock(Block);
+        RefMapping[Block.first] = Block.first;
+      }
+    }
     return Block.first;
   };
+
+  memodb_value Root = memodb_value::map();
+  Root["format"] = "MemoDB CAR";
+  Root["version"] = 0;
+  memodb_value &Calls = Root["calls"] = memodb_value::map();
+  memodb_value &Heads = Root["heads"] = memodb_value::map();
+  memodb_value &IDs = Root["ids"] = memodb_value::array();
+  auto addName = [&](const memodb_name &Name) {
+    errs() << "exporting " << Name << "\n";
+    if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name)) {
+      exportRef(*Ref);
+      IDs.array_items().emplace_back(*Ref);
+    } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+      Heads[Head->Name] = Db->get(Name);
+      exportRef(Heads[Head->Name].as_ref());
+    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+      memodb_value &FuncCalls = Calls[Call->Name];
+      if (FuncCalls == memodb_value{})
+        FuncCalls = memodb_value::map();
+      memodb_value Args = memodb_value::array();
+      std::string Key;
+      for (const memodb_ref &Arg : Call->Args) {
+        Args.array_items().emplace_back(Arg);
+        Key += std::string(exportRef(Arg)) + "/";
+      }
+      Key.pop_back();
+      FuncCalls[Key] =
+          memodb_value::map({{"args", Args}, {"result", Db->get(Name)}});
+      exportRef(Db->get(Name).as_ref());
+    } else {
+      llvm_unreachable("impossible memodb_name type");
+    }
+  };
+  if (!NamesToExport.empty()) {
+    for (const std::string &NameStr : NamesToExport)
+      addName(GetNameFromURI(NameStr));
+  } else {
+    Db->eachHead([&](const memodb_head &Head) {
+      addName(Head);
+      return false;
+    });
+    for (StringRef Func : Db->list_funcs()) {
+      Db->eachCall(Func, [&](const memodb_call &Call) {
+        addName(Call);
+        return false;
+      });
+    }
+  }
 
   memodb_ref RootRef = exportValue(Root);
 
@@ -331,6 +344,7 @@ static int Export() {
     llvm::report_fatal_error("CAR header too large to fit");
 
   OutputFile->keep();
+  llvm::errs() << "Exported with Root CID: " << RootRef << "\n";
   return 0;
 }
 

@@ -33,9 +33,10 @@ public:
 
   llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
   std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
-  std::vector<memodb_call> list_calls(llvm::StringRef Func) override;
   std::vector<std::string> list_funcs() override;
-  std::vector<memodb_head> list_heads() override;
+  void eachHead(std::function<bool(const memodb_head &)> F) override;
+  void eachCall(llvm::StringRef Func,
+                std::function<bool(const memodb_call &)> F) override;
 
   memodb_ref put(const memodb_value &value) override;
   void set(const memodb_name &Name, const memodb_ref &ref) override;
@@ -183,7 +184,7 @@ llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
   } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
     if (!Root["calls"].map_items().count(Call->Name))
       return {};
-    auto AllCalls = Root["calls"][Call->Name];
+    const auto &AllCalls = Root["calls"][Call->Name];
     std::string Key;
     for (const memodb_ref &Arg : Call->Args)
       Key += std::string(Arg) + "/";
@@ -202,18 +203,18 @@ std::vector<memodb_name> CARStore::list_names_using(const memodb_ref &ref) {
   return {};
 }
 
-std::vector<memodb_call> CARStore::list_calls(llvm::StringRef Func) {
+void CARStore::eachCall(llvm::StringRef Func,
+                        std::function<bool(const memodb_call &)> F) {
   const auto &AllCalls = Root["calls"].map_items();
   if (!AllCalls.count(std::string(Func)))
-    return {};
-  std::vector<memodb_call> Result;
+    return;
   for (const auto &Item : Root["calls"][std::string(Func)].map_items()) {
     memodb_call Call(Func, {});
     for (const memodb_value &Arg : Item.second["args"].array_items())
       Call.Args.emplace_back(Arg.as_ref());
-    Result.push_back(std::move(Call));
+    if (F(Call))
+      break;
   }
-  return Result;
 }
 
 std::vector<std::string> CARStore::list_funcs() {
@@ -223,11 +224,10 @@ std::vector<std::string> CARStore::list_funcs() {
   return Result;
 }
 
-std::vector<memodb_head> CARStore::list_heads() {
-  std::vector<memodb_head> Result;
+void CARStore::eachHead(std::function<bool(const memodb_head &)> F) {
   for (const auto &Item : Root["heads"].map_items())
-    Result.emplace_back(Item.first);
-  return Result;
+    if (F(memodb_head(Item.first)))
+      break;
 }
 
 memodb_ref CARStore::put(const memodb_value &value) {

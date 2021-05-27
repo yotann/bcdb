@@ -108,9 +108,10 @@ public:
   memodb_ref put(const memodb_value &value) override;
   void set(const memodb_name &Name, const memodb_ref &ref) override;
   std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
-  std::vector<memodb_call> list_calls(llvm::StringRef Func) override;
   std::vector<std::string> list_funcs() override;
-  std::vector<memodb_head> list_heads() override;
+  void eachHead(std::function<bool(const memodb_head &)> F) override;
+  void eachCall(llvm::StringRef Func,
+                std::function<bool(const memodb_call &)> F) override;
   void head_delete(const memodb_head &Head) override;
 
   void call_invalidate(llvm::StringRef name) override;
@@ -410,8 +411,8 @@ std::vector<memodb_name> LevelDBMemo::list_names_using(const memodb_ref &ref) {
   return Result;
 }
 
-std::vector<memodb_call> LevelDBMemo::list_calls(llvm::StringRef Func) {
-  std::vector<memodb_call> Result;
+void LevelDBMemo::eachCall(llvm::StringRef Func,
+                           std::function<bool(const memodb_call &)> F) {
   Hash NameHash = calculateHash(makeBytes(Func));
   std::string Key = makeKey(NameHash, KEY_CALL);
   leveldb::ReadOptions ReadOptions;
@@ -423,9 +424,9 @@ std::vector<memodb_call> LevelDBMemo::list_calls(llvm::StringRef Func) {
     for (const memodb_value &Value :
          llvm::ArrayRef(RefValue.array_items()).drop_front())
       Args.emplace_back(Value.as_ref());
-    Result.emplace_back(memodb_call(Func, Args));
+    if (F(memodb_call(Func, Args)))
+      break;
   }
-  return Result;
 }
 
 std::vector<std::string> LevelDBMemo::list_funcs() {
@@ -441,17 +442,16 @@ std::vector<std::string> LevelDBMemo::list_funcs() {
   return Result;
 }
 
-std::vector<memodb_head> LevelDBMemo::list_heads() {
-  std::vector<memodb_head> Result;
+void LevelDBMemo::eachHead(std::function<bool(const memodb_head &)> F) {
   std::string Key = makeKey(HASH_NONE, KEY_HEAD);
   leveldb::ReadOptions ReadOptions;
   std::unique_ptr<leveldb::Iterator> Iter(DB->NewIterator(ReadOptions));
   for (Iter->Seek(Key); Iter->Valid() && makeStr(Iter->key()).startswith(Key);
        Iter->Next()) {
     auto Item = makeStr(Iter->key()).substr(Key.size());
-    Result.emplace_back(Item);
+    if (F(memodb_head(Item)))
+      break;
   }
-  return Result;
 }
 
 void LevelDBMemo::head_delete(const memodb_head &Head) {
