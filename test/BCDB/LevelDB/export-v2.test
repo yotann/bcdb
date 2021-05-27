@@ -1,0 +1,4 @@
+; RUN: rm -rf %t
+; RUN: cp -r %p/Inputs/version2 %t
+; RUN: memodb export -uri leveldb:%t > %t.car
+; RUN: diff %t.car %p/Outputs/version2.car

@@ -1,0 +1,8 @@
+; RUN: memodb list-heads -uri car:%p/Inputs/bitcode.car | FileCheck --check-prefix=HEADS %s
+; HEADS: head:-
+
+; RUN: memodb put -uri car:%p/Inputs/bitcode.car head:- | FileCheck --check-prefix=HEAD %s
+; HEAD: id:bafy2bzacedbzrazeaxz4rz2uviwqnyi6nvtcpjkrc4aqrvtc5rz3xkkuembtg
+
+; RUN: memodb export -uri car:%p/Inputs/bitcode.car > %t.car
+; RUN: diff %t.car %p/Inputs/bitcode.car

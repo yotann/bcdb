@@ -2,6 +2,7 @@ set(LLVM_LINK_COMPONENTS
   Support
 )
 add_llvm_library(MemoDB
+  CAR.cpp
   LevelDB.cpp
   MemoDB.cpp
   SQLite.cpp

@@ -1,0 +1,19 @@
+; RUN: memodb list-funcs -uri car:%p/Inputs/call.car | FileCheck --check-prefix=FUNCS %s
+; FUNCS: add
+; FUNCS: primes
+
+; RUN: memodb list-calls -uri car:%p/Inputs/call.car add | FileCheck --check-prefix=ADD %s
+; ADD: call:add/bafyqaaic/bafyqaaic
+
+; RUN: memodb put -uri car:%p/Inputs/call.car call:add/bafyqaaic/bafyqaaic | FileCheck --check-prefix=FOUR %s
+; FOUR: id:bafyqaaie
+
+; RUN: memodb list-calls -uri car:%p/Inputs/call.car primes | FileCheck --check-prefix=PRIMES %s
+; PRIMES: call:primes/bafyqaaif
+; PRIMES: call:primes/bafyqaaig
+
+; RUN: memodb put -uri car:%p/Inputs/call.car call:primes/bafyqaaif | FileCheck --check-prefix=PRIMES5 %s
+; PRIMES5: id:bafyqabufaibqkbyl
+
+; RUN: memodb export -uri car:%p/Inputs/call.car > %t.car
+; RUN: diff %t.car %p/Inputs/call.car
