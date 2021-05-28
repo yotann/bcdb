@@ -61,6 +61,7 @@ public:
   memodb_ref() : id_(), type_(EMPTY) {}
   memodb_ref(llvm::StringRef Text);
   static memodb_ref fromCID(llvm::ArrayRef<std::uint8_t> Bytes);
+  static memodb_ref loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes);
   static memodb_ref fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes);
   static memodb_ref fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes);
   bool isCID() const { return type_ != EMPTY && type_ != NUMERIC; }

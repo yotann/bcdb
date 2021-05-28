@@ -1,0 +1,9 @@
+; RUN: rm -rf %t
+; RUN: bcdb init -uri rocksdb:%t
+
+; RUN: memodb set -uri rocksdb:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
+; RUN: memodb set -uri rocksdb:%t call:primes/bafyqaaig id:bafyqab4gaibqkbylbu
+; RUN: memodb set -uri rocksdb:%t call:add/bafyqaaic/bafyqaaic id:bafyqaaie
+
+; RUN: memodb export -uri rocksdb:%t > %t.car
+; RUN: diff %t.car %p/Outputs/export-call.car

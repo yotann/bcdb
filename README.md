@@ -54,6 +54,8 @@ You will need the following dependencies:
 - [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
+- [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
+  Zstandard support (`ROCKSDB_LITE` is not supported)
 - [Python](https://www.python.org/), at least 2.7.
 - [LLVM](https://llvm.org/) version 7 through 12 (development versions up to 13
   may work, but this is not guaranteed). When working on the BCDB code, you

@@ -5,6 +5,7 @@ add_llvm_library(MemoDB
   CAR.cpp
   LevelDB.cpp
   MemoDB.cpp
+  RocksDB.cpp
   SQLite.cpp
 )
 target_include_directories(MemoDB PRIVATE
@@ -14,6 +15,7 @@ target_include_directories(MemoDB PRIVATE
 target_link_libraries(MemoDB PRIVATE
   ${LIBSODIUM_LIBRARIES}
   ${SQLITE3_LIBRARIES}
+  RocksDB::rocksdb
 )
 if(WITH_LEVELDB)
   target_include_directories(MemoDB PRIVATE ${LEVELDB_INCLUDE_DIRS})

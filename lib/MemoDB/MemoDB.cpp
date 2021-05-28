@@ -102,6 +102,8 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
     return memodb_leveldb_open(uri, create_if_missing);
   } else if (uri.startswith("car:")) {
     return memodb_car_open(uri, create_if_missing);
+  } else if (uri.startswith("rocksdb:")) {
+    return memodb_rocksdb_open(uri, create_if_missing);
   } else {
     llvm::report_fatal_error(llvm::Twine("unsupported URI ") + uri);
   }
@@ -195,28 +197,46 @@ memodb_ref::memodb_ref(llvm::StringRef Text) {
 }
 
 memodb_ref memodb_ref::fromCID(llvm::ArrayRef<std::uint8_t> Bytes) {
+  memodb_ref Result = loadCIDFromSequence(Bytes);
+  if (!Bytes.empty())
+    llvm::report_fatal_error("Extra bytes in CID");
+  return Result;
+}
+
+memodb_ref
+memodb_ref::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
   auto startsWith = [&](const auto &Prefix) {
     return Bytes.take_front(Prefix.size()).equals(Prefix);
   };
   if (startsWith(CID_PREFIX_RAW)) {
-    return fromBlake2BRaw(Bytes.drop_front(CID_PREFIX_RAW.size()));
+    Bytes = Bytes.drop_front(CID_PREFIX_RAW.size());
+    memodb_ref Result = fromBlake2BRaw(Bytes.take_front(HASH_SIZE));
+    Bytes = Bytes.drop_front(HASH_SIZE);
+    return Result;
   } else if (startsWith(CID_PREFIX_DAG)) {
-    return fromBlake2BMerkleDAG(Bytes.drop_front(CID_PREFIX_DAG.size()));
+    Bytes = Bytes.drop_front(CID_PREFIX_RAW.size());
+    memodb_ref Result = fromBlake2BMerkleDAG(Bytes.take_front(HASH_SIZE));
+    Bytes = Bytes.drop_front(HASH_SIZE);
+    return Result;
   } else if (startsWith(CID_PREFIX_INLINE_RAW)) {
     Bytes = Bytes.drop_front(CID_PREFIX_INLINE_RAW.size());
-    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] != Bytes.size() - 1)
+    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] > Bytes.size() - 1)
       llvm::report_fatal_error("invalid inline CID");
+    size_t Size = Bytes[0];
     memodb_ref Result;
-    Result.id_ = Bytes.drop_front(1);
+    Result.id_ = Bytes.slice(1, Size);
     Result.type_ = INLINE_RAW;
+    Bytes = Bytes.drop_front(1 + Size);
     return Result;
   } else if (startsWith(CID_PREFIX_INLINE_DAG)) {
     Bytes = Bytes.drop_front(CID_PREFIX_INLINE_DAG.size());
-    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] != Bytes.size() - 1)
+    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] > Bytes.size() - 1)
       llvm::report_fatal_error("invalid inline CID");
+    size_t Size = Bytes[0];
     memodb_ref Result;
-    Result.id_ = Bytes.drop_front(1);
+    Result.id_ = Bytes.slice(1, Size);
     Result.type_ = INLINE_DAG;
+    Bytes = Bytes.drop_front(1 + Size);
     return Result;
   } else {
     llvm::report_fatal_error(llvm::Twine("invalid CID"));

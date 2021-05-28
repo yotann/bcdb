@@ -37,39 +37,39 @@ let
 
 in rec {
   bcdb-llvm7 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_7.llvm;
     clang = pkgs.clang_7;
   };
   bcdb-llvm8 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_8.llvm;
     clang = pkgs.clang_8;
   };
   bcdb-llvm9 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_9.llvm;
     clang = pkgs.clang_9;
   };
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_10.llvm;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_11.llvm;
     clang = pkgs.clang_11;
   };
   bcdb-llvmAlive = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     llvm = debugLLVM llvmAlive;
     clang = pkgs.clang_11;
   };
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
   bcdb-clang = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp;
+    inherit nng nngpp rocksdb;
     inherit (pkgs.llvmPackages_11) stdenv llvm clang;
   };
 
@@ -77,6 +77,21 @@ in rec {
 
   bcdb-sqlite-only = bcdb.override { leveldb = null; };
   bcdb-without-nng = bcdb.override { nng = null; nngpp = null; };
+
+  rocksdb = pkgs.rocksdb.overrideAttrs (o: {
+    version = "6.20.3";
+    src = pkgs.fetchFromGitHub {
+      owner = "facebook";
+      repo = "rocksdb";
+      rev = "v6.20.3";
+      sha256 = "106psd0ap38d0b5ghm6gy66ig02xn8yjmzpb8l6x23kvw7vzrfrc";
+    };
+    # Install the tools.
+    postInstall = ''
+      mkdir -p $out/bin
+      cp tools/ldb tools/sst_dump $out/bin/
+    '';
+  });
 
   symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
 }

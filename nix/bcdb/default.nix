@@ -1,5 +1,5 @@
 { stdenv, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite, xxd,
-leveldb ? null, nng ? null, nngpp ? null }:
+leveldb ? null, rocksdb ? null, nng ? null, nngpp ? null }:
 
 let
   gitFilter = patterns: root: with nix-gitignore;
@@ -25,7 +25,7 @@ in stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [ clang cmake pkgconfig python2 xxd ];
-  buildInputs = [ leveldb libsodium llvm nng nngpp sqlite ];
+  buildInputs = [ leveldb libsodium llvm nng nngpp rocksdb sqlite ];
 
   preConfigure = ''
     patchShebangs third_party/lit/lit.py
