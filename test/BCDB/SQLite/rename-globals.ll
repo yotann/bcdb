@@ -1,3 +1,4 @@
+; RUN: rm -rf %t
 ; RUN: bcdb init -uri sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -rename-globals
 ; RUN: bcdb get -uri sqlite:%t -name - | opt -verify -S | FileCheck %s

@@ -789,6 +789,19 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
              variant_);
 }
 
+memodb_value memodb_value::loadFromIPLD(const memodb_ref &CID,
+                                        llvm::ArrayRef<std::uint8_t> Content) {
+  if (CID.isInline()) {
+    assert(Content.empty());
+    return CID.asInline();
+  }
+  if (CID.isBlake2BRaw())
+    return memodb_value(Content);
+  if (CID.isBlake2BMerkleDAG())
+    return memodb_value::load_cbor(Content);
+  llvm::report_fatal_error("Unsupported CID");
+}
+
 std::pair<memodb_ref, memodb_value::bytes_t>
 memodb_value::saveAsIPLD(bool noInline) const {
   bool raw = type() == BYTES;

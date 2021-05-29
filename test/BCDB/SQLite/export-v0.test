@@ -1,3 +1,0 @@
-; RUN: cp %p/Inputs/version0.bcdb %t
-; RUN: memodb export -uri sqlite:%t > %t.car
-; RUN: diff %t.car %p/Outputs/version0.car

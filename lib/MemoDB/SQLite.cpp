@@ -17,12 +17,6 @@
  * shared caches <https://sqlite.org/sharedcache.html> as a trade-off between
  * RAM usage and lock contention. */
 
-enum ValueType {
-  BYTES_BLOB = 0,   // bytestring stored directly in "blob" table
-  OBSOLETE_MAP = 1, // old map format stored in "map" table
-  CBOR_BLOB = 2,    // arbitrary value stored as CBOR in "blob" table
-};
-
 // Errors when running these statements are ignored.
 static const std::vector<const char *> SQLITE_PRAGMAS = {
     // Don't enforce foreign key constraints.
@@ -40,50 +34,50 @@ static const std::vector<const char *> SQLITE_PRAGMAS = {
     "PRAGMA journal_size_limit = 536870912;\n",
 };
 
-static const unsigned int CURRENT_VERSION = 6;
+static const unsigned int CURRENT_VERSION = 7;
+
+static const int CODEC_RAW = 0;
 
 static const char SQLITE_INIT_STMTS[] =
-    "PRAGMA user_version = 6;\n"
+    "PRAGMA user_version = 7;\n"
     "PRAGMA application_id = 1111704642;\n"
-    "CREATE TABLE value(\n"
-    "  vid     INTEGER PRIMARY KEY,\n"
-    "  type    INTEGER NOT NULL\n"
+    "CREATE TABLE blocks(\n"
+    "  bid     INTEGER PRIMARY KEY,\n"
+    "  cid     BLOB    NOT NULL UNIQUE,\n"
+    "  codec   INTEGER NOT NULL,\n"
+    "          -- compression type, etc.\n"
+    "  content BLOB    NOT NULL\n"
     ");\n"
-    "CREATE TABLE head(\n"
-    "  hid     INTEGER PRIMARY KEY,\n"
+    "CREATE TABLE heads(\n"
     "  name    TEXT    NOT NULL UNIQUE,\n"
-    "  vid     INTEGER NOT NULL REFERENCES value(vid)\n"
+    "  bid     INTEGER NOT NULL REFERENCES blocks(bid)\n"
     ");\n"
-    "CREATE INDEX head_by_vid ON head(vid);\n"
-    "CREATE TABLE refs(\n"
-    "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
-    "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
-    "  UNIQUE(dest, src)\n"
-    ");\n"
-    "CREATE TABLE blob(\n"
-    "  vid     INTEGER PRIMARY KEY REFERENCES value(vid),\n"
-    "  type    INTEGER NOT NULL,\n"
-    "  hash    BLOB    NOT NULL,\n"
-    "          -- Hash of the content\n"
-    "  content BLOB    NOT NULL,\n"
-    "  UNIQUE(hash, type)\n"
-    ");\n"
-    "CREATE TABLE func(\n"
-    "  fid     INTEGER PRIMARY KEY,\n"
+    "CREATE INDEX heads_by_bid ON heads(bid);\n"
+    "CREATE TABLE funcs(\n"
+    "  funcid  INTEGER PRIMARY KEY,\n"
     "  name    TEXT    NOT NULL UNIQUE\n"
     ");\n"
-    "CREATE TABLE call(\n"
-    "  cid     INTEGER PRIMARY KEY,\n"
-    "  fid     INTEGER NOT NULL REFERENCES func(fid),\n"
-    "  parent  INTEGER          REFERENCES call(cid),\n"
-    "          -- (only if this is not the first arg)\n"
-    "  arg     INTEGER NOT NULL REFERENCES value(vid),\n"
-    "  result  INTEGER          REFERENCES value(vid)\n"
-    "          -- (only if this is the last arg)\n"
+    "CREATE TABLE calls(\n"
+    "  callid  INTEGER PRIMARY KEY,\n"
+    "  funcid  INTEGER NOT NULL REFERENCES funcs(funcid),\n"
+    "  args    BLOB    NOT NULL,\n"
+    "          -- CBOR array with bids of arguments\n"
+    "  result  INTEGER NOT NULL REFERENCES blocks(bid),\n"
+    "  UNIQUE(funcid, args)\n"
     ");\n"
-    "CREATE INDEX call_by_arg ON call(arg, fid, parent);\n"
-    "CREATE INDEX call_by_fid ON call(fid);\n"
-    "CREATE INDEX call_by_result ON call(result, fid);\n";
+    "CREATE INDEX call_by_result ON calls(result, funcid);\n"
+    "CREATE TABLE block_refs(\n"
+    "  src     INTEGER NOT NULL REFERENCES blocks(bid),\n"
+    "  dest    INTEGER NOT NULL REFERENCES blocks(bid),\n"
+    "  UNIQUE(dest, src)\n"
+    ");\n"
+    "CREATE TABLE call_refs(\n"
+    "  funcid  INTEGER NOT NULL REFERENCES funcs(funcid),\n"
+    "  callid  INTEGER NOT NULL REFERENCES calls(callid),\n"
+    "  dest    INTEGER NOT NULL REFERENCES blocks(bid),\n"
+    "  UNIQUE(dest, funcid, callid)\n"
+    ");\n"
+    "CREATE INDEX call_ref_by_funcid ON call_refs(funcid);\n";
 
 namespace {
 class sqlite_db : public memodb_db {
@@ -108,27 +102,28 @@ class sqlite_db : public memodb_db {
   sqlite3 *get_db(bool create_file_if_missing = false);
 
   void fatal_error();
+  void checkStatus(int rc);
+  void checkDone(int rc);
+  void requireRow(int rc);
+  bool checkRow(int rc);
 
-  memodb_ref id_to_ref(sqlite3_int64 id);
-  memodb_ref id_to_ref_obsolete(sqlite3_int64 id);
-  sqlite3_int64 ref_to_id(const memodb_ref &ref);
-  sqlite3_int64 get_fid(llvm::StringRef name, bool create_if_missing = false);
-
-  memodb_value get_obsolete(const memodb_ref &ref, bool binary_keys = false);
+  memodb_ref bid_to_cid(sqlite3_int64 bid);
+  sqlite3_int64 cid_to_bid(const memodb_ref &ref);
+  sqlite3_int64 get_funcid(llvm::StringRef name,
+                           bool create_if_missing = false);
 
   void add_refs_from(sqlite3_int64 id, const memodb_value &value);
 
-  memodb_call identifyCall(sqlite3_int64 CID);
-  void identifyCalls(std::vector<memodb_call> &Result, sqlite3_int64 CID);
-
   void upgrade_schema();
 
-  llvm::Optional<memodb_value> getInternal(sqlite3_int64 id);
-  sqlite3_int64 putInternal(const memodb_ref &Ref,
-                            const memodb_value::bytes_t &Bytes,
+  sqlite3_int64 putInternal(const memodb_ref &CID,
+                            const llvm::ArrayRef<std::uint8_t> &Bytes,
                             const memodb_value &Value);
 
-  friend class Transaction;
+  std::vector<std::uint8_t> encodeArgs(const memodb_call &Call);
+  memodb_call identifyCall(sqlite3_int64 callid);
+
+  friend class ExclusiveTransaction;
 
 public:
   void open(const char *uri, bool create_if_missing);
@@ -159,10 +154,11 @@ struct Stmt {
     rc = sqlite3_prepare_v2(db, sql, /*nByte*/ -1, &stmt, nullptr);
   }
 
-  void bind_blob(int i, const void *data, size_t size) {
+  void bind_blob(int i, llvm::ArrayRef<std::uint8_t> Bytes) {
     if (rc != SQLITE_OK)
       return;
-    rc = sqlite3_bind_blob64(stmt, i, data, size, SQLITE_STATIC);
+    rc =
+        sqlite3_bind_blob64(stmt, i, Bytes.data(), Bytes.size(), SQLITE_STATIC);
   }
 
   void bind_int(int i, sqlite3_int64 value) {
@@ -183,6 +179,20 @@ struct Stmt {
     rc = sqlite3_bind_text(stmt, i, value.data(), value.size(), SQLITE_STATIC);
   }
 
+  sqlite_int64 columnInt(int i) { return sqlite3_column_int64(stmt, i); }
+
+  llvm::ArrayRef<std::uint8_t> columnBytes(int i) {
+    const std::uint8_t *Data =
+        reinterpret_cast<const std::uint8_t *>(sqlite3_column_blob(stmt, i));
+    return llvm::ArrayRef(Data, sqlite3_column_bytes(stmt, i));
+  }
+
+  llvm::StringRef columnString(int i) {
+    const char *Data =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, i));
+    return llvm::StringRef(Data, sqlite3_column_bytes(stmt, i));
+  }
+
   int step() {
     if (rc != SQLITE_OK)
       return rc;
@@ -196,30 +206,25 @@ struct Stmt {
 } // end anonymous namespace
 
 namespace {
-class Transaction {
+class ExclusiveTransaction {
   sqlite_db &db;
-  int rc = 0;
   bool committed = false;
 
 public:
-  Transaction(sqlite_db &db) : db(db) {
-    rc =
-        sqlite3_exec(db.get_db(), "BEGIN EXCLUSIVE", nullptr, nullptr, nullptr);
-    if (rc)
-      db.fatal_error();
+  ExclusiveTransaction(sqlite_db &db) : db(db) {
+    db.checkStatus(sqlite3_exec(db.get_db(), "BEGIN EXCLUSIVE", nullptr,
+                                nullptr, nullptr));
   }
   void commit() {
     assert(!committed);
     committed = true;
-    if (rc)
-      db.fatal_error();
-    rc = sqlite3_exec(db.get_db(), "COMMIT", nullptr, nullptr, nullptr);
-    if (rc)
-      db.fatal_error();
+    db.checkStatus(
+        sqlite3_exec(db.get_db(), "COMMIT", nullptr, nullptr, nullptr));
   }
-  ~Transaction() {
+  ~ExclusiveTransaction() {
     if (!committed)
       sqlite3_exec(db.get_db(), "ROLLBACK", nullptr, nullptr, nullptr);
+    // ignore return code
   }
 };
 } // end anonymous namespace
@@ -265,18 +270,13 @@ sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
 
     int flags = SQLITE_OPEN_URI | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX |
                 (create_file_if_missing ? SQLITE_OPEN_CREATE : 0);
-    int rc = sqlite3_open_v2(uri.c_str(), &result, flags, /*zVfs*/ nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
+    checkStatus(sqlite3_open_v2(uri.c_str(), &result, flags, /*zVfs*/ nullptr));
 
-    rc = sqlite3_busy_handler(result, busy_callback, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
-
+    checkStatus(sqlite3_busy_handler(result, busy_callback, nullptr));
     sqlite3_wal_hook(result, wal_hook, nullptr);
 
     for (const char *stmt : SQLITE_PRAGMAS) {
-      rc = sqlite3_exec(result, stmt, nullptr, nullptr, nullptr);
+      sqlite3_exec(result, stmt, nullptr, nullptr, nullptr);
       // ignore return code
     }
     upgrade_schema();
@@ -289,6 +289,30 @@ sqlite3 *sqlite_db::get_db(bool create_file_if_missing) {
 
 void sqlite_db::fatal_error() {
   llvm::report_fatal_error(sqlite3_errmsg(get_db()));
+}
+
+void sqlite_db::checkStatus(int rc) {
+  if (rc != SQLITE_OK)
+    fatal_error();
+}
+
+void sqlite_db::checkDone(int rc) {
+  if (rc != SQLITE_DONE)
+    fatal_error();
+}
+
+void sqlite_db::requireRow(int rc) {
+  if (rc != SQLITE_ROW)
+    fatal_error();
+}
+
+bool sqlite_db::checkRow(int rc) {
+  if (rc == SQLITE_ROW)
+    return true;
+  else if (rc == SQLITE_DONE)
+    return false;
+  fatal_error();
+  return false;
 }
 
 void sqlite_db::open(const char *uri, bool create_if_missing) {
@@ -310,39 +334,34 @@ sqlite_db::~sqlite_db() {
 
 void sqlite_db::upgrade_schema() {
   sqlite3 *db = get_db();
-  int rc;
 
   // Exit early if the schema is already current.
   sqlite3_int64 user_version;
   {
     Stmt stmt(db, "PRAGMA user_version");
-    if (stmt.step() != SQLITE_ROW)
-      fatal_error();
-    user_version = sqlite3_column_int64(stmt.stmt, 0);
+    requireRow(stmt.step());
+    user_version = stmt.columnInt(0);
   }
   if (user_version == CURRENT_VERSION)
     return;
 
   // Start an exclusive transaction so the upgrade process doesn't conflict
   // with other processes.
-  Transaction transaction(*this);
+  ExclusiveTransaction transaction(*this);
 
   // If the database is empty, initialize it.
   {
     Stmt exists_stmt(
         db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='value'");
-    if (exists_stmt.step() == SQLITE_DONE) {
-      rc = sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr);
-      if (rc != SQLITE_OK)
-        fatal_error();
-    }
+    if (!checkRow(exists_stmt.step()))
+      checkStatus(
+          sqlite3_exec(db, SQLITE_INIT_STMTS, nullptr, nullptr, nullptr));
   }
 
   {
     Stmt stmt(db, "PRAGMA user_version");
-    if (stmt.step() != SQLITE_ROW)
-      fatal_error();
-    user_version = sqlite3_column_int64(stmt.stmt, 0);
+    requireRow(stmt.step());
+    user_version = stmt.columnInt(0);
   }
 
   if (user_version > CURRENT_VERSION) {
@@ -353,268 +372,87 @@ void sqlite_db::upgrade_schema() {
     fatal_error();
   }
 
-  if (user_version < CURRENT_VERSION)
-    llvm::errs() << "Upgrading BCDB format from " << user_version << " to "
-                 << CURRENT_VERSION << "...\n";
-
-  // Version 1 stores values as CBOR instead of using the map table.
-  if (user_version < 1) {
-    static const char UPGRADE_STMTS[] =
-        "ALTER TABLE blob ADD COLUMN type INTEGER;\n"
-        "UPDATE blob SET type = 0;\n"
-        "CREATE UNIQUE INDEX blob_unique_hash ON blob(hash, type);\n"
-        "CREATE TABLE IF NOT EXISTS func(\n"
-        "  fid     INTEGER PRIMARY KEY,\n"
-        "  name    TEXT    NOT NULL UNIQUE\n"
-        ");\n"
-        "CREATE TABLE IF NOT EXISTS call(\n"
-        "  cid     INTEGER PRIMARY KEY,\n"
-        "  fid     INTEGER NOT NULL REFERENCES func(fid),\n"
-        "  parent  INTEGER          REFERENCES call(cid),\n"
-        "          -- (only if this is not the first arg)\n"
-        "  arg     INTEGER NOT NULL REFERENCES value(vid),\n"
-        "  result  INTEGER          REFERENCES value(vid)\n"
-        "          -- (only if this is the last arg)\n"
-        ");\n";
-    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
+  if (user_version < CURRENT_VERSION) {
+    llvm::errs() << "This BCDB database is too old to read. BCDB's "
+                    "legacy-sqlite tag from Git should be able to read it and "
+                    "convert it to CAR or RocksDB.\n";
+    fatal_error();
   }
 
-  // Version 3 is the same as version 2, but forces old-format maps to be
-  // converted to CBOR. Note that we do this upgrade *before* the version 2
-  // upgrade, which needs to load values in CBOR format.
-  if (user_version < 3) {
-    Stmt stmt(db, "SELECT vid FROM value WHERE type = ?1");
-    stmt.bind_int(1, OBSOLETE_MAP);
-    while (true) {
-      rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      else if (rc != SQLITE_ROW)
-        fatal_error();
-
-      sqlite3_int64 id = sqlite3_column_int64(stmt.stmt, 0);
-      memodb_value value = get_obsolete(id_to_ref_obsolete(id));
-
-      // Ensure each value is unique. Otherwise, we would need to deduplicate
-      // the new values and change their ID numbers, which is too much work.
-      value["obsolete_vid"] = id;
-
-      std::vector<std::uint8_t> buffer;
-      value.save_cbor(buffer);
-      unsigned char hash[crypto_generichash_BYTES];
-      crypto_generichash(hash, sizeof hash, buffer.data(), buffer.size(),
-                         nullptr, 0);
-
-      Stmt stmt(db,
-                "INSERT OR IGNORE INTO blob(vid, type, hash, content) VALUES "
-                "(?1,?2,?3,?4)");
-      stmt.bind_int(1, id);
-      stmt.bind_int(2, CBOR_BLOB);
-      stmt.bind_blob(3, hash, sizeof hash);
-      stmt.bind_blob(4, buffer.data(), buffer.size());
-      if (stmt.step() != SQLITE_DONE)
-        fatal_error();
-    }
-
-    static const char UPGRADE_STMTS[] =
-        "UPDATE value SET type = 2 WHERE type = 1;\n"
-        "DROP TABLE IF EXISTS map;\n";
-    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
-  }
-
-  // Version 2 adds the refs table.
-  if (user_version < 2) {
-    static const char UPGRADE_STMTS[] =
-        "CREATE TABLE IF NOT EXISTS refs(\n"
-        "  src     INTEGER NOT NULL REFERENCES value(vid),\n"
-        "  dest    INTEGER NOT NULL REFERENCES value(vid),\n"
-        "  UNIQUE(dest, src)\n"
-        ");\n";
-    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
-
-    Stmt stmt(db, "SELECT vid FROM value WHERE type != ?1");
-    stmt.bind_int(1, BYTES_BLOB);
-    while (true) {
-      rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      else if (rc != SQLITE_ROW)
-        fatal_error();
-      sqlite3_int64 id = sqlite3_column_int64(stmt.stmt, 0);
-      memodb_value value = get(id_to_ref(id));
-      add_refs_from(id, value);
-    }
-  }
-
-  // Version 4 adds some indexes and the application_id.
-  if (user_version < 4) {
-    static const char UPGRADE_STMTS[] =
-        "CREATE INDEX IF NOT EXISTS head_by_vid ON head(vid);\n"
-        "DROP INDEX IF EXISTS call_by_arg;\n"
-        "CREATE INDEX call_by_arg ON call(arg, fid, parent);\n"
-        "CREATE INDEX IF NOT EXISTS call_by_result ON call(result, fid);\n"
-        "PRAGMA application_id = 1111704642;\n"
-        "PRAGMA user_version = 4;\n";
-    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
-  }
-
-  // Version 5 adds an index.
-  if (user_version < 5) {
-    static const char UPGRADE_STMTS[] =
-        "CREATE INDEX call_by_fid ON call(fid);\n"
-        "PRAGMA user_version = 5;\n";
-    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
-  }
-
-  // Version 6 adds optional CID support; no changes necessary.
-  if (user_version < 6) {
-    static const char UPGRADE_STMTS[] = "PRAGMA user_version = 6;\n";
-    rc = sqlite3_exec(db, UPGRADE_STMTS, nullptr, nullptr, nullptr);
-    if (rc != SQLITE_OK)
-      fatal_error();
-  }
-
-  // NOTE: it might be nice to run VACUUM here. However, it can be extremely
-  // slow and it requires either gigabytes of RAM or gigabytes of /tmp space
-  // (depending on the value of PRAGMA temp_store).
+  // NOTE: it might be nice to run VACUUM here after converting. However, it
+  // can be extremely slow and it requires either gigabytes of RAM or gigabytes
+  // of /tmp space (depending on the value of PRAGMA temp_store).
 
   transaction.commit();
 
   // Ensure the new user_version/application_id are written to the actual
   // database file.
-  rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr,
-                    nullptr);
-  // ignore return value
+  sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr, nullptr);
+  // ignore return code
 }
 
-memodb_ref sqlite_db::id_to_ref(sqlite3_int64 id) {
-  // We can't just look up the hash because the content might be small enough
-  // that we should use an inline CID instead. On the other hand, we can't just
-  // use the hash calculated with saveAsIPLD() because it might use the wrong
-  // canonicalization of CBOR.
-  memodb_value Value = *getInternal(id);
-  auto Block = Value.saveAsIPLD();
-  if (Block.first.isInline())
-    return Block.first;
-
+memodb_ref sqlite_db::bid_to_cid(sqlite3_int64 bid) {
   sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT type, hash FROM blob WHERE vid = ?1");
-  stmt.bind_int(1, id);
-  if (stmt.step() != SQLITE_ROW)
+  Stmt stmt(db, "SELECT cid FROM blocks WHERE bid = ?1");
+  stmt.bind_int(1, bid);
+  requireRow(stmt.step());
+  return memodb_ref::fromCID(stmt.columnBytes(0));
+}
+
+sqlite3_int64 sqlite_db::cid_to_bid(const memodb_ref &ref) {
+  sqlite3 *db = get_db();
+  auto Bytes = ref.asCID();
+  Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
+  stmt.bind_blob(1, Bytes);
+  if (checkRow(stmt.step()))
+    return stmt.columnInt(0);
+
+  if (!ref.isInline())
     fatal_error();
-  auto Data =
-      reinterpret_cast<const std::uint8_t *>(sqlite3_column_blob(stmt.stmt, 1));
-  int Size = sqlite3_column_bytes(stmt.stmt, 1);
-  auto Bytes = llvm::ArrayRef(Data, Size);
-  if (sqlite3_column_int64(stmt.stmt, 0) == BYTES_BLOB)
-    return memodb_ref::fromBlake2BRaw(Bytes);
-  else
-    return memodb_ref::fromBlake2BMerkleDAG(Bytes);
+  std::vector<std::uint8_t> Content;
+  memodb_value Value = ref.asInline();
+  Value.save_cbor(Content);
+  return putInternal(ref, Content, Value);
 }
 
-memodb_ref sqlite_db::id_to_ref_obsolete(sqlite3_int64 id) {
-  return memodb_ref(llvm::to_string(id));
-}
-
-sqlite3_int64 sqlite_db::ref_to_id(const memodb_ref &ref) {
-  if (ref.isInline()) {
-    memodb_value Value = ref.asInline();
-    auto IPLD = Value.saveAsIPLD(true);
-    return putInternal(IPLD.first, IPLD.second, Value);
-  } else if (ref.isCID()) {
-    sqlite3 *db = get_db();
-    auto Hash =
-        ref.isBlake2BRaw() ? ref.asBlake2BRaw() : ref.asBlake2BMerkleDAG();
-    Stmt stmt(db, "SELECT vid FROM blob WHERE hash = ?1");
-    stmt.bind_blob(1, Hash.data(), Hash.size());
-    if (stmt.step() != SQLITE_ROW)
-      fatal_error();
-    return sqlite3_column_int64(stmt.stmt, 0);
-  } else {
-    sqlite3_int64 id;
-    if (llvm::StringRef(ref).getAsInteger(10, id))
-      fatal_error();
-    return id;
-  }
-}
-
-sqlite3_int64 sqlite_db::putInternal(const memodb_ref &Ref,
-                                     const memodb_value::bytes_t &Bytes,
+sqlite3_int64 sqlite_db::putInternal(const memodb_ref &CID,
+                                     const llvm::ArrayRef<std::uint8_t> &Bytes,
                                      const memodb_value &Value) {
   sqlite3 *db = get_db();
-
-  int value_type;
-  llvm::ArrayRef<std::uint8_t> hash;
-  if (Ref.isBlake2BRaw()) {
-    value_type = BYTES_BLOB;
-    hash = Ref.asBlake2BRaw();
-  } else if (Ref.isBlake2BMerkleDAG()) {
-    value_type = CBOR_BLOB;
-    hash = Ref.asBlake2BMerkleDAG();
-  } else
-    llvm::report_fatal_error("invalid CID type for put");
+  auto CIDBytes = CID.asCID();
 
   // Optimistically check for an existing entry (without a transaction).
   {
-    Stmt select_stmt(db, "SELECT vid FROM blob WHERE hash = ?1 AND type = ?2");
-    select_stmt.bind_blob(1, hash.data(), hash.size());
-    select_stmt.bind_int(2, value_type);
-    int step = select_stmt.step();
-    if (step == SQLITE_ROW)
-      return sqlite3_column_int64(select_stmt.stmt, 0);
-    if (step != SQLITE_DONE)
-      fatal_error();
+    Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
+    stmt.bind_blob(1, CIDBytes);
+    if (checkRow(stmt.step()))
+      return stmt.columnInt(0);
   }
 
-  // We may need to add a new entry. Start an exclusive transaction and check
-  // again (an entry may have been added since the previous check).
-  std::unique_ptr<Transaction> transaction;
-  if (sqlite3_txn_state(db, nullptr) == SQLITE_TXN_NONE) {
-    transaction.reset(new Transaction(*this));
-  }
+  // We may need to add a new entry. Start an exclusive transaction (if we
+  // aren't already in one) and check again (an entry may have been added since
+  // the previous check).
+  std::optional<ExclusiveTransaction> transaction;
+  if (sqlite3_txn_state(db, nullptr) == SQLITE_TXN_NONE)
+    transaction.emplace(*this);
 
   {
-    Stmt select_stmt(db, "SELECT vid FROM blob WHERE hash = ?1 AND type = ?2");
-    select_stmt.bind_blob(1, hash.data(), hash.size());
-    select_stmt.bind_int(2, value_type);
-    int step = select_stmt.step();
-    if (step == SQLITE_ROW)
-      return sqlite3_column_int64(select_stmt.stmt, 0);
-    if (step != SQLITE_DONE)
-      fatal_error();
+    Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
+    stmt.bind_blob(1, CIDBytes);
+    if (checkRow(stmt.step()))
+      return stmt.columnInt(0);
   }
 
-  // Add the new entry to the value table.
+  // Add the new entry to the blocks table.
   sqlite3_int64 new_id;
   {
-    Stmt stmt(db, "INSERT INTO value(type) VALUES (?1)");
-    stmt.bind_int(1, value_type);
-    if (stmt.step() != SQLITE_DONE)
-      fatal_error();
+    Stmt stmt(db, "INSERT INTO blocks(cid,codec,content) VALUES (?1,?2,?3)");
+    stmt.bind_blob(1, CIDBytes);
+    stmt.bind_int(2, CODEC_RAW);
+    stmt.bind_blob(3, Bytes);
+    checkDone(stmt.step());
     new_id = sqlite3_last_insert_rowid(db);
     assert(new_id);
-  }
-
-  // Add the new entry to the blob table.
-  {
-    Stmt stmt(db, "INSERT OR IGNORE INTO blob(vid, type, hash, content) VALUES "
-                  "(?1,?2,?3,?4)");
-    stmt.bind_int(1, new_id);
-    stmt.bind_int(2, value_type);
-    stmt.bind_blob(3, hash.data(), hash.size());
-    stmt.bind_blob(4, Bytes.data(), Bytes.size());
-    if (stmt.step() != SQLITE_DONE)
-      fatal_error();
   }
 
   // Update the refs table.
@@ -625,59 +463,89 @@ sqlite3_int64 sqlite_db::putInternal(const memodb_ref &Ref,
   return new_id;
 }
 
+std::vector<std::uint8_t> sqlite_db::encodeArgs(const memodb_call &Call) {
+  memodb_value ArgsValue = memodb_value::array();
+  for (const memodb_ref &Arg : Call.Args)
+    ArgsValue.array_items().emplace_back(cid_to_bid(Arg));
+  std::vector<std::uint8_t> Result;
+  ArgsValue.save_cbor(Result);
+  return Result;
+}
+
+memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
+  sqlite3 *db = get_db();
+  Stmt stmt(
+      db, "SELECT name, args FROM calls NATURAL JOIN funcs WHERE callid = ?1");
+  stmt.bind_int(1, callid);
+  requireRow(stmt.step());
+
+  std::vector<memodb_ref> Args;
+  memodb_value ArgsValue = memodb_value::load_cbor(stmt.columnBytes(1));
+  for (const memodb_value &ArgValue : ArgsValue.array_items())
+    Args.emplace_back(bid_to_cid(ArgValue.as_integer()));
+
+  return memodb_call(stmt.columnString(0), Args);
+}
+
 memodb_ref sqlite_db::put(const memodb_value &value) {
   auto IPLD = value.saveAsIPLD();
-  if (!IPLD.first.isInline())
-    putInternal(IPLD.first, IPLD.second, value);
+  putInternal(IPLD.first, IPLD.second, value);
   return IPLD.first;
 }
 
 void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
   sqlite3 *db = get_db();
   if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-    Stmt insert_stmt(db,
-                     "INSERT OR REPLACE INTO head(name, vid) VALUES(?1,?2)");
-    insert_stmt.bind_text(1, Head->Name);
-    insert_stmt.bind_int(2, ref_to_id(ref));
-    if (insert_stmt.step() != SQLITE_DONE)
-      fatal_error();
+    Stmt stmt(db, "INSERT OR REPLACE INTO heads(name, bid) VALUES(?1,?2)");
+    stmt.bind_text(1, Head->Name);
+    stmt.bind_int(2, cid_to_bid(ref));
+    checkDone(stmt.step());
   } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-    auto fid = get_fid(Call->Name, /* create_if_missing */ true);
+    auto funcid = get_funcid(Call->Name, /* create_if_missing */ true);
 
-    Transaction transaction(*this);
+    ExclusiveTransaction transaction(*this);
 
-    Stmt select_stmt(
-        db,
-        "SELECT cid FROM call WHERE fid = ?1 AND parent IS ?2 AND arg = ?3");
-    Stmt insert_stmt(db, "INSERT INTO call(fid, parent, arg) VALUES(?1,?2,?3)");
-    select_stmt.bind_int(1, fid);
-    insert_stmt.bind_int(1, fid);
-    sqlite3_int64 parent = -1;
-    for (const memodb_ref &arg : Call->Args) {
-      select_stmt.reset();
-      insert_stmt.reset();
-      if (parent != -1) {
-        select_stmt.bind_int(2, parent);
-        insert_stmt.bind_int(2, parent);
-      }
-      select_stmt.bind_int(3, ref_to_id(arg));
-      insert_stmt.bind_int(3, ref_to_id(arg));
-      if (select_stmt.step() == SQLITE_ROW) {
-        parent = sqlite3_column_int64(select_stmt.stmt, 0);
-        assert(parent);
-      } else {
-        if (insert_stmt.step() != SQLITE_DONE)
-          fatal_error();
-        parent = sqlite3_last_insert_rowid(db);
-        assert(parent);
-      }
+    auto Args = encodeArgs(*Call);
+
+    bool existing;
+    sqlite3_int64 CallID;
+    {
+      Stmt stmt(db, "SELECT callid FROM calls WHERE funcid = ?1 AND args = ?2");
+      stmt.bind_int(1, funcid);
+      stmt.bind_blob(2, Args);
+      existing = checkRow(stmt.step());
+      if (existing)
+        CallID = stmt.columnInt(0);
     }
 
-    Stmt update_stmt(db, "UPDATE call SET result = ?1 WHERE cid = ?2");
-    update_stmt.bind_int(1, ref_to_id(ref));
-    update_stmt.bind_int(2, parent);
-    if (update_stmt.step() != SQLITE_DONE)
-      fatal_error();
+    if (existing) {
+      // The existing call_refs rows don't need to change.
+      Stmt stmt(db, "UPDATE calls SET result = ?1 WHERE callid = ?2");
+      stmt.bind_int(1, cid_to_bid(ref));
+      stmt.bind_int(2, CallID);
+      checkDone(stmt.step());
+    } else {
+      {
+        Stmt stmt(db,
+                  "INSERT INTO calls(funcid, args, result) VALUES(?1,?2,?3)");
+        stmt.bind_int(1, funcid);
+        stmt.bind_blob(2, Args);
+        stmt.bind_int(3, cid_to_bid(ref));
+        checkDone(stmt.step());
+        CallID = sqlite3_last_insert_rowid(db);
+      }
+      {
+        Stmt stmt(db, "INSERT OR IGNORE INTO call_refs(funcid, callid, dest) "
+                      "VALUES(?1,?2,?3)");
+        for (const memodb_ref &Arg : Call->Args) {
+          stmt.bind_int(1, funcid);
+          stmt.bind_int(2, CallID);
+          stmt.bind_int(3, cid_to_bid(Arg));
+          checkDone(stmt.step());
+          stmt.reset();
+        }
+      }
+    }
     transaction.commit();
   } else {
     llvm::report_fatal_error("can't set a memodb_ref");
@@ -687,14 +555,11 @@ void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
 void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   sqlite3 *db = get_db();
   if (value.type() == memodb_value::REF) {
-    if (value.as_ref().isInline())
-      return;
-    auto dest = ref_to_id(value.as_ref());
-    Stmt stmt(db, "INSERT OR IGNORE INTO refs(src, dest) VALUES (?1,?2)");
+    auto dest = cid_to_bid(value.as_ref());
+    Stmt stmt(db, "INSERT OR IGNORE INTO block_refs(src, dest) VALUES (?1,?2)");
     stmt.bind_int(1, id);
     stmt.bind_int(2, dest);
-    if (stmt.step() != SQLITE_DONE)
-      fatal_error();
+    checkDone(stmt.step());
   } else if (value.type() == memodb_value::ARRAY) {
     for (const memodb_value &item : value.array_items())
       add_refs_from(id, item);
@@ -706,231 +571,73 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   }
 }
 
-memodb_call sqlite_db::identifyCall(sqlite3_int64 CID) {
-  sqlite3_int64 FID = -1;
-  std::vector<memodb_ref> ArgsReversed;
-  sqlite3 *db = get_db();
-  while (true) {
-    Stmt stmt(db, "SELECT fid, parent, arg FROM call WHERE cid = ?");
-    stmt.bind_int(1, CID);
-    int rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      break;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    FID = sqlite3_column_int64(stmt.stmt, 0);
-    ArgsReversed.emplace_back(id_to_ref(sqlite3_column_int64(stmt.stmt, 2)));
-    if (sqlite3_column_type(stmt.stmt, 1) == SQLITE_NULL)
-      break;
-    CID = sqlite3_column_int64(stmt.stmt, 1);
-  }
-
-  std::string Name;
-  {
-    Stmt stmt(db, "SELECT name FROM func WHERE fid = ?");
-    stmt.bind_int(1, FID);
-    int rc = stmt.step();
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    Name = reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0));
-  }
-
-  memodb_call Call(Name, {});
-  Call.Args.assign(ArgsReversed.rbegin(), ArgsReversed.rend());
-  return Call;
-}
-
-void sqlite_db::identifyCalls(std::vector<memodb_call> &Result,
-                              sqlite3_int64 CID) {
-  sqlite3 *db = get_db();
-  {
-    Stmt stmt(db, "SELECT cid FROM call WHERE parent = ?");
-    stmt.bind_int(1, CID);
-    while (true) {
-      auto rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      if (rc != SQLITE_ROW)
-        fatal_error();
-      identifyCalls(Result, sqlite3_column_int64(stmt.stmt, 0));
-    }
-  }
-  {
-    Stmt stmt(db, "SELECT 1 FROM call WHERE cid = ? AND result NOT NULL");
-    stmt.bind_int(1, CID);
-    int rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      return;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    Result.emplace_back(identifyCall(CID));
-  }
-}
-
-llvm::Optional<memodb_value> sqlite_db::getInternal(sqlite3_int64 id) {
-  sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT content, type FROM blob WHERE vid = ?1");
-  stmt.bind_int(1, id);
-  int rc = stmt.step();
-  if (rc == SQLITE_DONE)
-    return llvm::None;
-  if (rc != SQLITE_ROW)
-    fatal_error();
-
-  int value_type = sqlite3_column_int64(stmt.stmt, 1);
-  const char *data =
-      reinterpret_cast<const char *>(sqlite3_column_blob(stmt.stmt, 0));
-  int size = sqlite3_column_bytes(stmt.stmt, 0);
-  switch (value_type) {
-  case BYTES_BLOB:
-    return memodb_value::bytes(llvm::StringRef(data, size));
-  case CBOR_BLOB:
-    return memodb_value::load_cbor(llvm::ArrayRef<std::uint8_t>(
-        reinterpret_cast<const std::uint8_t *>(data), size));
-  default:
-    llvm_unreachable("impossible blob type");
-  }
-}
-
 llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
-  sqlite3 *db = get_db();
   if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
     if (Ref->isInline())
       return Ref->asInline();
-    return getInternal(ref_to_id(*Ref));
+    sqlite3 *db = get_db();
+    auto CIDBytes = Ref->asCID();
+    Stmt stmt(db, "SELECT codec, content FROM blocks WHERE cid = ?1");
+    stmt.bind_blob(1, CIDBytes);
+    if (!checkRow(stmt.step()))
+      return llvm::None;
+    if (stmt.columnInt(0) != CODEC_RAW)
+      llvm::report_fatal_error("unsupported compression codec");
+    return memodb_value::loadFromIPLD(*Ref, stmt.columnBytes(1));
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
-    Stmt stmt(db, "SELECT vid FROM head WHERE name = ?1");
+    sqlite3 *db = get_db();
+    Stmt stmt(db, "SELECT bid FROM heads WHERE name = ?1");
     stmt.bind_text(1, Head->Name);
-    int rc = stmt.step();
-    if (rc == SQLITE_DONE)
+    if (!checkRow(stmt.step()))
       return llvm::None;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    return memodb_value(id_to_ref(sqlite3_column_int64(stmt.stmt, 0)));
+    return memodb_value(bid_to_cid(stmt.columnInt(0)));
   } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
-    auto fid = get_fid(Call->Name);
-    if (fid == -1)
+    sqlite3 *db = get_db();
+    auto funcid = get_funcid(Call->Name);
+    auto Args = encodeArgs(*Call);
+    Stmt stmt(db, "SELECT result FROM calls WHERE funcid = ?1 AND args = ?2");
+    stmt.bind_int(1, funcid);
+    stmt.bind_blob(2, Args);
+    if (!checkRow(stmt.step()))
       return llvm::None;
-
-    Stmt stmt(db,
-              "SELECT cid, result FROM call WHERE fid = ?1 AND parent IS ?2 "
-              "AND arg = ?3");
-    stmt.bind_int(1, fid);
-    sqlite3_int64 parent = -1;
-    for (const memodb_ref &arg : Call->Args) {
-      stmt.reset();
-      if (parent != -1)
-        stmt.bind_int(2, parent);
-      stmt.bind_int(3, ref_to_id(arg));
-      if (stmt.step() != SQLITE_ROW)
-        return llvm::None;
-      parent = sqlite3_column_int64(stmt.stmt, 0);
-    }
-
-    return memodb_value(id_to_ref(sqlite3_column_int64(stmt.stmt, 1)));
+    return memodb_value(bid_to_cid(stmt.columnInt(0)));
   } else {
     llvm_unreachable("impossible memodb_name type");
   }
-}
-
-memodb_value sqlite_db::get_obsolete(const memodb_ref &ref, bool binary_keys) {
-  // Load an obsolete map value. Return a nested map where leaves are
-  // memodb_ref.
-  sqlite3 *db = get_db();
-  int value_type;
-  {
-    Stmt stmt(db, "SELECT type FROM value WHERE vid = ?1");
-    stmt.bind_int(1, ref_to_id(ref));
-    int rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      return {}; // missing value
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    value_type = sqlite3_column_int64(stmt.stmt, 0);
-  }
-
-  if (value_type != OBSOLETE_MAP)
-    return ref;
-
-  // Load the map.
-  auto result = memodb_value::map();
-  {
-    Stmt stmt(db, "SELECT key, value FROM map WHERE vid = ?1");
-    stmt.bind_int(1, ref_to_id(ref));
-    while (true) {
-      int rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      if (rc != SQLITE_ROW)
-        fatal_error();
-      memodb_ref value = id_to_ref_obsolete(sqlite3_column_int64(stmt.stmt, 1));
-      if (binary_keys) {
-        const std::uint8_t *data = reinterpret_cast<const std::uint8_t *>(
-            sqlite3_column_blob(stmt.stmt, 0));
-        int size = sqlite3_column_bytes(stmt.stmt, 0);
-        result[bytesToUTF8(llvm::ArrayRef(data, size))] = value;
-      } else {
-        const char *key =
-            reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0));
-        result[key] = value;
-      }
-    }
-  }
-
-  // Load nested maps.
-  for (auto &item : result.map_items()) {
-    item.second = get_obsolete(item.second.as_ref(), /* binary_keys */ true);
-  }
-
-  return result;
 }
 
 std::vector<memodb_name> sqlite_db::list_names_using(const memodb_ref &ref) {
   sqlite3 *db = get_db();
   std::vector<memodb_name> Result;
 
+  auto BID = cid_to_bid(ref);
+
   {
-    Stmt stmt(db, "SELECT src FROM refs WHERE dest = ?1");
-    stmt.bind_int(1, ref_to_id(ref));
-    while (true) {
-      auto rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      if (rc != SQLITE_ROW)
-        fatal_error();
-      Result.push_back(id_to_ref(sqlite3_column_int64(stmt.stmt, 0)));
-    }
+    Stmt stmt(db, "SELECT src FROM block_refs WHERE dest = ?1");
+    stmt.bind_int(1, BID);
+    while (checkRow(stmt.step()))
+      Result.emplace_back(bid_to_cid(stmt.columnInt(0)));
   }
 
   {
-    Stmt stmt(db, "SELECT name FROM head WHERE vid = ?1");
-    stmt.bind_int(1, ref_to_id(ref));
-    while (true) {
-      auto rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      if (rc != SQLITE_ROW)
-        fatal_error();
-      Result.emplace_back(memodb_head(
-          reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0))));
-    }
+    Stmt stmt(db, "SELECT name FROM heads WHERE bid = ?1");
+    stmt.bind_int(1, BID);
+    while (checkRow(stmt.step()))
+      Result.emplace_back(memodb_head(stmt.columnString(0)));
   }
 
-  std::vector<sqlite3_int64> CIDs;
   {
-    Stmt stmt(db, "SELECT cid FROM call WHERE arg = ?1 OR result = ?1");
-    stmt.bind_int(1, ref_to_id(ref));
-    while (true) {
-      auto rc = stmt.step();
-      if (rc == SQLITE_DONE)
-        break;
-      if (rc != SQLITE_ROW)
-        fatal_error();
-      std::vector<memodb_call> Calls;
-      identifyCalls(Calls, sqlite3_column_int64(stmt.stmt, 0));
-      for (memodb_call &Call : Calls)
-        Result.emplace_back(std::move(Call));
-    }
+    Stmt stmt(db, "SELECT callid FROM calls WHERE result = ?1");
+    stmt.bind_int(1, BID);
+    while (checkRow(stmt.step()))
+      Result.emplace_back(identifyCall(stmt.columnInt(0)));
+  }
+
+  {
+    Stmt stmt(db, "SELECT callid FROM call_refs WHERE dest = ?1");
+    stmt.bind_int(1, BID);
+    while (checkRow(stmt.step()))
+      Result.emplace_back(identifyCall(stmt.columnInt(0)));
   }
 
   return Result;
@@ -939,94 +646,78 @@ std::vector<memodb_name> sqlite_db::list_names_using(const memodb_ref &ref) {
 void sqlite_db::eachCall(llvm::StringRef Func,
                          std::function<bool(const memodb_call &)> F) {
   sqlite3 *db = get_db();
-  sqlite3_int64 FID = get_fid(Func);
-  Stmt stmt(db, "SELECT cid FROM call WHERE fid = ? AND result NOT NULL");
-  stmt.bind_int(1, FID);
-  while (true) {
-    int rc = stmt.step();
-    if (rc == SQLITE_DONE)
+  sqlite3_int64 FuncID = get_funcid(Func);
+  Stmt stmt(db, "SELECT callid FROM calls WHERE funcid = ?");
+  stmt.bind_int(1, FuncID);
+  while (checkRow(stmt.step()))
+    if (F(identifyCall(stmt.columnInt(0))))
       break;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    if (F(identifyCall(sqlite3_column_int64(stmt.stmt, 0))))
-      break;
-  }
 }
 
 std::vector<std::string> sqlite_db::list_funcs() {
   sqlite3 *db = get_db();
   std::vector<std::string> result;
-  Stmt stmt(db, "SELECT name FROM func");
-  while (true) {
-    auto rc = stmt.step();
-    if (rc == SQLITE_DONE)
-      break;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    result.emplace_back(
-        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0)));
-  }
+  Stmt stmt(db, "SELECT name FROM funcs");
+  while (checkRow(stmt.step()))
+    result.emplace_back(stmt.columnString(0));
   return result;
 }
 
 void sqlite_db::eachHead(std::function<bool(const memodb_head &)> F) {
   sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT name FROM head");
-  while (true) {
-    auto rc = stmt.step();
-    if (rc == SQLITE_DONE)
+  Stmt stmt(db, "SELECT name FROM heads");
+  while (checkRow(stmt.step()))
+    if (F(memodb_head(stmt.columnString(0))))
       break;
-    if (rc != SQLITE_ROW)
-      fatal_error();
-    auto Name =
-        reinterpret_cast<const char *>(sqlite3_column_text(stmt.stmt, 0));
-    if (F(memodb_head(Name)))
-      break;
-  }
 }
 
 void sqlite_db::head_delete(const memodb_head &Head) {
   sqlite3 *db = get_db();
-  Stmt delete_stmt(db, "DELETE FROM head WHERE name = ?1");
+  Stmt delete_stmt(db, "DELETE FROM heads WHERE name = ?1");
   delete_stmt.bind_text(1, Head.Name);
-  if (delete_stmt.step() != SQLITE_DONE)
-    fatal_error();
+  checkDone(delete_stmt.step());
 }
 
-sqlite3_int64 sqlite_db::get_fid(llvm::StringRef name, bool create_if_missing) {
+sqlite3_int64 sqlite_db::get_funcid(llvm::StringRef name,
+                                    bool create_if_missing) {
   sqlite3 *db = get_db();
-  Stmt stmt(db, "SELECT fid FROM func WHERE name = ?1");
+  Stmt stmt(db, "SELECT funcid FROM funcs WHERE name = ?1");
   stmt.bind_text(1, name);
-  if (stmt.step() == SQLITE_ROW)
-    return sqlite3_column_int64(stmt.stmt, 0);
+  if (checkRow(stmt.step()))
+    return stmt.columnInt(0);
   if (!create_if_missing)
     return -1;
 
-  Transaction transaction(*this);
+  ExclusiveTransaction transaction(*this);
   stmt.reset();
-  if (stmt.step() == SQLITE_ROW)
-    return sqlite3_column_int64(stmt.stmt, 0);
+  if (checkRow(stmt.step()))
+    return stmt.columnInt(0);
 
-  Stmt insert_stmt(db, "INSERT INTO func(name) VALUES (?1)");
+  Stmt insert_stmt(db, "INSERT INTO funcs(name) VALUES (?1)");
   insert_stmt.bind_text(1, name);
-  if (insert_stmt.step() != SQLITE_DONE)
-    fatal_error();
+  checkDone(insert_stmt.step());
   sqlite3_int64 newid = sqlite3_last_insert_rowid(db);
-  assert(newid);
+  assert(newid > 0);
   transaction.commit();
   return newid;
 }
 
 void sqlite_db::call_invalidate(llvm::StringRef name) {
   sqlite3 *db = get_db();
-  auto fid = get_fid(name);
-  if (fid == -1)
-    return;
+  auto funcid = get_funcid(name);
 
-  Stmt delete_stmt(db, "DELETE FROM call WHERE fid = ?1");
-  delete_stmt.bind_int(1, fid);
-  if (delete_stmt.step() != SQLITE_DONE)
-    fatal_error();
+  ExclusiveTransaction transaction(*this);
+  {
+    Stmt stmt(db, "DELETE FROM calls WHERE funcid = ?1");
+    stmt.bind_int(1, funcid);
+    checkDone(stmt.step());
+  }
+  {
+    Stmt stmt(db, "DELETE FROM call_refs WHERE funcid = ?1");
+    stmt.bind_int(1, funcid);
+    checkDone(stmt.step());
+  }
+  transaction.commit();
 }
 
 std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,

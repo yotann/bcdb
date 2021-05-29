@@ -313,10 +313,7 @@ RocksDBStore::getOptional(const memodb_name &name) {
     if (!checkFound(
             DB->Get({}, BlocksFamily, makeSlice(Ref->asCID()), &Fetched)))
       return {};
-    if (Ref->isBlake2BRaw())
-      return memodb_value(makeBytes(Fetched));
-    else
-      return memodb_value::load_cbor(makeBytes(Fetched));
+    return memodb_value::loadFromIPLD(*Ref, makeBytes(Fetched));
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(DB->Get({}, HeadsFamily, Head->Name, &Fetched)))

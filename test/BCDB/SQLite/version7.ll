@@ -1,4 +1,5 @@
-; RUN: cp %p/Inputs/version4.bcdb %t
+; RUN: rm -rf %t
+; RUN: cp %p/Inputs/version7.bcdb %t
 ; RUN: bcdb get -uri sqlite:%t -name - | opt -verify -S | FileCheck %s
 ; RUN: bcdb get-function -uri sqlite:%t -id $(bcdb list-function-ids -uri sqlite:%t) | opt -verify -S | FileCheck --check-prefix=FUNC %s
 ; RUN: bcdb refs -uri sqlite:%t $(bcdb list-function-ids -uri sqlite:%t) | FileCheck --check-prefix=REFS %s

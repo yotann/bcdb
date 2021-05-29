@@ -1,3 +1,4 @@
+; RUN: rm -rf %t
 ; RUN: bcdb init     -uri sqlite:%t
 ; RUN: bcdb add      -uri sqlite:%t %s -name x
 ; RUN: bcdb add      -uri sqlite:%t %s -name y

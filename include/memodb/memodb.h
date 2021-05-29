@@ -289,6 +289,8 @@ public:
     return load_cbor_from_sequence(in);
   }
   static memodb_value load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in);
+  static memodb_value loadFromIPLD(const memodb_ref &CID,
+                                   llvm::ArrayRef<std::uint8_t> Content);
   void save_cbor(std::vector<std::uint8_t> &out) const;
   std::pair<memodb_ref, bytes_t> saveAsIPLD(bool noInline = false) const;
 

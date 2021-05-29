@@ -1,3 +1,4 @@
+; RUN: rm -rf %t
 ; RUN: bcdb init -uri sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -uri sqlite:%t -name a -
 ; RUN: llvm-as < %s | bcdb add -uri sqlite:%t -name a -
