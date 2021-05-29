@@ -169,14 +169,10 @@ llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
     memodb_ref CIDFromFile = readCID(&Pos);
     if (*CID != CIDFromFile)
       llvm::report_fatal_error("CID mismatch (file changed while reading?)");
-    if (CID->isBlake2BRaw()) {
-      std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
-      if (!readBytes(Buffer, &Pos))
-        llvm::report_fatal_error("Unexpected end of file in raw bytes");
-      return memodb_value(Buffer);
-    } else {
-      return readValue(&Pos, BlockEnd - Pos);
-    }
+    std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
+    if (!readBytes(Buffer, &Pos))
+      llvm::report_fatal_error("Unexpected end of file in content");
+    return memodb_value::loadFromIPLD(*CID, Buffer);
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
     if (Root["heads"].map_items().count(Head->Name))
       return Root["heads"][Head->Name];

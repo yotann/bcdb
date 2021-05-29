@@ -165,25 +165,6 @@ template <typename T> void walkRefs(const memodb_value &Value, T F) {
   }
 }
 
-template <typename T>
-memodb_value transformRefs(const memodb_value &Value, T F) {
-  if (Value.type() == memodb_value::REF) {
-    return F(Value.as_ref());
-  } else if (Value.type() == memodb_value::ARRAY) {
-    memodb_value::array_t Result;
-    for (const memodb_value &Item : Value.array_items())
-      Result.push_back(transformRefs(Item, F));
-    return memodb_value(Result);
-  } else if (Value.type() == memodb_value::MAP) {
-    memodb_value::map_t Result;
-    for (const auto &Item : Value.map_items())
-      Result[Item.first] = transformRefs(Item.second, F);
-    return memodb_value(Result);
-  } else {
-    return Value;
-  }
-}
-
 // memodb export
 
 static cl::list<std::string> NamesToExport(cl::Positional, cl::ZeroOrMore,
@@ -239,25 +220,20 @@ static int Export() {
   OutputFile->os().write_zeros(0x200);
   auto DataStartPos = OutputFile->os().tell();
 
-  std::map<memodb_ref, memodb_ref> RefMapping;
-  std::function<memodb_ref(const memodb_ref &)> exportRef;
+  std::set<memodb_ref> AlreadyWritten;
+  std::function<void(const memodb_ref &)> exportRef;
   std::function<memodb_ref(const memodb_value &)> exportValue;
 
   exportRef = [&](const memodb_ref &Ref) {
-    auto Inserted = RefMapping.insert(std::make_pair(Ref, memodb_ref()));
-    if (Inserted.second)
-      Inserted.first->second = exportValue(Db->get(Ref));
-    return Inserted.first->second;
+    if (AlreadyWritten.insert(Ref).second)
+      exportValue(Db->get(Ref));
   };
 
   exportValue = [&](const memodb_value &Value) {
-    auto Block = transformRefs(Value, exportRef).saveAsIPLD();
-    if (!Block.first.isInline()) {
-      if (RefMapping[Block.first] != Block.first) {
-        writeBlock(Block);
-        RefMapping[Block.first] = Block.first;
-      }
-    }
+    auto Block = Value.saveAsIPLD();
+    if (!Block.first.isInline())
+      writeBlock(Block);
+    walkRefs(Value, exportRef);
     return Block.first;
   };
 
@@ -282,13 +258,14 @@ static int Export() {
       memodb_value Args = memodb_value::array();
       std::string Key;
       for (const memodb_ref &Arg : Call->Args) {
+        exportRef(Arg);
         Args.array_items().emplace_back(Arg);
-        Key += std::string(exportRef(Arg)) + "/";
+        Key += std::string(Arg) + "/";
       }
       Key.pop_back();
-      FuncCalls[Key] =
-          memodb_value::map({{"args", Args}, {"result", Db->get(Name)}});
-      exportRef(Db->get(Name).as_ref());
+      auto Result = Db->get(Name);
+      FuncCalls[Key] = memodb_value::map({{"args", Args}, {"result", Result}});
+      exportRef(Result.as_ref());
     } else {
       llvm_unreachable("impossible memodb_name type");
     }
@@ -457,33 +434,29 @@ static int Transfer() {
   auto SourceDb = memodb_db_open(GetUri());
   auto TargetDb = memodb_db_open(TargetDatabaseURI);
 
-  std::map<memodb_ref, memodb_ref> RefMapping;
-
-  std::function<memodb_ref(const memodb_ref &)> transferRef =
+  std::function<void(const memodb_ref &)> transferRef =
       [&](const memodb_ref &Ref) {
-        auto Inserted = RefMapping.insert(std::make_pair(Ref, memodb_ref()));
-        if (Inserted.second) {
+        if (!TargetDb->has(Ref)) {
           memodb_value Value = SourceDb->get(Ref);
-          Value = transformRefs(Value, transferRef);
-          Inserted.first->second = TargetDb->put(Value);
+          TargetDb->put(Value);
+          walkRefs(Value, transferRef);
         }
-        return Inserted.first->second;
       };
 
   auto transferName = [&](const memodb_name &Name) {
     errs() << "transferring " << Name << "\n";
     if (const memodb_ref *Ref = std::get_if<memodb_ref>(&Name)) {
-      memodb_ref Result = transferRef(*Ref);
-      outs() << Result << "\n";
+      transferRef(*Ref);
     } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-      memodb_ref Result = transferRef(SourceDb->get(Name).as_ref());
-      TargetDb->set(Name, Result);
+      auto Result = SourceDb->get(Name).as_ref();
+      transferRef(Result);
+      TargetDb->set(*Head, Result);
     } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-      memodb_call NewCall(Call->Name, {});
       for (const memodb_ref &Arg : Call->Args)
-        NewCall.Args.emplace_back(transferRef(Arg));
-      memodb_ref Result = transferRef(SourceDb->get(Name).as_ref());
-      TargetDb->set(NewCall, Result);
+        transferRef(Arg);
+      memodb_ref Result = SourceDb->get(Name).as_ref();
+      transferRef(Result);
+      TargetDb->set(*Call, Result);
     } else {
       llvm_unreachable("impossible memodb_name type");
     }

@@ -185,12 +185,8 @@ static std::string encodeBase32(llvm::ArrayRef<std::uint8_t> Bytes) {
 memodb_ref::memodb_ref(llvm::StringRef Text) {
   if (Text.startswith(BASE32_PREFIX)) {
     *this = fromCID(decodeBase32(Text.drop_front()));
-  } else if (Text.find_first_not_of("0123456789") == llvm::StringRef::npos) {
-    id_ = llvm::ArrayRef(reinterpret_cast<const std::uint8_t *>(Text.data()),
-                         Text.size());
-    type_ = NUMERIC;
   } else {
-    llvm::report_fatal_error(llvm::Twine("invalid ID format ") + Text);
+    llvm::report_fatal_error(llvm::Twine("unsupported multibase ") + Text);
   }
 }
 
@@ -269,18 +265,6 @@ memodb_value memodb_ref::asInline() const {
     llvm::report_fatal_error("incorrect type of ID");
 }
 
-llvm::ArrayRef<std::uint8_t> memodb_ref::asBlake2BRaw() const {
-  if (type_ != BLAKE2B_RAW)
-    llvm::report_fatal_error("incorrect type of ID");
-  return id_;
-}
-
-llvm::ArrayRef<std::uint8_t> memodb_ref::asBlake2BMerkleDAG() const {
-  if (type_ != BLAKE2B_MERKLEDAG)
-    llvm::report_fatal_error("incorrect type of ID");
-  return id_;
-}
-
 std::vector<std::uint8_t> memodb_ref::asCID() const {
   std::vector<std::uint8_t> Result;
   if (type_ == BLAKE2B_RAW)
@@ -302,8 +286,6 @@ std::vector<std::uint8_t> memodb_ref::asCID() const {
 memodb_ref::operator std::string() const {
   if (type_ == EMPTY)
     return "";
-  else if (type_ == NUMERIC)
-    return std::string(reinterpret_cast<const char *>(id_.data()), id_.size());
   else {
     auto Bytes = asCID();
     return BASE32_PREFIX + encodeBase32(Bytes);
@@ -427,19 +409,13 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
             os << '"';
           },
           [&](const memodb_value::ref_t &x) {
-            if (x.isCID()) {
-              os << "42(h'00"; // include multibase prefix
-              for (std::uint8_t b : x.asCID()) {
-                char buf[3];
-                std::snprintf(buf, sizeof(buf), "%02x", b);
-                os << buf;
-              }
-              os << "')";
-            } else {
-              os << "39(\"";
-              print_escaped(std::string(x), '"');
-              os << "\")";
+            os << "42(h'00"; // DAG-CBOR required multibase prefix
+            for (std::uint8_t b : x.asCID()) {
+              char buf[3];
+              std::snprintf(buf, sizeof(buf), "%02x", b);
+              os << buf;
             }
+            os << "')";
           },
           [&](const memodb_value::array_t &x) {
             bool first = true;
@@ -600,19 +576,15 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     }
   };
 
-  bool is_numeric_ref = false, is_cid = false;
+  bool is_cid = false;
   do {
     start(major_type, minor_type, additional, indefinite);
-    if (major_type == 6 && additional == 39)
-      is_numeric_ref = true;
     if (major_type == 6 && additional == 42)
       is_cid = true;
   } while (major_type == 6);
 
   if (is_cid && major_type != 2)
     llvm::report_fatal_error("Invalid CID type");
-  if (is_numeric_ref && major_type != 3)
-    llvm::report_fatal_error("Invalid reference type");
 
   switch (major_type) {
   case 0:
@@ -642,8 +614,6 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
       result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
-    if (is_numeric_ref)
-      return memodb_ref(std::move(result));
     return memodb_value::string(result);
   }
   case 4: {
@@ -747,19 +717,12 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                    out.insert(out.end(), x.begin(), x.end());
                  },
                  [&](const ref_t &x) {
-                   if (x.isCID()) {
-                     auto Bytes = x.asCID();
-                     // Insert identity multibase prefix (required by DAG-CBOR).
-                     Bytes.insert(Bytes.begin(), 0x00);
-                     start(6, 42); // CID tag
-                     start(2, Bytes.size());
-                     out.insert(out.end(), Bytes.begin(), Bytes.end());
-                   } else {
-                     std::string Str = x;
-                     start(6, 39); // "identifier" tag
-                     start(3, Str.size());
-                     out.insert(out.end(), Str.begin(), Str.end());
-                   }
+                   auto Bytes = x.asCID();
+                   // Insert identity multibase prefix (required by DAG-CBOR).
+                   Bytes.insert(Bytes.begin(), 0x00);
+                   start(6, 42); // CID tag
+                   start(2, Bytes.size());
+                   out.insert(out.end(), Bytes.begin(), Bytes.end());
                  },
                  [&](const array_t &x) {
                    start(4, x.size());
@@ -795,9 +758,9 @@ memodb_value memodb_value::loadFromIPLD(const memodb_ref &CID,
     assert(Content.empty());
     return CID.asInline();
   }
-  if (CID.isBlake2BRaw())
+  if (CID.type_ == memodb_ref::BLAKE2B_RAW)
     return memodb_value(Content);
-  if (CID.isBlake2BMerkleDAG())
+  if (CID.type_ == memodb_ref::BLAKE2B_MERKLEDAG)
     return memodb_value::load_cbor(Content);
   llvm::report_fatal_error("Unsupported CID");
 }

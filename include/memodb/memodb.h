@@ -47,14 +47,7 @@ class memodb_value;
 class memodb_ref {
 private:
   std::vector<std::uint8_t> id_;
-  enum {
-    EMPTY,
-    NUMERIC,
-    INLINE_RAW,
-    INLINE_DAG,
-    BLAKE2B_RAW,
-    BLAKE2B_MERKLEDAG
-  } type_;
+  enum { EMPTY, INLINE_RAW, INLINE_DAG, BLAKE2B_RAW, BLAKE2B_MERKLEDAG } type_;
   friend class memodb_value;
 
 public:
@@ -64,13 +57,8 @@ public:
   static memodb_ref loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes);
   static memodb_ref fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes);
   static memodb_ref fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes);
-  bool isCID() const { return type_ != EMPTY && type_ != NUMERIC; }
   bool isInline() const { return type_ == INLINE_RAW || type_ == INLINE_DAG; }
-  bool isBlake2BRaw() const { return type_ == BLAKE2B_RAW; }
-  bool isBlake2BMerkleDAG() const { return type_ == BLAKE2B_MERKLEDAG; }
   memodb_value asInline() const;
-  llvm::ArrayRef<std::uint8_t> asBlake2BRaw() const;
-  llvm::ArrayRef<std::uint8_t> asBlake2BMerkleDAG() const;
   std::vector<std::uint8_t> asCID() const;
   operator std::string() const;
   operator bool() const { return type_ != EMPTY; }

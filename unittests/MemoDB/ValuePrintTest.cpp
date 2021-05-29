@@ -73,8 +73,8 @@ TEST(ValuePrintTest, Map) {
 }
 
 TEST(ValuePrintTest, Ref) {
-  test_print("39(\"\")", memodb_value(memodb_ref()));
-  test_print("39(\"7\")", memodb_value(memodb_ref("7")));
+  test_print("42(h'0001710001f6')",
+             memodb_value(memodb_ref::fromCID({0x01, 0x71, 0x00, 0x01, 0xf6})));
   test_print(
       "42(h'"
       "000171a0e4022003170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c"
