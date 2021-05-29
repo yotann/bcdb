@@ -1,9 +1,0 @@
-; RUN: rm -rf %t
-; RUN: bcdb init -uri leveldb:%t
-
-; RUN: memodb set -uri leveldb:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
-; RUN: memodb set -uri leveldb:%t call:primes/bafyqaaig id:bafyqab4gaibqkbylbu
-; RUN: memodb set -uri leveldb:%t call:add/bafyqaaic/bafyqaaic id:bafyqaaie
-
-; RUN: memodb export -uri leveldb:%t > %t.car
-; RUN: diff %t.car %p/Outputs/export-call.car

@@ -113,15 +113,6 @@ else(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
   set(ENABLE_SMOUT OFF)
 endif(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
 
-find_library(LEVELDB_LIBRARIES leveldb)
-find_path(LEVELDB_INCLUDE_DIRS leveldb/db.h)
-if(LEVELDB_LIBRARIES AND LEVELDB_INCLUDE_DIRS)
-  set(WITH_LEVELDB ON)
-else(LEVELDB_LIBRARIES AND LEVELDB_INCLUDE_DIRS)
-  message(WARNING "Could not find LevelDB library.")
-  set(WITH_LEVELDB OFF)
-endif(LEVELDB_LIBRARIES AND LEVELDB_INCLUDE_DIRS)
-
 find_package(RocksDB REQUIRED)
 
 
