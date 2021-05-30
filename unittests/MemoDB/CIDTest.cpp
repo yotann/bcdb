@@ -535,4 +535,32 @@ TEST(CIDTest, ToBase64UrlPad) {
                 0xb3, 0xd3, 0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf}));
 }
 
+TEST(CIDTest, FromProquint) {
+  EXPECT_EQ(CID::parse("pro-bajij-babad-zus"), identityCID({0xff}));
+  EXPECT_EQ(CID::parse("pro-bajij-babah-lusab-babad"),
+            identityCID({0x7f, 0x00, 0x00, 0x01}));
+  EXPECT_EQ(CID::parse("pro-bajij-babah-gutih-tugad"),
+            identityCID({0x3f, 0x54, 0xdc, 0xc1}));
+  EXPECT_EQ(CID::parse("pro-bajij-babar-badif-gohuj-kalim-nopur-sativ-zab"),
+            identityCID({0x00, 0x52, 0x39, 0x35, 0x61, 0xd8, 0x9a, 0xbb, 0xc3,
+                         0x5e, 0xf0}));
+
+  EXPECT_EQ(CID::parse("prq-bajij-babad-zus"), std::nullopt);
+  EXPECT_EQ(CID::parse("pro-bajij+babad-zus"), std::nullopt);
+  EXPECT_EQ(CID::parse("pro-bajij-aabad-zus"), std::nullopt);
+  EXPECT_EQ(CID::parse("pro-bajij-babad-zusa"), std::nullopt);
+}
+
+TEST(CIDTest, ToProquint) {
+  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
+    return identityCID(Bytes).asString(Multibase::Proquint);
+  };
+  EXPECT_EQ("pro-bajij-babad-zus", to({0xff}));
+  EXPECT_EQ("pro-bajij-babah-lusab-babad", to({0x7f, 0x00, 0x00, 0x01}));
+  EXPECT_EQ("pro-bajij-babah-gutih-tugad", to({0x3f, 0x54, 0xdc, 0xc1}));
+  EXPECT_EQ(
+      "pro-bajij-babar-badif-gohuj-kalim-nopur-sativ-zab",
+      to({0x00, 0x52, 0x39, 0x35, 0x61, 0xd8, 0x9a, 0xbb, 0xc3, 0x5e, 0xf0}));
+}
+
 } // namespace

@@ -2,18 +2,26 @@
 
 #include <assert.h>
 #include <cmath>
-#include <sodium.h>
+#include <llvm/Support/CommandLine.h>
+#include <sodium/crypto_generichash_blake2b.h>
 
 using namespace memodb;
+
+namespace {
+llvm::cl::opt<std::string>
+    MultibaseOption("multibase", llvm::cl::Optional,
+                    llvm::cl::desc("Multibase to print CIDs in"),
+                    llvm::cl::init("base32"));
+} // end anonymous namespace
 
 namespace {
 struct MultibaseCodec {
   static const std::int8_t INVALID_VALUE = -1;
   static const std::int8_t PAD_VALUE = -2;
 
-  MultibaseCodec(Multibase ID, char Prefix, llvm::StringRef Chars,
-                 std::optional<char> Pad)
-      : ID(ID), Prefix(Prefix), Chars(Chars), Pad(Pad) {
+  MultibaseCodec(llvm::StringRef Name, Multibase ID, char Prefix,
+                 llvm::StringRef Chars, std::optional<char> Pad)
+      : Name(Name), ID(ID), Prefix(Prefix), Chars(Chars), Pad(Pad) {
     for (int i = 0; i < 256; i++)
       Values[i] = INVALID_VALUE;
     for (size_t i = 0; i < Chars.size(); i++)
@@ -28,6 +36,7 @@ struct MultibaseCodec {
   std::optional<std::vector<std::uint8_t>> decode(llvm::StringRef Str) const;
   std::string encode(llvm::ArrayRef<std::uint8_t> Bytes) const;
 
+  llvm::StringRef Name;
   Multibase ID;
   char Prefix;
   llvm::StringRef Chars;
@@ -39,6 +48,8 @@ struct MultibaseCodec {
 
 std::optional<std::vector<std::uint8_t>>
 MultibaseCodec::decode(llvm::StringRef Str) const {
+  // XXX: strings are accepted even if their pad bits are nonzero (e.g.,
+  // "cafkqaab=" is equivalent to "cafkqaaa=").
   std::vector<std::uint8_t> Result;
   bool PadSeen = false;
   while (!Str.empty()) {
@@ -104,46 +115,116 @@ std::string MultibaseCodec::encode(llvm::ArrayRef<std::uint8_t> Bytes) const {
   return Result;
 }
 
+std::optional<std::vector<std::uint8_t>> proquintDecode(llvm::StringRef Str) {
+  static const llvm::StringRef CON = "bdfghjklmnprstvz";
+  static const llvm::StringRef VO = "aiou";
+  std::vector<std::uint8_t> Result;
+  if (!Str.startswith("pro"))
+    return {};
+  Str = Str.drop_front(3);
+  while (!Str.empty()) {
+    if (Str[0] != '-' || Str.size() < 4 || Str.size() == 5)
+      return {};
+    std::size_t Pos0 = CON.find(Str[1]);
+    std::size_t Pos1 = VO.find(Str[2]);
+    std::size_t Pos2 = CON.find(Str[3]);
+    if (Pos0 == llvm::StringRef::npos || Pos1 == llvm::StringRef::npos ||
+        Pos2 == llvm::StringRef::npos)
+      return {};
+    std::uint16_t Word = (Pos0 << 12) | (Pos1 << 10) | (Pos2 << 6);
+    Result.push_back(Word >> 8);
+    Str = Str.drop_front(4);
+    if (Str.size() >= 2) {
+      std::size_t Pos3 = VO.find(Str[0]);
+      std::size_t Pos4 = CON.find(Str[1]);
+      if (Pos3 == llvm::StringRef::npos || Pos4 == llvm::StringRef::npos)
+        return {};
+      Word |= (Pos3 << 4) | Pos4;
+      Result.push_back(Word & 0xff);
+      Str = Str.drop_front(2);
+    }
+  }
+  return Result;
+}
+
+std::string proquintEncode(llvm::ArrayRef<std::uint8_t> Bytes) {
+  // https://github.com/multiformats/multibase/blob/master/rfcs/PRO-QUINT.md
+
+  // XXX: It isn't specified how to handle an odd number of bytes. This
+  // implementation produces the minimum number of unambiguous chars, so there
+  // will be a lone syllable.
+
+  // It also isn't explicitly specified what happens if there are zero bytes.
+  // This implementation produces "pro".
+
+  static const char CON[] = {"bdfghjklmnprstvz"};
+  static const char VO[] = {"aiou"};
+  std::string Result = "pro";
+  while (!Bytes.empty()) {
+    std::uint16_t Word = Bytes[0] << 8;
+    Bytes = Bytes.drop_front();
+    bool FullWord = !Bytes.empty();
+    if (FullWord) {
+      Word |= Bytes[0];
+      Bytes = Bytes.drop_front();
+    }
+    Result.push_back('-');
+    Result.push_back(CON[Word >> 12]);
+    Result.push_back(VO[(Word >> 10) & 3]);
+    Result.push_back(CON[(Word >> 6) & 15]);
+    if (FullWord) {
+      Result.push_back(VO[(Word >> 4) & 3]);
+      Result.push_back(CON[(Word >> 0) & 15]);
+    }
+  }
+  return Result;
+}
+
 static const MultibaseCodec MULTIBASE_CODECS[] = {
-    MultibaseCodec(Multibase::Base2, '0', "01", std::nullopt),
-    MultibaseCodec(Multibase::Base16, 'f', "0123456789abcdef", std::nullopt),
-    MultibaseCodec(Multibase::Base16Upper, 'F', "0123456789ABCDEF",
+    MultibaseCodec("base2", Multibase::Base2, '0', "01", std::nullopt),
+    MultibaseCodec("base8", Multibase::Base8, '7', "01234567", std::nullopt),
+    MultibaseCodec("base16", Multibase::Base16, 'f', "0123456789abcdef",
                    std::nullopt),
-    MultibaseCodec(Multibase::Base32Hex, 'v',
+    MultibaseCodec("base16upper", Multibase::Base16Upper, 'F',
+                   "0123456789ABCDEF", std::nullopt),
+    MultibaseCodec("base32hex", Multibase::Base32Hex, 'v',
                    "0123456789abcdefghijklmnopqrstuv", std::nullopt),
-    MultibaseCodec(Multibase::Base32HexUpper, 'V',
+    MultibaseCodec("base32hexupper", Multibase::Base32HexUpper, 'V',
                    "0123456789ABCDEFGHIJKLMNOPQRSTUV", std::nullopt),
-    MultibaseCodec(Multibase::Base32HexPad, 't',
+    MultibaseCodec("base32hexpad", Multibase::Base32HexPad, 't',
                    "0123456789abcdefghijklmnopqrstuv", '='),
-    MultibaseCodec(Multibase::Base32HexPadUpper, 'T',
+    MultibaseCodec("base32hexpadupper", Multibase::Base32HexPadUpper, 'T',
                    "0123456789ABCDEFGHIJKLMNOPQRSTUV", '='),
-    MultibaseCodec(Multibase::Base32, 'b', "abcdefghijklmnopqrstuvwxyz234567",
-                   std::nullopt),
-    MultibaseCodec(Multibase::Base32Upper, 'B',
+    MultibaseCodec("base32", Multibase::Base32, 'b',
+                   "abcdefghijklmnopqrstuvwxyz234567", std::nullopt),
+    MultibaseCodec("base32upper", Multibase::Base32Upper, 'B',
                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", std::nullopt),
-    MultibaseCodec(Multibase::Base32Pad, 'c',
+    MultibaseCodec("base32pad", Multibase::Base32Pad, 'c',
                    "abcdefghijklmnopqrstuvwxyz234567", '='),
-    MultibaseCodec(Multibase::Base32PadUpper, 'C',
+    MultibaseCodec("base32padupper", Multibase::Base32PadUpper, 'C',
                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", '='),
+    MultibaseCodec("base32z", Multibase::Base32z, 'h',
+                   "ybndrfg8ejkmcpqxot1uwisza345h769", std::nullopt),
     MultibaseCodec(
-        Multibase::Base64, 'm',
+        "base64", Multibase::Base64, 'm',
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
         std::nullopt),
     MultibaseCodec(
-        Multibase::Base64Pad, 'M',
+        "base64pad", Multibase::Base64Pad, 'M',
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
         '='),
     MultibaseCodec(
-        Multibase::Base64Url, 'u',
+        "base64url", Multibase::Base64Url, 'u',
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
         std::nullopt),
     MultibaseCodec(
-        Multibase::Base64UrlPad, 'U',
+        "base64urlpad", Multibase::Base64UrlPad, 'U',
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
         '='),
 };
 
-static void writeVarInt(std::vector<std::uint8_t> &Bytes, std::uint64_t Value) {
+static void writeVarInt(llvm::SmallVectorImpl<std::uint8_t> &Bytes,
+                        std::uint64_t Value) {
   for (; Value >= 0x80; Value >>= 7)
     Bytes.push_back((Value & 0x7f) | 0x80);
   Bytes.push_back(Value);
@@ -157,14 +238,14 @@ CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
     HashType = IdentitySize <= Blake2BSize ? Multicodec::Identity
                                            : Multicodec::Blake2b_256;
   }
-  std::vector<std::uint8_t> Buffer;
+  llvm::SmallVector<std::uint8_t, 32> Buffer;
   llvm::ArrayRef<std::uint8_t> Hash;
   if (*HashType == Multicodec::Identity) {
     Hash = Content;
   } else if (*HashType == Multicodec::Blake2b_256) {
     Buffer.resize(32);
-    crypto_generichash(Buffer.data(), Buffer.size(), Content.data(),
-                       Content.size(), nullptr, 0);
+    crypto_generichash_blake2b(Buffer.data(), Buffer.size(), Content.data(),
+                               Content.size(), nullptr, 0);
     Hash = Buffer;
   } else {
     assert(false && "unsupported multihash");
@@ -179,7 +260,7 @@ CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
   writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Result.ContentType));
   writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Result.HashType));
   writeVarInt(Result.Bytes, Result.HashSize);
-  Result.Bytes.insert(Result.Bytes.end(), Hash.begin(), Hash.end());
+  Result.Bytes.append(Hash.begin(), Hash.end());
   return Result;
 }
 
@@ -193,6 +274,12 @@ std::optional<CID> CID::parse(llvm::StringRef Text) {
         return {};
       return fromBytes(*Bytes);
     }
+  }
+  if (Text[0] == 'p') {
+    auto Bytes = proquintDecode(Text);
+    if (!Bytes)
+      return {};
+    return fromBytes(*Bytes);
   }
   return {};
 }
@@ -255,15 +342,26 @@ std::optional<CID> CID::loadFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
   Result.HashType = static_cast<Multicodec>(*RawHashType);
   Result.HashSize = *RawHashSize;
   OrigBytes = OrigBytes.drop_back(Bytes.size());
-  Result.Bytes.insert(Result.Bytes.end(), OrigBytes.begin(), OrigBytes.end());
+  Result.Bytes.append(OrigBytes.begin(), OrigBytes.end());
   return Result;
 }
 
 std::string CID::asString(Multibase Base) const {
   for (const auto &Codec : MULTIBASE_CODECS)
-    if (Codec.ID == Base)
+    if (Base == Codec.ID)
       return Codec.Prefix + Codec.encode(asBytes());
+  if (Base == Multibase::Proquint)
+    return proquintEncode(asBytes());
   assert(false && "unsupported multibase");
+  return asString(Multibase::Base32);
+}
+
+std::string CID::asString() const {
+  for (const auto &Codec : MULTIBASE_CODECS)
+    if (MultibaseOption == Codec.Name)
+      return asString(Codec.ID);
+  if (MultibaseOption == "proquint")
+    return asString(Multibase::Proquint);
   return asString(Multibase::Base32);
 }
 

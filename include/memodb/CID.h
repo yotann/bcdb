@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iosfwd>
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
 #include <optional>
@@ -16,6 +17,7 @@ namespace memodb {
 enum class Multibase : char {
   Identity = '\x00',
   Base2 = '0',
+  Base8 = '7',
   Base16 = 'f',
   Base16Upper = 'F',
   Base32Hex = 'v',
@@ -26,10 +28,12 @@ enum class Multibase : char {
   Base32Upper = 'B',
   Base32Pad = 'c',
   Base32PadUpper = 'C',
+  Base32z = 'h',
   Base64 = 'm',
   Base64Pad = 'M',
   Base64Url = 'u',
   Base64UrlPad = 'U',
+  Proquint = 'p',
 };
 
 // https://github.com/multiformats/multicodec
@@ -49,9 +53,8 @@ private:
 
   std::size_t HashSize;
 
-  // Bytes field consists of the whole encoded CID, including a 0x00 multibase
-  // prefix.
-  std::vector<std::uint8_t> Bytes;
+  // Bytes field consists of the whole encoded CID.
+  llvm::SmallVector<std::uint8_t, 48> Bytes;
 
   CID() {}
 
@@ -62,7 +65,7 @@ public:
   Multicodec getContentType() const { return ContentType; }
 
   llvm::ArrayRef<std::uint8_t> getHashBytes() const {
-    return llvm::ArrayRef(Bytes).take_back(HashSize);
+    return llvm::ArrayRef<std::uint8_t>(Bytes).take_back(HashSize);
   }
 
   static CID calculate(Multicodec ContentType,
@@ -83,14 +86,16 @@ public:
 
   llvm::ArrayRef<std::uint8_t> asBytes() const { return Bytes; }
 
-  std::string asString(Multibase Base = Multibase::Base32) const;
+  std::string asString(Multibase Base) const;
 
+  // Use user-specified multibase.
+  std::string asString() const;
   operator std::string() const;
 
   bool operator<(const CID &Other) const { return Bytes < Other.Bytes; }
-  bool operator>(const CID &Other) const { return Bytes > Other.Bytes; }
-  bool operator<=(const CID &Other) const { return Bytes <= Other.Bytes; }
-  bool operator>=(const CID &Other) const { return Bytes >= Other.Bytes; }
+  bool operator>(const CID &Other) const { return Other.Bytes < Bytes; }
+  bool operator<=(const CID &Other) const { return !(Other.Bytes < Bytes); }
+  bool operator>=(const CID &Other) const { return !(Bytes < Other.Bytes); }
   bool operator==(const CID &Other) const { return Bytes == Other.Bytes; }
   bool operator!=(const CID &Other) const { return Bytes != Other.Bytes; }
 };

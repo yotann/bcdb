@@ -8,7 +8,6 @@
 #include <cassert>
 #include <cstring>
 #include <mutex>
-#include <sodium.h>
 #include <sqlite3.h>
 #include <vector>
 
@@ -48,7 +47,7 @@ static const char SQLITE_INIT_STMTS[] =
     "  cid     BLOB    NOT NULL UNIQUE,\n"
     "  codec   INTEGER NOT NULL,\n"
     "          -- compression type, etc.\n"
-    "  content BLOB    NOT NULL\n"
+    "  content BLOB\n"
     ");\n"
     "CREATE TABLE heads(\n"
     "  name    TEXT    NOT NULL UNIQUE,\n"
