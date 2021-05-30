@@ -15,10 +15,21 @@ namespace memodb {
 // https://github.com/multiformats/multibase
 enum class Multibase : char {
   Identity = '\x00',
+  Base2 = '0',
   Base16 = 'f',
   Base16Upper = 'F',
+  Base32Hex = 'v',
+  Base32HexUpper = 'V',
+  Base32HexPad = 't',
+  Base32HexPadUpper = 'T',
   Base32 = 'b',
   Base32Upper = 'B',
+  Base32Pad = 'c',
+  Base32PadUpper = 'C',
+  Base64 = 'm',
+  Base64Pad = 'M',
+  Base64Url = 'u',
+  Base64UrlPad = 'U',
 };
 
 // https://github.com/multiformats/multicodec
@@ -70,7 +81,7 @@ public:
   static std::optional<CID>
   loadFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes);
 
-  llvm::ArrayRef<std::uint8_t> asBytes(bool WithMultibasePrefix = false) const;
+  llvm::ArrayRef<std::uint8_t> asBytes() const { return Bytes; }
 
   std::string asString(Multibase Base = Multibase::Base32) const;
 

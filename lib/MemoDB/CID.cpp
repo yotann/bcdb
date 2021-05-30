@@ -1,56 +1,147 @@
 #include "memodb/CID.h"
 
 #include <assert.h>
+#include <cmath>
 #include <sodium.h>
 
 using namespace memodb;
 
-// IDs follow the CID specification: https://github.com/multiformats/cid
+namespace {
+struct MultibaseCodec {
+  static const std::int8_t INVALID_VALUE = -1;
+  static const std::int8_t PAD_VALUE = -2;
 
-static const char *BASE32_PREFIX = "b";
+  MultibaseCodec(Multibase ID, char Prefix, llvm::StringRef Chars,
+                 std::optional<char> Pad)
+      : ID(ID), Prefix(Prefix), Chars(Chars), Pad(Pad) {
+    for (int i = 0; i < 256; i++)
+      Values[i] = INVALID_VALUE;
+    for (size_t i = 0; i < Chars.size(); i++)
+      Values[(std::uint8_t)Chars[i]] = i;
+    if (Pad)
+      Values[(std::uint8_t)*Pad] = PAD_VALUE;
 
-static const llvm::StringRef BASE32_TABLE("abcdefghijklmnopqrstuvwxyz234567");
+    BitsPerChar = std::ilogb(Chars.size());
+    assert((1ul << BitsPerChar) == Chars.size());
+  }
 
-static std::optional<std::vector<std::uint8_t>>
-decodeBase32(llvm::StringRef Str) {
+  std::optional<std::vector<std::uint8_t>> decode(llvm::StringRef Str) const;
+  std::string encode(llvm::ArrayRef<std::uint8_t> Bytes) const;
+
+  Multibase ID;
+  char Prefix;
+  llvm::StringRef Chars;
+  std::optional<char> Pad;
+  std::int8_t Values[256];
+  unsigned BitsPerChar;
+};
+} // end anonymous namespace
+
+std::optional<std::vector<std::uint8_t>>
+MultibaseCodec::decode(llvm::StringRef Str) const {
   std::vector<std::uint8_t> Result;
+  bool PadSeen = false;
   while (!Str.empty()) {
-    uint64_t Value = 0;
-    for (size_t i = 0; i < 8; i++) {
-      Value <<= 5;
-      if (i < Str.size()) {
-        size_t Pos = BASE32_TABLE.find(Str[i]);
-        if (Pos == llvm::StringRef::npos)
-          return {}; // invalid character
-        Value |= Pos;
+    std::uint64_t Value = 0;
+    size_t NumBits = 0, ValidBits = 0;
+    do {
+      Value <<= BitsPerChar;
+      NumBits += BitsPerChar;
+      if (Str.empty() && Pad)
+        return {}; // missing padding
+      if (Str.empty())
+        continue;
+      std::int8_t CharValue = Values[(std::uint8_t)Str[0]];
+      Str = Str.drop_front();
+      if (CharValue == INVALID_VALUE)
+        return {}; // invalid char
+      if (CharValue == PAD_VALUE && !ValidBits)
+        return {}; // too much padding
+      if (CharValue == PAD_VALUE) {
+        PadSeen = true;
+      } else {
+        if (PadSeen)
+          return {}; // chars after padding
+        ValidBits += BitsPerChar;
+        Value |= CharValue;
       }
+    } while (NumBits % 8);
+    while (ValidBits >= 8) {
+      ValidBits -= 8;
+      NumBits -= 8;
+      Result.push_back((Value >> NumBits) & 0xff);
     }
-
-    const size_t NumBytesArray[8] = {0, 0, 1, 0, 2, 3, 0, 4};
-    size_t NumBytes = Str.size() >= 8 ? 5 : NumBytesArray[Str.size()];
-    if (!NumBytes)
-      return {}; // invalid length
-    for (size_t i = 0; i < NumBytes; i++)
-      Result.push_back((Value >> (32 - 8 * i)) & 0xff);
-    Str = Str.drop_front(Str.size() >= 8 ? 8 : Str.size());
+    if (ValidBits >= BitsPerChar)
+      return {}; // unused char
   }
   return Result;
 }
 
-static std::string encodeBase32(llvm::ArrayRef<std::uint8_t> Bytes) {
+std::string MultibaseCodec::encode(llvm::ArrayRef<std::uint8_t> Bytes) const {
   std::string Result;
   while (!Bytes.empty()) {
     uint64_t Value = 0;
-    for (size_t i = 0; i < 5; i++)
-      Value = (Value << 8) | (i < Bytes.size() ? Bytes[i] : 0);
-    const size_t NumCharsArray[5] = {0, 2, 4, 5, 7};
-    size_t NumChars = Bytes.size() >= 5 ? 8 : NumCharsArray[Bytes.size()];
-    for (size_t i = 0; i < NumChars; i++)
-      Result.push_back(BASE32_TABLE[(Value >> (35 - 5 * i)) & 0x1f]);
-    Bytes = Bytes.drop_front(Bytes.size() >= 5 ? 5 : Bytes.size());
+    size_t NumBits = 0, ValidBits = 0;
+    do {
+      Value <<= 8;
+      NumBits += 8;
+      if (!Bytes.empty()) {
+        Value |= Bytes[0];
+        Bytes = Bytes.drop_front();
+        ValidBits += 8;
+      }
+    } while (NumBits % BitsPerChar);
+    while (ValidBits) {
+      ValidBits -= ValidBits > BitsPerChar ? BitsPerChar : ValidBits;
+      NumBits -= BitsPerChar;
+      Result.push_back(Chars[(Value >> NumBits) & ((1 << BitsPerChar) - 1)]);
+    }
+    while (Pad && NumBits) {
+      NumBits -= BitsPerChar;
+      Result.push_back(*Pad);
+    }
   }
   return Result;
 }
+
+static const MultibaseCodec MULTIBASE_CODECS[] = {
+    MultibaseCodec(Multibase::Base2, '0', "01", std::nullopt),
+    MultibaseCodec(Multibase::Base16, 'f', "0123456789abcdef", std::nullopt),
+    MultibaseCodec(Multibase::Base16Upper, 'F', "0123456789ABCDEF",
+                   std::nullopt),
+    MultibaseCodec(Multibase::Base32Hex, 'v',
+                   "0123456789abcdefghijklmnopqrstuv", std::nullopt),
+    MultibaseCodec(Multibase::Base32HexUpper, 'V',
+                   "0123456789ABCDEFGHIJKLMNOPQRSTUV", std::nullopt),
+    MultibaseCodec(Multibase::Base32HexPad, 't',
+                   "0123456789abcdefghijklmnopqrstuv", '='),
+    MultibaseCodec(Multibase::Base32HexPadUpper, 'T',
+                   "0123456789ABCDEFGHIJKLMNOPQRSTUV", '='),
+    MultibaseCodec(Multibase::Base32, 'b', "abcdefghijklmnopqrstuvwxyz234567",
+                   std::nullopt),
+    MultibaseCodec(Multibase::Base32Upper, 'B',
+                   "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", std::nullopt),
+    MultibaseCodec(Multibase::Base32Pad, 'c',
+                   "abcdefghijklmnopqrstuvwxyz234567", '='),
+    MultibaseCodec(Multibase::Base32PadUpper, 'C',
+                   "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", '='),
+    MultibaseCodec(
+        Multibase::Base64, 'm',
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+        std::nullopt),
+    MultibaseCodec(
+        Multibase::Base64Pad, 'M',
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+        '='),
+    MultibaseCodec(
+        Multibase::Base64Url, 'u',
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+        std::nullopt),
+    MultibaseCodec(
+        Multibase::Base64UrlPad, 'U',
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+        '='),
+};
 
 static void writeVarInt(std::vector<std::uint8_t> &Bytes, std::uint64_t Value) {
   for (; Value >= 0x80; Value >>= 7)
@@ -66,10 +157,6 @@ CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
     HashType = IdentitySize <= Blake2BSize ? Multicodec::Identity
                                            : Multicodec::Blake2b_256;
   }
-  CID Result;
-  Result.ContentType = ContentType;
-  Result.HashType = *HashType;
-  Result.Bytes = {0x00};
   std::vector<std::uint8_t> Buffer;
   llvm::ArrayRef<std::uint8_t> Hash;
   if (*HashType == Multicodec::Identity) {
@@ -83,6 +170,10 @@ CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
     assert(false && "unsupported multihash");
     return calculate(ContentType, Content);
   }
+
+  CID Result;
+  Result.ContentType = ContentType;
+  Result.HashType = *HashType;
   Result.HashSize = Hash.size();
   writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Multicodec::CIDv1));
   writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Result.ContentType));
@@ -93,11 +184,15 @@ CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
 }
 
 std::optional<CID> CID::parse(llvm::StringRef Text) {
-  if (Text.startswith(BASE32_PREFIX)) {
-    auto Bytes = decodeBase32(Text.drop_front());
-    if (!Bytes)
-      return {};
-    return fromBytes(*Bytes);
+  if (Text.empty())
+    return {};
+  for (const MultibaseCodec &Codec : MULTIBASE_CODECS) {
+    if (Text[0] == Codec.Prefix) {
+      auto Bytes = Codec.decode(Text.drop_front());
+      if (!Bytes)
+        return {};
+      return fromBytes(*Bytes);
+    }
   }
   return {};
 }
@@ -159,26 +254,17 @@ std::optional<CID> CID::loadFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
   Result.ContentType = static_cast<Multicodec>(*RawContentType);
   Result.HashType = static_cast<Multicodec>(*RawHashType);
   Result.HashSize = *RawHashSize;
-  Result.Bytes = {0x00};
   OrigBytes = OrigBytes.drop_back(Bytes.size());
   Result.Bytes.insert(Result.Bytes.end(), OrigBytes.begin(), OrigBytes.end());
   return Result;
 }
 
-llvm::ArrayRef<std::uint8_t> CID::asBytes(bool WithMultibasePrefix) const {
-  if (WithMultibasePrefix)
-    return Bytes;
-  else
-    return llvm::ArrayRef(Bytes).drop_front(1);
-}
-
 std::string CID::asString(Multibase Base) const {
-  if (Base == Multibase::Base32)
-    return static_cast<char>(Base) + encodeBase32(asBytes());
-  else {
-    assert(false && "unsupported multibase");
-    return asString(Multibase::Base32);
-  }
+  for (const auto &Codec : MULTIBASE_CODECS)
+    if (Codec.ID == Base)
+      return Codec.Prefix + Codec.encode(asBytes());
+  assert(false && "unsupported multibase");
+  return asString(Multibase::Base32);
 }
 
 CID::operator std::string() const { return asString(); }

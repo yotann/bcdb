@@ -528,9 +528,10 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                    out.insert(out.end(), x.begin(), x.end());
                  },
                  [&](const ref_t &x) {
-                   auto Bytes = x.asBytes(true);
+                   auto Bytes = x.asBytes();
                    start(6, 42); // CID tag
-                   start(2, Bytes.size());
+                   start(2, Bytes.size() + 1);
+                   out.push_back(0x00); // DAG-CBOR requires multibase prefix
                    out.insert(out.end(), Bytes.begin(), Bytes.end());
                  },
                  [&](const array_t &x) {
