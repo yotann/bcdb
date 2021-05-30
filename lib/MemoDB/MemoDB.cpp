@@ -218,7 +218,7 @@ std::ostream &operator<<(std::ostream &os, const memodb_value &value) {
           },
           [&](const memodb_value::ref_t &x) {
             os << "42(h'00"; // DAG-CBOR required multibase prefix
-            for (std::uint8_t b : x.asCID()) {
+            for (std::uint8_t b : x.asBytes()) {
               char buf[3];
               std::snprintf(buf, sizeof(buf), "%02x", b);
               os << buf;
@@ -412,7 +412,10 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     if (is_cid) {
       if (result.empty() || result[0] != 0x00)
         llvm::report_fatal_error("invalid encoded CID");
-      return CID::fromCID(llvm::ArrayRef(result).drop_front(1));
+      auto CID = CID::fromBytes(llvm::ArrayRef(result).drop_front(1));
+      if (!CID)
+        llvm::report_fatal_error("invalid encoded CID");
+      return *CID;
     }
     return memodb_value(result);
   }
@@ -525,9 +528,7 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
                    out.insert(out.end(), x.begin(), x.end());
                  },
                  [&](const ref_t &x) {
-                   auto Bytes = x.asCID();
-                   // Insert identity multibase prefix (required by DAG-CBOR).
-                   Bytes.insert(Bytes.begin(), 0x00);
+                   auto Bytes = x.asBytes(true);
                    start(6, 42); // CID tag
                    start(2, Bytes.size());
                    out.insert(out.end(), Bytes.begin(), Bytes.end());
@@ -562,27 +563,29 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
 
 memodb_value memodb_value::loadFromIPLD(const CID &CID,
                                         llvm::ArrayRef<std::uint8_t> Content) {
-  if (CID.isInline()) {
+  if (CID.isIdentity()) {
     assert(Content.empty());
-    return CID.asInline();
+    Content = CID.getHashBytes();
   }
-  if (CID.type_ == CID::BLAKE2B_RAW)
+  if (CID.getContentType() == Multicodec::Raw)
     return memodb_value(Content);
-  if (CID.type_ == CID::BLAKE2B_MERKLEDAG)
+  if (CID.getContentType() == Multicodec::DAG_CBOR)
     return memodb_value::load_cbor(Content);
-  llvm::report_fatal_error("Unsupported CID");
+  llvm::report_fatal_error("Unsupported CID content type");
 }
 
 std::pair<CID, memodb_value::bytes_t>
-memodb_value::saveAsIPLD(bool noInline) const {
+memodb_value::saveAsIPLD(bool noIdentity) const {
   bool raw = type() == BYTES;
   bytes_t Bytes;
   if (raw)
     Bytes = as_bytes();
   else
     save_cbor(Bytes);
-  CID Ref = CID::calculateFromContent(Bytes, raw, noInline);
-  if (Ref.isInline())
+  CID Ref = CID::calculate(raw ? Multicodec::Raw : Multicodec::DAG_CBOR, Bytes,
+                           noIdentity ? std::optional(Multicodec::Blake2b_256)
+                                      : std::nullopt);
+  if (Ref.isIdentity())
     return {std::move(Ref), {}};
   else
     return {std::move(Ref), std::move(Bytes)};

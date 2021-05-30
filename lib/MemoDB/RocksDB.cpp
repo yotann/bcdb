@@ -121,11 +121,10 @@ bool RocksDBStore::checkFound(const rocksdb::Status &Status) {
 template <typename BatchT>
 void RocksDBStore::addRef(BatchT &Batch, char Type, const rocksdb::Slice &From,
                           const CID &To) {
-  if (To.isInline())
+  if (To.isIdentity())
     return;
-  auto CID = To.asCID();
   rocksdb::Slice Slices[3] = {
-      makeSlice(CID),
+      makeSlice(To.asBytes()),
       rocksdb::Slice(&Type, 1),
       From,
   };
@@ -150,7 +149,7 @@ void RocksDBStore::addRefs(rocksdb::WriteBatch &Batch, char Type,
                            const llvm::ArrayRef<uint8_t> &Key,
                            const memodb_value &Value) {
   if (Value.type() == memodb_value::REF) {
-    if (Value.as_ref().isInline())
+    if (Value.as_ref().isIdentity())
       return;
     addRef(Batch, Type, makeSlice(Key), Value.as_ref());
   } else if (Value.type() == memodb_value::ARRAY) {
@@ -167,7 +166,7 @@ std::string RocksDBStore::makeKeyForCall(const memodb_call &Call) {
   memodb_value(Call.Name).save_cbor(Buffer);
   std::string Key = makeSlice(Buffer).ToString();
   for (const CID &Arg : Call.Args) {
-    auto CID = Arg.asCID();
+    auto CID = Arg.asBytes();
     Key.insert(Key.end(), CID.begin(), CID.end());
   }
   return Key;
@@ -309,24 +308,24 @@ RocksDBStore::~RocksDBStore() {
 llvm::Optional<memodb_value>
 RocksDBStore::getOptional(const memodb_name &name) {
   if (const CID *Ref = std::get_if<CID>(&name)) {
-    if (Ref->isInline())
-      return Ref->asInline();
+    if (Ref->isIdentity())
+      return memodb_value::loadFromIPLD(*Ref, {});
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(
-            DB->Get({}, BlocksFamily, makeSlice(Ref->asCID()), &Fetched)))
+            DB->Get({}, BlocksFamily, makeSlice(Ref->asBytes()), &Fetched)))
       return {};
     return memodb_value::loadFromIPLD(*Ref, makeBytes(Fetched));
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(DB->Get({}, HeadsFamily, Head->Name, &Fetched)))
       return {};
-    return memodb_value(CID::fromCID(makeBytes(Fetched)));
+    return memodb_value(*CID::fromBytes(makeBytes(Fetched)));
   } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
     auto Key = makeKeyForCall(*Call);
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(DB->Get({}, CallsFamily, Key, &Fetched)))
       return {};
-    return memodb_value(CID::fromCID(makeBytes(Fetched)));
+    return memodb_value(*CID::fromBytes(makeBytes(Fetched)));
   } else {
     llvm_unreachable("impossible memodb_name type");
   }
@@ -334,9 +333,9 @@ RocksDBStore::getOptional(const memodb_name &name) {
 
 CID RocksDBStore::put(const memodb_value &value) {
   auto IPLD = value.saveAsIPLD();
-  if (IPLD.first.isInline())
+  if (IPLD.second.empty())
     return IPLD.first;
-  auto Key = IPLD.first.asCID();
+  auto Key = IPLD.first.asBytes();
 
   rocksdb::PinnableSlice Fetched;
   if (checkFound(DB->Get({}, BlocksFamily, makeSlice(Key), &Fetched))) {
@@ -353,7 +352,7 @@ CID RocksDBStore::put(const memodb_value &value) {
 
 void RocksDBStore::set(const memodb_name &Name, const CID &ref) {
   rocksdb::Status TxnStatus;
-  auto refKey = ref.asCID();
+  auto refKey = ref.asBytes();
   do {
     std::unique_ptr<rocksdb::Transaction> Txn(DB->BeginTransaction({}, {}));
     if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
@@ -381,7 +380,7 @@ void RocksDBStore::set(const memodb_name &Name, const CID &ref) {
 
 std::vector<memodb_name> RocksDBStore::list_names_using(const CID &ref) {
   std::vector<memodb_name> Result;
-  auto Key = ref.asCID();
+  auto Key = ref.asBytes();
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, RefsFamily));
   for (Iterator->Seek(makeSlice(Key)); Iterator->Valid(); Iterator->Next()) {
     auto Ref = Iterator->key();
@@ -393,7 +392,7 @@ std::vector<memodb_name> RocksDBStore::list_names_using(const CID &ref) {
     char Type = Ref[0];
     Ref.remove_prefix(1);
     if (Type == TYPE_BLOCK)
-      Result.emplace_back(CID::fromCID(makeBytes(Ref)));
+      Result.emplace_back(*CID::fromBytes(makeBytes(Ref)));
     else if (Type == TYPE_HEAD)
       Result.emplace_back(memodb_head(Ref.ToString()));
     else if (Type == TYPE_CALL) {
@@ -401,7 +400,7 @@ std::vector<memodb_name> RocksDBStore::list_names_using(const CID &ref) {
       memodb_call Call("", {});
       Call.Name = memodb_value::load_cbor_from_sequence(Bytes).as_string();
       while (!Bytes.empty())
-        Call.Args.emplace_back(CID::loadCIDFromSequence(Bytes));
+        Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
       Result.emplace_back(std::move(Call));
     } else
       llvm::report_fatal_error("invalid type in refs family");
@@ -448,7 +447,7 @@ void RocksDBStore::eachCall(llvm::StringRef Func,
     auto Bytes = makeBytes(Iterator->key()).drop_front(Prefix.size());
     memodb_call Call(Func, {});
     while (!Bytes.empty())
-      Call.Args.emplace_back(CID::loadCIDFromSequence(Bytes));
+      Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
     if (F(Call))
       return;
   }
@@ -482,8 +481,8 @@ void RocksDBStore::call_invalidate(llvm::StringRef name) {
       deleteRef(*Txn, TYPE_CALL, Iterator->key(), Iterator->value());
       auto Bytes = makeBytes(Iterator->key()).drop_front(Prefix.size());
       while (!Bytes.empty()) {
-        auto Arg = CID::loadCIDFromSequence(Bytes);
-        deleteRef(*Txn, TYPE_CALL, Iterator->key(), makeSlice(Arg.asCID()));
+        auto Arg = CID::loadFromSequence(Bytes);
+        deleteRef(*Txn, TYPE_CALL, Iterator->key(), makeSlice(Arg->asBytes()));
       }
       TxnStatus = Txn->Commit();
     } while (TxnStatus.IsBusy() || TxnStatus.IsTryAgain());

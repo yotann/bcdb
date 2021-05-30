@@ -398,21 +398,20 @@ CID sqlite_db::bid_to_cid(sqlite3_int64 bid) {
   Stmt stmt(db, "SELECT cid FROM blocks WHERE bid = ?1");
   stmt.bind_int(1, bid);
   requireRow(stmt.step());
-  return CID::fromCID(stmt.columnBytes(0));
+  return *CID::fromBytes(stmt.columnBytes(0));
 }
 
 sqlite3_int64 sqlite_db::cid_to_bid(const CID &ref) {
   sqlite3 *db = get_db();
-  auto Bytes = ref.asCID();
   Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
-  stmt.bind_blob(1, Bytes);
+  stmt.bind_blob(1, ref.asBytes());
   if (checkRow(stmt.step()))
     return stmt.columnInt(0);
 
-  if (!ref.isInline())
+  if (!ref.isIdentity())
     fatal_error();
   std::vector<std::uint8_t> Content;
-  memodb_value Value = ref.asInline();
+  memodb_value Value = memodb_value::loadFromIPLD(ref, {});
   Value.save_cbor(Content);
   return putInternal(ref, Content, Value);
 }
@@ -421,12 +420,11 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
                                      const llvm::ArrayRef<std::uint8_t> &Bytes,
                                      const memodb_value &Value) {
   sqlite3 *db = get_db();
-  auto CIDBytes = CID.asCID();
 
   // Optimistically check for an existing entry (without a transaction).
   {
     Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
-    stmt.bind_blob(1, CIDBytes);
+    stmt.bind_blob(1, CID.asBytes());
     if (checkRow(stmt.step()))
       return stmt.columnInt(0);
   }
@@ -440,7 +438,7 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
 
   {
     Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
-    stmt.bind_blob(1, CIDBytes);
+    stmt.bind_blob(1, CID.asBytes());
     if (checkRow(stmt.step()))
       return stmt.columnInt(0);
   }
@@ -449,7 +447,7 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
   sqlite3_int64 new_id;
   {
     Stmt stmt(db, "INSERT INTO blocks(cid,codec,content) VALUES (?1,?2,?3)");
-    stmt.bind_blob(1, CIDBytes);
+    stmt.bind_blob(1, CID.asBytes());
     stmt.bind_int(2, CODEC_RAW);
     stmt.bind_blob(3, Bytes);
     checkDone(stmt.step());
@@ -575,12 +573,11 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
 
 llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
   if (const CID *Ref = std::get_if<CID>(&name)) {
-    if (Ref->isInline())
-      return Ref->asInline();
+    if (Ref->isIdentity())
+      return memodb_value::loadFromIPLD(*Ref, {});
     sqlite3 *db = get_db();
-    auto CIDBytes = Ref->asCID();
     Stmt stmt(db, "SELECT codec, content FROM blocks WHERE cid = ?1");
-    stmt.bind_blob(1, CIDBytes);
+    stmt.bind_blob(1, Ref->asBytes());
     if (!checkRow(stmt.step()))
       return llvm::None;
     if (stmt.columnInt(0) != CODEC_RAW)

@@ -74,14 +74,14 @@ static memodb_name GetNameFromURI(llvm::StringRef URI) {
   if (Parsed.Scheme == "head")
     return memodb_head(Parsed.Path);
   else if (Parsed.Scheme == "id")
-    return CID(Parsed.Path);
+    return *CID::parse(Parsed.Path);
   else if (Parsed.Scheme == "call") {
     std::vector<CID> Args;
     if (Parsed.PathSegments.empty())
       report_fatal_error("invalid name URI");
     auto FuncName = Parsed.PathSegments.front();
     for (const auto &Arg : llvm::ArrayRef(Parsed.PathSegments).drop_front())
-      Args.emplace_back(Arg);
+      Args.emplace_back(*CID::parse(Arg));
     return memodb_call(FuncName, Args);
   } else
     report_fatal_error("invalid name URI");
@@ -198,12 +198,12 @@ static int Export() {
     OutputFile->os().write(Value);
   };
   auto getBlockSize = [&](const std::pair<CID, memodb_value::bytes_t> &Block) {
-    size_t Result = Block.second.size() + Block.first.asCID().size();
+    size_t Result = Block.second.size() + Block.first.asBytes().size();
     Result += getVarIntSize(Result);
     return Result;
   };
   auto writeBlock = [&](const std::pair<CID, memodb_value::bytes_t> &Block) {
-    std::vector<std::uint8_t> Buffer = Block.first.asCID();
+    std::vector<std::uint8_t> Buffer(Block.first.asBytes());
     Buffer.insert(Buffer.end(), Block.second.begin(), Block.second.end());
     writeVarInt(Buffer.size());
     OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
@@ -230,7 +230,7 @@ static int Export() {
 
   exportValue = [&](const memodb_value &Value) {
     auto Block = Value.saveAsIPLD();
-    if (!Block.first.isInline())
+    if (!Block.first.isIdentity())
       writeBlock(Block);
     walkRefs(Value, exportRef);
     return Block.first;

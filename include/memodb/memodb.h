@@ -246,7 +246,7 @@ public:
   static memodb_value loadFromIPLD(const memodb::CID &CID,
                                    llvm::ArrayRef<std::uint8_t> Content);
   void save_cbor(std::vector<std::uint8_t> &out) const;
-  std::pair<memodb::CID, bytes_t> saveAsIPLD(bool noInline = false) const;
+  std::pair<memodb::CID, bytes_t> saveAsIPLD(bool noIdentity = false) const;
 
 private:
   void require_type(value_t type) const {
@@ -321,13 +321,6 @@ public:
     set(memodb_head(name), ref);
   }
 
-  memodb::CID call_get(llvm::StringRef name, llvm::ArrayRef<memodb::CID> args) {
-    auto Value = getOptional(memodb_call(name, args));
-    if (!Value)
-      return memodb::CID();
-    return Value->as_ref();
-  }
-
   void call_set(llvm::StringRef name, llvm::ArrayRef<memodb::CID> args,
                 const memodb::CID &result) {
     set(memodb_call(name, args), result);
@@ -355,20 +348,22 @@ public:
 
   template <typename F, typename... Targs>
   memodb::CID call_or_lookup_ref(llvm::StringRef name, F func, Targs... Fargs) {
-    memodb::CID ref = call_get(name, {Fargs...});
+    memodb_call Call(name, {Fargs...});
+    auto ref = getOptional(Call);
     if (!ref) {
       ref = put(func(*this, get(Fargs)...));
       call_set(name, {Fargs...}, ref);
     }
-    return ref;
+    return ref->as_ref();
   }
 
   template <typename F, typename... Targs>
   memodb_value call_or_lookup_value(llvm::StringRef name, F func,
                                     Targs... Fargs) {
+    memodb_call Call(name, {Fargs...});
     memodb_value value;
-    if (memodb::CID ref = call_get(name, {Fargs...})) {
-      value = get(ref);
+    if (auto ref = getOptional(Call)) {
+      value = get(ref->as_ref());
     } else {
       value = func(*this, get(Fargs)...);
       call_set(name, {Fargs...}, put(value));

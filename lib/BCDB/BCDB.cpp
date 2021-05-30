@@ -65,9 +65,6 @@ Expected<std::vector<std::string>> BCDB::ListModules() {
 
 Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
   CID ref = db->head_get(Name);
-  if (!ref)
-    return make_error<StringError>("could not get head",
-                                   inconvertibleErrorCode());
   memodb_value head = db->get(ref);
   std::vector<std::string> result;
   for (auto &item : head["functions"].map_items()) {
@@ -157,7 +154,7 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
       if (GlobalObject *GO = dyn_cast_or_null<GlobalObject>(Node.second)) {
         auto MPart = Splitter.SplitGlobal(GO);
         if (MPart)
-          Map[GO] = SaveModule(*MPart);
+          Map.insert(std::make_pair(GO, SaveModule(*MPart)));
       }
     }
     for (auto &Item : Map) {
@@ -203,9 +200,6 @@ static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
 Expected<std::unique_ptr<Module>>
 BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
   CID head_ref = db->head_get(Name);
-  if (!head_ref)
-    return make_error<StringError>("could not get head",
-                                   inconvertibleErrorCode());
   memodb_value head = db->get(head_ref);
   auto Remainder =
       LoadModuleFromValue(db, head["remainder"].as_ref(), Name, *Context);
@@ -220,14 +214,11 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
 }
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
-  return LoadModuleFromValue(db, CID(Id), Id, *Context);
+  return LoadModuleFromValue(db, *CID::parse(Id), Id, *Context);
 }
 
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
   CID head_ref = db->head_get(Name);
-  if (!head_ref)
-    return make_error<StringError>("could not get head",
-                                   inconvertibleErrorCode());
   memodb_value head = db->get(head_ref);
 
   auto M = LoadModuleFromValue(db, head["remainder"].as_ref(), "remainder",

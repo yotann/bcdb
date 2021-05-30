@@ -1,8 +1,7 @@
 #include "memodb/CID.h"
 
+#include <assert.h>
 #include <sodium.h>
-
-#include "memodb/memodb.h"
 
 using namespace memodb;
 
@@ -12,35 +11,8 @@ static const char *BASE32_PREFIX = "b";
 
 static const llvm::StringRef BASE32_TABLE("abcdefghijklmnopqrstuvwxyz234567");
 
-static const size_t HASH_SIZE = crypto_generichash_BYTES;
-
-static const std::array<std::uint8_t, 3> CID_PREFIX_INLINE_RAW = {
-    0x01, // CIDv1
-    0x55, // content type: raw
-    0x00, // multihash function: identity
-};
-
-static const std::array<std::uint8_t, 3> CID_PREFIX_INLINE_DAG = {
-    0x01, // CIDv1
-    0x71, // content type: MerkleDAG CBOR
-    0x00, // multihash function: identity
-};
-
-static const std::array<std::uint8_t, 6> CID_PREFIX_RAW = {
-    0x01,                  // CIDv1
-    0x55,                  // content type: raw
-    0xa0,      0xe4, 0x02, // multihash function: Blake2B-256
-    HASH_SIZE,             // multihash size
-};
-
-static const std::array<std::uint8_t, 6> CID_PREFIX_DAG = {
-    0x01,                  // CIDv1
-    0x71,                  // content type: MerkleDAG CBOR
-    0xa0,      0xe4, 0x02, // multihash function: Blake2B-256
-    HASH_SIZE,             // multihash size
-};
-
-static std::vector<std::uint8_t> decodeBase32(llvm::StringRef Str) {
+static std::optional<std::vector<std::uint8_t>>
+decodeBase32(llvm::StringRef Str) {
   std::vector<std::uint8_t> Result;
   while (!Str.empty()) {
     uint64_t Value = 0;
@@ -49,7 +21,7 @@ static std::vector<std::uint8_t> decodeBase32(llvm::StringRef Str) {
       if (i < Str.size()) {
         size_t Pos = BASE32_TABLE.find(Str[i]);
         if (Pos == llvm::StringRef::npos)
-          llvm::report_fatal_error("invalid character in base32");
+          return {}; // invalid character
         Value |= Pos;
       }
     }
@@ -57,7 +29,7 @@ static std::vector<std::uint8_t> decodeBase32(llvm::StringRef Str) {
     const size_t NumBytesArray[8] = {0, 0, 1, 0, 2, 3, 0, 4};
     size_t NumBytes = Str.size() >= 8 ? 5 : NumBytesArray[Str.size()];
     if (!NumBytes)
-      llvm::report_fatal_error("invalid length of base32");
+      return {}; // invalid length
     for (size_t i = 0; i < NumBytes; i++)
       Result.push_back((Value >> (32 - 8 * i)) & 0xff);
     Str = Str.drop_front(Str.size() >= 8 ? 8 : Str.size());
@@ -80,131 +52,136 @@ static std::string encodeBase32(llvm::ArrayRef<std::uint8_t> Bytes) {
   return Result;
 }
 
-CID::CID(llvm::StringRef Text) {
-  if (Text.startswith(BASE32_PREFIX)) {
-    *this = fromCID(decodeBase32(Text.drop_front()));
-  } else {
-    llvm::report_fatal_error(llvm::Twine("unsupported multibase ") + Text);
+static void writeVarInt(std::vector<std::uint8_t> &Bytes, std::uint64_t Value) {
+  for (; Value >= 0x80; Value >>= 7)
+    Bytes.push_back((Value & 0x7f) | 0x80);
+  Bytes.push_back(Value);
+}
+
+CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
+                   std::optional<Multicodec> HashType) {
+  if (!HashType) {
+    size_t IdentitySize = Content.size();
+    size_t Blake2BSize = 32 + 2; // VarInt encoded HashType is 2 bytes longer
+    HashType = IdentitySize <= Blake2BSize ? Multicodec::Identity
+                                           : Multicodec::Blake2b_256;
   }
-}
-
-CID CID::fromCID(llvm::ArrayRef<std::uint8_t> Bytes) {
-  CID Result = loadCIDFromSequence(Bytes);
-  if (!Bytes.empty())
-    llvm::report_fatal_error("Extra bytes in CID");
-  return Result;
-}
-
-CID CID::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
-  auto startsWith = [&](const auto &Prefix) {
-    return Bytes.take_front(Prefix.size()).equals(Prefix);
-  };
-  if (startsWith(CID_PREFIX_RAW)) {
-    Bytes = Bytes.drop_front(CID_PREFIX_RAW.size());
-    CID Result = fromBlake2BRaw(Bytes.take_front(HASH_SIZE));
-    Bytes = Bytes.drop_front(HASH_SIZE);
-    return Result;
-  } else if (startsWith(CID_PREFIX_DAG)) {
-    Bytes = Bytes.drop_front(CID_PREFIX_RAW.size());
-    CID Result = fromBlake2BMerkleDAG(Bytes.take_front(HASH_SIZE));
-    Bytes = Bytes.drop_front(HASH_SIZE);
-    return Result;
-  } else if (startsWith(CID_PREFIX_INLINE_RAW)) {
-    Bytes = Bytes.drop_front(CID_PREFIX_INLINE_RAW.size());
-    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] > Bytes.size() - 1)
-      llvm::report_fatal_error("invalid inline CID");
-    size_t Size = Bytes[0];
-    CID Result;
-    Result.id_ = Bytes.slice(1, Size);
-    Result.type_ = INLINE_RAW;
-    Bytes = Bytes.drop_front(1 + Size);
-    return Result;
-  } else if (startsWith(CID_PREFIX_INLINE_DAG)) {
-    Bytes = Bytes.drop_front(CID_PREFIX_INLINE_DAG.size());
-    if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] > Bytes.size() - 1)
-      llvm::report_fatal_error("invalid inline CID");
-    size_t Size = Bytes[0];
-    CID Result;
-    Result.id_ = Bytes.slice(1, Size);
-    Result.type_ = INLINE_DAG;
-    Bytes = Bytes.drop_front(1 + Size);
-    return Result;
-  } else {
-    llvm::report_fatal_error(llvm::Twine("invalid CID"));
-  }
-}
-
-CID CID::fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes) {
-  if (Bytes.size() != HASH_SIZE)
-    llvm::report_fatal_error("incorrect Blake2B hash size");
   CID Result;
-  Result.id_ = Bytes;
-  Result.type_ = BLAKE2B_RAW;
-  return Result;
-}
-
-CID CID::fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes) {
-  if (Bytes.size() != HASH_SIZE)
-    llvm::report_fatal_error("incorrect Blake2B hash size");
-  CID Result;
-  Result.id_ = Bytes;
-  Result.type_ = BLAKE2B_MERKLEDAG;
-  return Result;
-}
-
-memodb_value CID::asInline() const {
-  if (type_ == INLINE_RAW)
-    return memodb_value(id_);
-  else if (type_ == INLINE_DAG)
-    return memodb_value::load_cbor(id_);
-  else
-    llvm::report_fatal_error("incorrect type of ID");
-}
-
-std::vector<std::uint8_t> CID::asCID() const {
-  std::vector<std::uint8_t> Result;
-  if (type_ == BLAKE2B_RAW)
-    Result.assign(CID_PREFIX_RAW.begin(), CID_PREFIX_RAW.end());
-  else if (type_ == BLAKE2B_MERKLEDAG)
-    Result.assign(CID_PREFIX_DAG.begin(), CID_PREFIX_DAG.end());
-  else if (type_ == INLINE_RAW) {
-    Result.assign(CID_PREFIX_INLINE_RAW.begin(), CID_PREFIX_INLINE_RAW.end());
-    Result.push_back(id_.size());
-  } else if (type_ == INLINE_DAG) {
-    Result.assign(CID_PREFIX_INLINE_DAG.begin(), CID_PREFIX_INLINE_DAG.end());
-    Result.push_back(id_.size());
-  } else
-    llvm::report_fatal_error("ID not a CID");
-  Result.insert(Result.end(), id_.begin(), id_.end());
-  return Result;
-}
-
-CID::operator std::string() const {
-  if (type_ == EMPTY)
-    return "";
-  else {
-    auto Bytes = asCID();
-    return BASE32_PREFIX + encodeBase32(Bytes);
-  }
-}
-
-CID CID::calculateFromContent(llvm::ArrayRef<std::uint8_t> Content, bool raw,
-                              bool noInline) {
-  if (!noInline && CID_PREFIX_INLINE_DAG.size() + 1 + Content.size() <=
-                       CID_PREFIX_DAG.size() + HASH_SIZE) {
-    CID Ref;
-    Ref.id_ = Content;
-    Ref.type_ = raw ? CID::INLINE_RAW : CID::INLINE_DAG;
-    return Ref;
-  } else {
-    CID Ref;
-    Ref.id_.resize(HASH_SIZE);
-    Ref.type_ = raw ? CID::BLAKE2B_RAW : CID::BLAKE2B_MERKLEDAG;
-    crypto_generichash(Ref.id_.data(), Ref.id_.size(), Content.data(),
+  Result.ContentType = ContentType;
+  Result.HashType = *HashType;
+  Result.Bytes = {0x00};
+  std::vector<std::uint8_t> Buffer;
+  llvm::ArrayRef<std::uint8_t> Hash;
+  if (*HashType == Multicodec::Identity) {
+    Hash = Content;
+  } else if (*HashType == Multicodec::Blake2b_256) {
+    Buffer.resize(32);
+    crypto_generichash(Buffer.data(), Buffer.size(), Content.data(),
                        Content.size(), nullptr, 0);
-    return Ref;
+    Hash = Buffer;
+  } else {
+    assert(false && "unsupported multihash");
+    return calculate(ContentType, Content);
+  }
+  Result.HashSize = Hash.size();
+  writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Multicodec::CIDv1));
+  writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Result.ContentType));
+  writeVarInt(Result.Bytes, static_cast<std::uint64_t>(Result.HashType));
+  writeVarInt(Result.Bytes, Result.HashSize);
+  Result.Bytes.insert(Result.Bytes.end(), Hash.begin(), Hash.end());
+  return Result;
+}
+
+std::optional<CID> CID::parse(llvm::StringRef Text) {
+  if (Text.startswith(BASE32_PREFIX)) {
+    auto Bytes = decodeBase32(Text.drop_front());
+    if (!Bytes)
+      return {};
+    return fromBytes(*Bytes);
+  }
+  return {};
+}
+
+std::optional<CID> CID::fromBytes(llvm::ArrayRef<std::uint8_t> Bytes) {
+  auto Result = loadFromSequence(Bytes);
+  if (!Bytes.empty())
+    return {}; // extra bytes
+  return Result;
+}
+
+static std::optional<std::uint64_t>
+loadVarIntFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
+  std::uint64_t Result = 0;
+  for (unsigned Shift = 0; true; Shift += 7) {
+    if (Shift >= 64 - 7)
+      return {}; // too large
+    if (Bytes.empty())
+      return {}; // incomplete VarInt
+    std::uint8_t Byte = Bytes[0];
+    Bytes = Bytes.drop_front();
+    Result |= (std::uint64_t)(Byte & 0x7f) << Shift;
+    if (!(Byte & 0x80)) {
+      if (!Byte && Shift)
+        return {}; // extra trailing zeros
+      break;
+    }
+  }
+  return Result;
+}
+
+std::optional<CID> CID::loadFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
+  // Optional multibase prefix for binary.
+  if (Bytes.size() >= 1 && Bytes[0] == 0x00)
+    Bytes = Bytes.drop_front();
+  llvm::ArrayRef<std::uint8_t> OrigBytes = Bytes;
+  auto RawVersion = loadVarIntFromSequence(Bytes);
+  auto RawContentType = loadVarIntFromSequence(Bytes);
+  auto RawHashType = loadVarIntFromSequence(Bytes);
+  auto RawHashSize = loadVarIntFromSequence(Bytes);
+  if (!RawVersion || !RawContentType || !RawHashType || !RawHashSize)
+    return {};
+  if (Bytes.size() < RawHashSize)
+    return {};
+  if (*RawVersion != static_cast<std::uint64_t>(Multicodec::CIDv1))
+    return {};
+  if (*RawContentType != static_cast<std::uint64_t>(Multicodec::Raw) &&
+      *RawContentType != static_cast<std::uint64_t>(Multicodec::DAG_CBOR))
+    return {};
+  if (*RawHashType != static_cast<std::uint64_t>(Multicodec::Identity) &&
+      *RawHashType != static_cast<std::uint64_t>(Multicodec::Blake2b_256))
+    return {};
+  if (*RawHashType == static_cast<std::uint64_t>(Multicodec::Blake2b_256) &&
+      *RawHashSize != 32)
+    return {};
+
+  Bytes = Bytes.drop_front(*RawHashSize);
+  CID Result;
+  Result.ContentType = static_cast<Multicodec>(*RawContentType);
+  Result.HashType = static_cast<Multicodec>(*RawHashType);
+  Result.HashSize = *RawHashSize;
+  Result.Bytes = {0x00};
+  OrigBytes = OrigBytes.drop_back(Bytes.size());
+  Result.Bytes.insert(Result.Bytes.end(), OrigBytes.begin(), OrigBytes.end());
+  return Result;
+}
+
+llvm::ArrayRef<std::uint8_t> CID::asBytes(bool WithMultibasePrefix) const {
+  if (WithMultibasePrefix)
+    return Bytes;
+  else
+    return llvm::ArrayRef(Bytes).drop_front(1);
+}
+
+std::string CID::asString(Multibase Base) const {
+  if (Base == Multibase::Base32)
+    return static_cast<char>(Base) + encodeBase32(asBytes());
+  else {
+    assert(false && "unsupported multibase");
+    return asString(Multibase::Base32);
   }
 }
+
+CID::operator std::string() const { return asString(); }
 
 std::ostream &memodb::operator<<(std::ostream &os, const CID &ref) {
   return os << std::string(ref);

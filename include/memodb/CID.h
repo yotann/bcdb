@@ -6,41 +6,82 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
+#include <optional>
 #include <string>
 #include <vector>
 
-class memodb_value;
-
 namespace memodb {
 
+// https://github.com/multiformats/multibase
+enum class Multibase : char {
+  Identity = '\x00',
+  Base16 = 'f',
+  Base16Upper = 'F',
+  Base32 = 'b',
+  Base32Upper = 'B',
+};
+
+// https://github.com/multiformats/multicodec
+enum class Multicodec {
+  Identity = 0x00,
+  CIDv1 = 0x01,
+  Raw = 0x55,
+  DAG_CBOR = 0x71,
+  Blake2b_256 = 0xb220,
+};
+
+// A content hash that follows the Content Identifier Specification:
+// https://github.com/multiformats/cid
 class CID {
 private:
-  std::vector<std::uint8_t> id_;
-  enum { EMPTY, INLINE_RAW, INLINE_DAG, BLAKE2B_RAW, BLAKE2B_MERKLEDAG } type_;
-  friend class ::memodb_value;
-  static CID calculateFromContent(llvm::ArrayRef<std::uint8_t> Content,
-                                  bool raw, bool noInline = false);
+  Multicodec ContentType, HashType;
+
+  std::size_t HashSize;
+
+  // Bytes field consists of the whole encoded CID, including a 0x00 multibase
+  // prefix.
+  std::vector<std::uint8_t> Bytes;
+
+  CID() {}
 
 public:
-  CID() : id_(), type_(EMPTY) {}
-  CID(llvm::StringRef Text);
-  static CID fromCID(llvm::ArrayRef<std::uint8_t> Bytes);
-  static CID loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes);
-  static CID fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes);
-  static CID fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes);
-  bool isInline() const { return type_ == INLINE_RAW || type_ == INLINE_DAG; }
-  memodb_value asInline() const;
-  std::vector<std::uint8_t> asCID() const;
+  // An identity CID actually contains the data itself, not a hash of it.
+  bool isIdentity() const { return HashType == Multicodec::Identity; }
+
+  Multicodec getContentType() const { return ContentType; }
+
+  llvm::ArrayRef<std::uint8_t> getHashBytes() const {
+    return llvm::ArrayRef(Bytes).take_back(HashSize);
+  }
+
+  static CID calculate(Multicodec ContentType,
+                       llvm::ArrayRef<std::uint8_t> Content,
+                       std::optional<Multicodec> HashType = {});
+
+  static std::optional<CID> parse(llvm::StringRef String);
+
+  // Parse a raw binary CID with an optional 0x00 multibase prefix. Returns
+  // std::nullopt if invalid or unsupported.
+  static std::optional<CID> fromBytes(llvm::ArrayRef<std::uint8_t> Bytes);
+
+  // Like fromBytes(), but ignores extra data after the CID. On successful
+  // return, Bytes will point to the data after the CID. If std::nullopt is
+  // returned, it's unspecified what Bytes points to.
+  static std::optional<CID>
+  loadFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes);
+
+  llvm::ArrayRef<std::uint8_t> asBytes(bool WithMultibasePrefix = false) const;
+
+  std::string asString(Multibase Base = Multibase::Base32) const;
+
   operator std::string() const;
-  operator bool() const { return type_ != EMPTY; }
-  bool operator<(const CID &other) const {
-    if (type_ != other.type_)
-      return type_ < other.type_;
-    return id_ < other.id_;
-  }
-  bool operator==(const CID &other) const {
-    return type_ == other.type_ && id_ == other.id_;
-  }
+
+  bool operator<(const CID &Other) const { return Bytes < Other.Bytes; }
+  bool operator>(const CID &Other) const { return Bytes > Other.Bytes; }
+  bool operator<=(const CID &Other) const { return Bytes <= Other.Bytes; }
+  bool operator>=(const CID &Other) const { return Bytes >= Other.Bytes; }
+  bool operator==(const CID &Other) const { return Bytes == Other.Bytes; }
+  bool operator!=(const CID &Other) const { return Bytes != Other.Bytes; }
 };
 
 std::ostream &operator<<(std::ostream &os, const CID &ref);

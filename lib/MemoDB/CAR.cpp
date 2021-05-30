@@ -103,7 +103,10 @@ CID CARStore::readCID(std::uint64_t *Pos) {
   std::vector<std::uint8_t> Buffer(*Pos - StartPos);
   if (!readBytes(Buffer, &StartPos))
     llvm::report_fatal_error("Unexpected end of file in CID");
-  return CID::fromCID(Buffer);
+  auto CID = CID::fromBytes(Buffer);
+  if (!CID)
+    llvm::report_fatal_error("Invalid CID");
+  return *CID;
 }
 
 memodb_value CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
@@ -155,8 +158,8 @@ CARStore::~CARStore() {
 
 llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
   if (const CID *CIDValue = std::get_if<CID>(&name)) {
-    if (CIDValue->isInline())
-      return CIDValue->asInline();
+    if (CIDValue->isIdentity())
+      return memodb_value::loadFromIPLD(*CIDValue, {});
     if (!BlockPositions.count(*CIDValue))
       return {};
     auto Pos = BlockPositions[*CIDValue];

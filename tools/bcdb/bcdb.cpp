@@ -376,10 +376,10 @@ static int Cache() {
 
   std::vector<CID> args;
   for (const auto &arg_id : FuncArgs) {
-    args.push_back(CID(arg_id));
+    args.push_back(*CID::parse(arg_id));
   }
 
-  db->get_db().call_set(FuncName, args, CID(FuncResult));
+  db->get_db().call_set(FuncName, args, *CID::parse(FuncResult));
   return 0;
 }
 
@@ -389,16 +389,16 @@ static int Evaluate() {
 
   std::vector<CID> args;
   for (const auto &arg_id : FuncArgs) {
-    args.push_back(CID(arg_id));
+    args.push_back(*CID::parse(arg_id));
   }
 
-  CID result = db->get_db().call_get(FuncName, args);
+  auto result = db->get_db().getOptional(memodb_call(FuncName, args));
   if (!result) {
     Err(make_error<StringError>("Can't evaluate function " + FuncName,
                                 errc::invalid_argument));
   }
 
-  outs() << llvm::StringRef(result) << "\n";
+  outs() << llvm::StringRef(result->as_ref()) << "\n";
   return 0;
 }
 
@@ -422,7 +422,7 @@ static int Refs() {
   ExitOnError Err("bcdb refs: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
 
-  CID ref(RefsValue);
+  CID ref = *CID::parse(RefsValue);
   for (const auto &path : db->get_db().list_paths_to(ref)) {
     outs() << path.first;
     for (const auto &item : path.second) {
