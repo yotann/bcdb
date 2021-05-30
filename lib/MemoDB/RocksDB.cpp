@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+using namespace memodb;
+
 /*
  * Column families:
  *

@@ -26,6 +26,7 @@
 
 using namespace bcdb;
 using namespace llvm;
+using namespace memodb;
 
 static cl::opt<std::string> UriOrEmpty(
     "uri", cl::Optional, cl::desc("URI of the database"),

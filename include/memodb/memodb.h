@@ -17,9 +17,7 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace llvm {
-class raw_ostream;
-} // end namespace llvm
+#include "CID.h"
 
 // https://en.cppreference.com/w/cpp/utility/variant/visit
 template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
@@ -42,39 +40,6 @@ std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes);
 std::string bytesToUTF8(llvm::StringRef Bytes);
 std::string utf8ToByteString(llvm::StringRef Str);
 
-class memodb_value;
-
-class CID {
-private:
-  std::vector<std::uint8_t> id_;
-  enum { EMPTY, INLINE_RAW, INLINE_DAG, BLAKE2B_RAW, BLAKE2B_MERKLEDAG } type_;
-  friend class memodb_value;
-
-public:
-  CID() : id_(), type_(EMPTY) {}
-  CID(llvm::StringRef Text);
-  static CID fromCID(llvm::ArrayRef<std::uint8_t> Bytes);
-  static CID loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes);
-  static CID fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes);
-  static CID fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes);
-  bool isInline() const { return type_ == INLINE_RAW || type_ == INLINE_DAG; }
-  memodb_value asInline() const;
-  std::vector<std::uint8_t> asCID() const;
-  operator std::string() const;
-  operator bool() const { return type_ != EMPTY; }
-  bool operator<(const CID &other) const {
-    if (type_ != other.type_)
-      return type_ < other.type_;
-    return id_ < other.id_;
-  }
-  bool operator==(const CID &other) const {
-    return type_ == other.type_ && id_ == other.id_;
-  }
-};
-
-std::ostream &operator<<(std::ostream &os, const CID &ref);
-llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const CID &ref);
-
 struct memodb_head {
   std::string Name;
 
@@ -88,22 +53,23 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_head &head);
 
 struct memodb_call {
   std::string Name;
-  std::vector<CID> Args;
+  std::vector<memodb::CID> Args;
 
-  memodb_call(llvm::StringRef Name, llvm::ArrayRef<CID> Args)
+  memodb_call(llvm::StringRef Name, llvm::ArrayRef<memodb::CID> Args)
       : Name(Name), Args(Args) {}
 };
 
 std::ostream &operator<<(std::ostream &os, const memodb_call &call);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call);
 
-struct memodb_name : public std::variant<CID, memodb_head, memodb_call> {
-  typedef std::variant<CID, memodb_head, memodb_call> BaseType;
+struct memodb_name
+    : public std::variant<memodb::CID, memodb_head, memodb_call> {
+  typedef std::variant<memodb::CID, memodb_head, memodb_call> BaseType;
 
-  constexpr memodb_name(const CID &Ref) : variant(Ref) {}
+  constexpr memodb_name(const memodb::CID &Ref) : variant(Ref) {}
   constexpr memodb_name(const memodb_head &Head) : variant(Head) {}
   constexpr memodb_name(const memodb_call &Call) : variant(Call) {}
-  constexpr memodb_name(CID &&Ref) : variant(Ref) {}
+  constexpr memodb_name(memodb::CID &&Ref) : variant(Ref) {}
   constexpr memodb_name(memodb_head &&Head) : variant(Head) {}
   constexpr memodb_name(memodb_call &&Call) : variant(Call) {}
 
@@ -150,7 +116,7 @@ public:
   using float_t = double;
   using bytes_t = std::vector<std::uint8_t>;
   using string_t = std::string;
-  using ref_t = CID;
+  using ref_t = memodb::CID;
   using array_t = std::vector<memodb_value>;
   using map_t = std::map<string_t, memodb_value>;
 
@@ -277,10 +243,10 @@ public:
     return load_cbor_from_sequence(in);
   }
   static memodb_value load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in);
-  static memodb_value loadFromIPLD(const CID &CID,
+  static memodb_value loadFromIPLD(const memodb::CID &CID,
                                    llvm::ArrayRef<std::uint8_t> Content);
   void save_cbor(std::vector<std::uint8_t> &out) const;
-  std::pair<CID, bytes_t> saveAsIPLD(bool noInline = false) const;
+  std::pair<memodb::CID, bytes_t> saveAsIPLD(bool noInline = false) const;
 
 private:
   void require_type(value_t type) const {
@@ -330,9 +296,9 @@ public:
   virtual ~memodb_db() {}
 
   virtual llvm::Optional<memodb_value> getOptional(const memodb_name &name) = 0;
-  virtual CID put(const memodb_value &value) = 0;
-  virtual void set(const memodb_name &Name, const CID &ref) = 0;
-  virtual std::vector<memodb_name> list_names_using(const CID &ref) = 0;
+  virtual memodb::CID put(const memodb_value &value) = 0;
+  virtual void set(const memodb_name &Name, const memodb::CID &ref) = 0;
+  virtual std::vector<memodb_name> list_names_using(const memodb::CID &ref) = 0;
   virtual std::vector<std::string> list_funcs() = 0;
   // F should not modify the database. F can return true to stop iteration.
   virtual void eachHead(std::function<bool(const memodb_head &)> F) = 0;
@@ -347,21 +313,23 @@ public:
 
   memodb_value get(const memodb_name &name) { return *getOptional(name); }
 
-  CID head_get(llvm::StringRef name) { return get(memodb_head(name)).as_ref(); }
+  memodb::CID head_get(llvm::StringRef name) {
+    return get(memodb_head(name)).as_ref();
+  }
 
-  void head_set(llvm::StringRef name, const CID &ref) {
+  void head_set(llvm::StringRef name, const memodb::CID &ref) {
     set(memodb_head(name), ref);
   }
 
-  CID call_get(llvm::StringRef name, llvm::ArrayRef<CID> args) {
+  memodb::CID call_get(llvm::StringRef name, llvm::ArrayRef<memodb::CID> args) {
     auto Value = getOptional(memodb_call(name, args));
     if (!Value)
-      return CID();
+      return memodb::CID();
     return Value->as_ref();
   }
 
-  void call_set(llvm::StringRef name, llvm::ArrayRef<CID> args,
-                const CID &result) {
+  void call_set(llvm::StringRef name, llvm::ArrayRef<memodb::CID> args,
+                const memodb::CID &result) {
     set(memodb_call(name, args), result);
   }
 
@@ -383,11 +351,11 @@ public:
     return Result;
   }
 
-  virtual std::vector<memodb_path> list_paths_to(const CID &ref);
+  virtual std::vector<memodb_path> list_paths_to(const memodb::CID &ref);
 
   template <typename F, typename... Targs>
-  CID call_or_lookup_ref(llvm::StringRef name, F func, Targs... Fargs) {
-    CID ref = call_get(name, {Fargs...});
+  memodb::CID call_or_lookup_ref(llvm::StringRef name, F func, Targs... Fargs) {
+    memodb::CID ref = call_get(name, {Fargs...});
     if (!ref) {
       ref = put(func(*this, get(Fargs)...));
       call_set(name, {Fargs...}, ref);
@@ -399,7 +367,7 @@ public:
   memodb_value call_or_lookup_value(llvm::StringRef name, F func,
                                     Targs... Fargs) {
     memodb_value value;
-    if (CID ref = call_get(name, {Fargs...})) {
+    if (memodb::CID ref = call_get(name, {Fargs...})) {
       value = get(ref);
     } else {
       value = func(*this, get(Fargs)...);

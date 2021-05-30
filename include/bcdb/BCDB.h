@@ -10,7 +10,10 @@
 #include <vector>
 
 class memodb_db;
+
+namespace memodb {
 class CID;
+} // end namespace memodb
 
 namespace llvm {
 class Module;
@@ -40,7 +43,7 @@ public:
   memodb_db &get_db() { return *db; }
 
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
-  llvm::Expected<CID> AddWithoutHead(std::unique_ptr<llvm::Module> M);
+  llvm::Expected<memodb::CID> AddWithoutHead(std::unique_ptr<llvm::Module> M);
   llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
   llvm::Expected<std::unique_ptr<llvm::Module>>
   GetFunctionById(llvm::StringRef Id);

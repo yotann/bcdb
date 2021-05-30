@@ -21,6 +21,7 @@
 
 using namespace bcdb;
 using namespace llvm;
+using namespace memodb;
 
 cl::OptionCategory bcdb::BCDBCategory("BCDB options");
 

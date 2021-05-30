@@ -12,6 +12,8 @@
 #include <sqlite3.h>
 #include <vector>
 
+using namespace memodb;
+
 /* NOTE: we allow thread-safe access to sqlite_db by creating a separate
  * database connection for each thread. It may be worth experimenting with
  * shared caches <https://sqlite.org/sharedcache.html> as a trade-off between

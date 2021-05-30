@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
 )
 add_llvm_library(MemoDB
   CAR.cpp
+  CID.cpp
   MemoDB.cpp
   RocksDB.cpp
   SQLite.cpp

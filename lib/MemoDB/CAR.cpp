@@ -10,11 +10,7 @@
 #include <system_error>
 #include <unistd.h>
 
-// Could use llvm::sys::fs::readNativeFileSlice for portability, but it isn't
-// available until LLVM 9.
-#if defined(_WIN32)
-#error This file has not been ported to Windows.
-#endif
+using namespace memodb;
 
 namespace {
 class CARStore : public memodb_db {

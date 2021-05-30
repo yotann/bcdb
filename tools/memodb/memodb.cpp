@@ -20,6 +20,7 @@
 #include "memodb/memodb.h"
 
 using namespace llvm;
+using namespace memodb;
 
 cl::OptionCategory MemoDBCategory("MemoDB options");
 

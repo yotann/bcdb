@@ -55,6 +55,7 @@
 
 using namespace bcdb;
 using namespace llvm;
+using namespace memodb;
 
 static cl::SubCommand Alive2Command("alive2", "Check equivalence with Alive2");
 
