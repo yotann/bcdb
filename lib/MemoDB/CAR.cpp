@@ -20,11 +20,11 @@ namespace {
 class CARStore : public memodb_db {
   llvm::sys::fs::file_t FileHandle;
   memodb_value Root;
-  std::map<memodb_ref, std::uint64_t> BlockPositions;
+  std::map<CID, std::uint64_t> BlockPositions;
 
   bool readBytes(llvm::MutableArrayRef<std::uint8_t> Buf, std::uint64_t *Pos);
   std::optional<std::uint64_t> readVarInt(std::uint64_t *Pos);
-  memodb_ref readCID(std::uint64_t *Pos);
+  CID readCID(std::uint64_t *Pos);
   memodb_value readValue(std::uint64_t *Pos, std::uint64_t Size);
 
 public:
@@ -32,14 +32,14 @@ public:
   ~CARStore() override;
 
   llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
-  std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
+  std::vector<memodb_name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
   void eachHead(std::function<bool(const memodb_head &)> F) override;
   void eachCall(llvm::StringRef Func,
                 std::function<bool(const memodb_call &)> F) override;
 
-  memodb_ref put(const memodb_value &value) override;
-  void set(const memodb_name &Name, const memodb_ref &ref) override;
+  CID put(const memodb_value &value) override;
+  void set(const memodb_name &Name, const CID &ref) override;
   void head_delete(const memodb_head &Head) override;
   void call_invalidate(llvm::StringRef name) override;
 };
@@ -95,7 +95,7 @@ std::optional<std::uint64_t> CARStore::readVarInt(std::uint64_t *Pos) {
   return Result;
 }
 
-memodb_ref CARStore::readCID(std::uint64_t *Pos) {
+CID CARStore::readCID(std::uint64_t *Pos) {
   std::uint64_t StartPos = *Pos;
   auto CIDVersion = *readVarInt(Pos);
   if (CIDVersion != 1)
@@ -107,7 +107,7 @@ memodb_ref CARStore::readCID(std::uint64_t *Pos) {
   std::vector<std::uint8_t> Buffer(*Pos - StartPos);
   if (!readBytes(Buffer, &StartPos))
     llvm::report_fatal_error("Unexpected end of file in CID");
-  return memodb_ref::fromCID(Buffer);
+  return CID::fromCID(Buffer);
 }
 
 memodb_value CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
@@ -132,7 +132,7 @@ void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
   auto Header = readValue(&Pos, HeaderSize);
   if (Header["version"] != 1 || Header["roots"].array_items().size() != 1)
     llvm::report_fatal_error("Unsupported CAR header");
-  memodb_ref RootRef = Header["roots"][0].as_ref();
+  CID RootRef = Header["roots"][0].as_ref();
 
   while (true) {
     auto BlockStart = Pos;
@@ -140,7 +140,7 @@ void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
     if (!BlockSize)
       break;
     auto BlockEnd = Pos + *BlockSize;
-    memodb_ref CID = readCID(&Pos);
+    CID CID = readCID(&Pos);
     if (Pos > BlockEnd)
       llvm::report_fatal_error("Invalid size of block");
     BlockPositions[std::move(CID)] = BlockStart;
@@ -158,21 +158,21 @@ CARStore::~CARStore() {
 }
 
 llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
-  if (const memodb_ref *CID = std::get_if<memodb_ref>(&name)) {
-    if (CID->isInline())
-      return CID->asInline();
-    if (!BlockPositions.count(*CID))
+  if (const CID *CIDValue = std::get_if<CID>(&name)) {
+    if (CIDValue->isInline())
+      return CIDValue->asInline();
+    if (!BlockPositions.count(*CIDValue))
       return {};
-    auto Pos = BlockPositions[*CID];
+    auto Pos = BlockPositions[*CIDValue];
     auto BlockSize = *readVarInt(&Pos);
     auto BlockEnd = Pos + BlockSize;
-    memodb_ref CIDFromFile = readCID(&Pos);
-    if (*CID != CIDFromFile)
+    CID CIDFromFile = readCID(&Pos);
+    if (*CIDValue != CIDFromFile)
       llvm::report_fatal_error("CID mismatch (file changed while reading?)");
     std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
     if (!readBytes(Buffer, &Pos))
       llvm::report_fatal_error("Unexpected end of file in content");
-    return memodb_value::loadFromIPLD(*CID, Buffer);
+    return memodb_value::loadFromIPLD(*CIDValue, Buffer);
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
     if (Root["heads"].map_items().count(Head->Name))
       return Root["heads"][Head->Name];
@@ -182,7 +182,7 @@ llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
       return {};
     const auto &AllCalls = Root["calls"][Call->Name];
     std::string Key;
-    for (const memodb_ref &Arg : Call->Args)
+    for (const CID &Arg : Call->Args)
       Key += std::string(Arg) + "/";
     Key.pop_back();
     if (!AllCalls.map_items().count(Key))
@@ -193,7 +193,7 @@ llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
   }
 }
 
-std::vector<memodb_name> CARStore::list_names_using(const memodb_ref &ref) {
+std::vector<memodb_name> CARStore::list_names_using(const CID &ref) {
   // No easy way to find references, so return nothing. This function isn't
   // required to find every reference anyway.
   return {};
@@ -226,11 +226,11 @@ void CARStore::eachHead(std::function<bool(const memodb_head &)> F) {
       break;
 }
 
-memodb_ref CARStore::put(const memodb_value &value) {
+CID CARStore::put(const memodb_value &value) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 
-void CARStore::set(const memodb_name &Name, const memodb_ref &ref) {
+void CARStore::set(const memodb_name &Name, const CID &ref) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 

@@ -63,7 +63,7 @@ Expected<std::vector<std::string>> BCDB::ListModules() {
 }
 
 Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
-  memodb_ref ref = db->head_get(Name);
+  CID ref = db->head_get(Name);
   if (!ref)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
@@ -135,7 +135,7 @@ static void PreprocessModule(Module &M) {
   M.getMDKindID("srcloc");
 }
 
-Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
+Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   PreprocessModule(*M);
 
   auto SaveModule = [&](Module &M) {
@@ -151,7 +151,7 @@ Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
 
   GlobalReferenceGraph Graph(*M);
   for (auto &SCC : make_range(scc_begin(&Graph), scc_end(&Graph))) {
-    DenseMap<GlobalObject *, memodb_ref> Map;
+    DenseMap<GlobalObject *, CID> Map;
     for (auto &Node : SCC) {
       if (GlobalObject *GO = dyn_cast_or_null<GlobalObject>(Node.second)) {
         auto MPart = Splitter.SplitGlobal(GO);
@@ -161,7 +161,7 @@ Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
     }
     for (auto &Item : Map) {
       GlobalObject *GO = Item.first;
-      memodb_ref &Ref = Item.second;
+      CID &Ref = Item.second;
       function_map[bytesToUTF8(GO->getName())] = Ref;
       if (RenameGlobals) {
         GlobalAlias *GA = GlobalAlias::create(
@@ -173,7 +173,7 @@ Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   }
 
   Splitter.Finish();
-  memodb_ref remainder_value = SaveModule(*M);
+  CID remainder_value = SaveModule(*M);
 
   auto result = memodb_value::map(
       {{"functions", function_map}, {"remainder", remainder_value}});
@@ -181,7 +181,7 @@ Expected<memodb_ref> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
 }
 
 Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
-  Expected<memodb_ref> refOrErr = AddWithoutHead(std::move(M));
+  Expected<CID> refOrErr = AddWithoutHead(std::move(M));
   if (!refOrErr)
     return refOrErr.takeError();
   db->head_set(Name, *refOrErr);
@@ -189,7 +189,7 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
 }
 
 static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
-                                                   const memodb_ref &ref,
+                                                   const CID &ref,
                                                    StringRef Name,
                                                    LLVMContext &Context) {
   memodb_value value = db->get(ref);
@@ -201,7 +201,7 @@ static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
 
 Expected<std::unique_ptr<Module>>
 BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
-  memodb_ref head_ref = db->head_get(Name);
+  CID head_ref = db->head_get(Name);
   if (!head_ref)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());
@@ -211,7 +211,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
 
   for (auto &Item : head["functions"].map_items()) {
     auto Name = utf8ToByteString(Item.first);
-    memodb_ref ref = Item.second.as_ref();
+    CID ref = Item.second.as_ref();
     PartIDs[std::string(Name)] = llvm::StringRef(ref);
   }
 
@@ -219,11 +219,11 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
 }
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
-  return LoadModuleFromValue(db, memodb_ref(Id), Id, *Context);
+  return LoadModuleFromValue(db, CID(Id), Id, *Context);
 }
 
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
-  memodb_ref head_ref = db->head_get(Name);
+  CID head_ref = db->head_get(Name);
   if (!head_ref)
     return make_error<StringError>("could not get head",
                                    inconvertibleErrorCode());

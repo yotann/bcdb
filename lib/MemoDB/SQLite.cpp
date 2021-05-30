@@ -107,8 +107,8 @@ class sqlite_db : public memodb_db {
   void requireRow(int rc);
   bool checkRow(int rc);
 
-  memodb_ref bid_to_cid(sqlite3_int64 bid);
-  sqlite3_int64 cid_to_bid(const memodb_ref &ref);
+  CID bid_to_cid(sqlite3_int64 bid);
+  sqlite3_int64 cid_to_bid(const CID &ref);
   sqlite3_int64 get_funcid(llvm::StringRef name,
                            bool create_if_missing = false);
 
@@ -116,7 +116,7 @@ class sqlite_db : public memodb_db {
 
   void upgrade_schema();
 
-  sqlite3_int64 putInternal(const memodb_ref &CID,
+  sqlite3_int64 putInternal(const CID &CID,
                             const llvm::ArrayRef<std::uint8_t> &Bytes,
                             const memodb_value &Value);
 
@@ -130,9 +130,9 @@ public:
   ~sqlite_db() override;
 
   llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
-  memodb_ref put(const memodb_value &value) override;
-  void set(const memodb_name &Name, const memodb_ref &ref) override;
-  std::vector<memodb_name> list_names_using(const memodb_ref &ref) override;
+  CID put(const memodb_value &value) override;
+  void set(const memodb_name &Name, const CID &ref) override;
+  std::vector<memodb_name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
   void eachHead(std::function<bool(const memodb_head &)> F) override;
   void eachCall(llvm::StringRef Func,
@@ -391,15 +391,15 @@ void sqlite_db::upgrade_schema() {
   // ignore return code
 }
 
-memodb_ref sqlite_db::bid_to_cid(sqlite3_int64 bid) {
+CID sqlite_db::bid_to_cid(sqlite3_int64 bid) {
   sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT cid FROM blocks WHERE bid = ?1");
   stmt.bind_int(1, bid);
   requireRow(stmt.step());
-  return memodb_ref::fromCID(stmt.columnBytes(0));
+  return CID::fromCID(stmt.columnBytes(0));
 }
 
-sqlite3_int64 sqlite_db::cid_to_bid(const memodb_ref &ref) {
+sqlite3_int64 sqlite_db::cid_to_bid(const CID &ref) {
   sqlite3 *db = get_db();
   auto Bytes = ref.asCID();
   Stmt stmt(db, "SELECT bid FROM blocks WHERE cid = ?1");
@@ -415,7 +415,7 @@ sqlite3_int64 sqlite_db::cid_to_bid(const memodb_ref &ref) {
   return putInternal(ref, Content, Value);
 }
 
-sqlite3_int64 sqlite_db::putInternal(const memodb_ref &CID,
+sqlite3_int64 sqlite_db::putInternal(const CID &CID,
                                      const llvm::ArrayRef<std::uint8_t> &Bytes,
                                      const memodb_value &Value) {
   sqlite3 *db = get_db();
@@ -465,7 +465,7 @@ sqlite3_int64 sqlite_db::putInternal(const memodb_ref &CID,
 
 std::vector<std::uint8_t> sqlite_db::encodeArgs(const memodb_call &Call) {
   memodb_value ArgsValue = memodb_value::array();
-  for (const memodb_ref &Arg : Call.Args)
+  for (const CID &Arg : Call.Args)
     ArgsValue.array_items().emplace_back(cid_to_bid(Arg));
   std::vector<std::uint8_t> Result;
   ArgsValue.save_cbor(Result);
@@ -479,7 +479,7 @@ memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
   stmt.bind_int(1, callid);
   requireRow(stmt.step());
 
-  std::vector<memodb_ref> Args;
+  std::vector<CID> Args;
   memodb_value ArgsValue = memodb_value::load_cbor(stmt.columnBytes(1));
   for (const memodb_value &ArgValue : ArgsValue.array_items())
     Args.emplace_back(bid_to_cid(ArgValue.as_integer()));
@@ -487,13 +487,13 @@ memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
   return memodb_call(stmt.columnString(0), Args);
 }
 
-memodb_ref sqlite_db::put(const memodb_value &value) {
+CID sqlite_db::put(const memodb_value &value) {
   auto IPLD = value.saveAsIPLD();
   putInternal(IPLD.first, IPLD.second, value);
   return IPLD.first;
 }
 
-void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
+void sqlite_db::set(const memodb_name &Name, const CID &ref) {
   sqlite3 *db = get_db();
   if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
     Stmt stmt(db, "INSERT OR REPLACE INTO heads(name, bid) VALUES(?1,?2)");
@@ -537,7 +537,7 @@ void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
       {
         Stmt stmt(db, "INSERT OR IGNORE INTO call_refs(funcid, callid, dest) "
                       "VALUES(?1,?2,?3)");
-        for (const memodb_ref &Arg : Call->Args) {
+        for (const CID &Arg : Call->Args) {
           stmt.bind_int(1, funcid);
           stmt.bind_int(2, CallID);
           stmt.bind_int(3, cid_to_bid(Arg));
@@ -548,7 +548,7 @@ void sqlite_db::set(const memodb_name &Name, const memodb_ref &ref) {
     }
     transaction.commit();
   } else {
-    llvm::report_fatal_error("can't set a memodb_ref");
+    llvm::report_fatal_error("can't set a CID");
   }
 }
 
@@ -572,7 +572,7 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
 }
 
 llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
-  if (const memodb_ref *Ref = std::get_if<memodb_ref>(&name)) {
+  if (const CID *Ref = std::get_if<CID>(&name)) {
     if (Ref->isInline())
       return Ref->asInline();
     sqlite3 *db = get_db();
@@ -606,7 +606,7 @@ llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
   }
 }
 
-std::vector<memodb_name> sqlite_db::list_names_using(const memodb_ref &ref) {
+std::vector<memodb_name> sqlite_db::list_names_using(const CID &ref) {
   sqlite3 *db = get_db();
   std::vector<memodb_name> Result;
 

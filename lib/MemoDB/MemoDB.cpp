@@ -182,7 +182,7 @@ static std::string encodeBase32(llvm::ArrayRef<std::uint8_t> Bytes) {
   return Result;
 }
 
-memodb_ref::memodb_ref(llvm::StringRef Text) {
+CID::CID(llvm::StringRef Text) {
   if (Text.startswith(BASE32_PREFIX)) {
     *this = fromCID(decodeBase32(Text.drop_front()));
   } else {
@@ -190,26 +190,25 @@ memodb_ref::memodb_ref(llvm::StringRef Text) {
   }
 }
 
-memodb_ref memodb_ref::fromCID(llvm::ArrayRef<std::uint8_t> Bytes) {
-  memodb_ref Result = loadCIDFromSequence(Bytes);
+CID CID::fromCID(llvm::ArrayRef<std::uint8_t> Bytes) {
+  CID Result = loadCIDFromSequence(Bytes);
   if (!Bytes.empty())
     llvm::report_fatal_error("Extra bytes in CID");
   return Result;
 }
 
-memodb_ref
-memodb_ref::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
+CID CID::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
   auto startsWith = [&](const auto &Prefix) {
     return Bytes.take_front(Prefix.size()).equals(Prefix);
   };
   if (startsWith(CID_PREFIX_RAW)) {
     Bytes = Bytes.drop_front(CID_PREFIX_RAW.size());
-    memodb_ref Result = fromBlake2BRaw(Bytes.take_front(HASH_SIZE));
+    CID Result = fromBlake2BRaw(Bytes.take_front(HASH_SIZE));
     Bytes = Bytes.drop_front(HASH_SIZE);
     return Result;
   } else if (startsWith(CID_PREFIX_DAG)) {
     Bytes = Bytes.drop_front(CID_PREFIX_RAW.size());
-    memodb_ref Result = fromBlake2BMerkleDAG(Bytes.take_front(HASH_SIZE));
+    CID Result = fromBlake2BMerkleDAG(Bytes.take_front(HASH_SIZE));
     Bytes = Bytes.drop_front(HASH_SIZE);
     return Result;
   } else if (startsWith(CID_PREFIX_INLINE_RAW)) {
@@ -217,7 +216,7 @@ memodb_ref::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
     if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] > Bytes.size() - 1)
       llvm::report_fatal_error("invalid inline CID");
     size_t Size = Bytes[0];
-    memodb_ref Result;
+    CID Result;
     Result.id_ = Bytes.slice(1, Size);
     Result.type_ = INLINE_RAW;
     Bytes = Bytes.drop_front(1 + Size);
@@ -227,7 +226,7 @@ memodb_ref::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
     if (Bytes.empty() || Bytes[0] >= 0x80 || Bytes[0] > Bytes.size() - 1)
       llvm::report_fatal_error("invalid inline CID");
     size_t Size = Bytes[0];
-    memodb_ref Result;
+    CID Result;
     Result.id_ = Bytes.slice(1, Size);
     Result.type_ = INLINE_DAG;
     Bytes = Bytes.drop_front(1 + Size);
@@ -237,26 +236,25 @@ memodb_ref::loadCIDFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
   }
 }
 
-memodb_ref memodb_ref::fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes) {
+CID CID::fromBlake2BRaw(llvm::ArrayRef<std::uint8_t> Bytes) {
   if (Bytes.size() != HASH_SIZE)
     llvm::report_fatal_error("incorrect Blake2B hash size");
-  memodb_ref Result;
+  CID Result;
   Result.id_ = Bytes;
   Result.type_ = BLAKE2B_RAW;
   return Result;
 }
 
-memodb_ref
-memodb_ref::fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes) {
+CID CID::fromBlake2BMerkleDAG(llvm::ArrayRef<std::uint8_t> Bytes) {
   if (Bytes.size() != HASH_SIZE)
     llvm::report_fatal_error("incorrect Blake2B hash size");
-  memodb_ref Result;
+  CID Result;
   Result.id_ = Bytes;
   Result.type_ = BLAKE2B_MERKLEDAG;
   return Result;
 }
 
-memodb_value memodb_ref::asInline() const {
+memodb_value CID::asInline() const {
   if (type_ == INLINE_RAW)
     return memodb_value(id_);
   else if (type_ == INLINE_DAG)
@@ -265,7 +263,7 @@ memodb_value memodb_ref::asInline() const {
     llvm::report_fatal_error("incorrect type of ID");
 }
 
-std::vector<std::uint8_t> memodb_ref::asCID() const {
+std::vector<std::uint8_t> CID::asCID() const {
   std::vector<std::uint8_t> Result;
   if (type_ == BLAKE2B_RAW)
     Result.assign(CID_PREFIX_RAW.begin(), CID_PREFIX_RAW.end());
@@ -283,7 +281,7 @@ std::vector<std::uint8_t> memodb_ref::asCID() const {
   return Result;
 }
 
-memodb_ref::operator std::string() const {
+CID::operator std::string() const {
   if (type_ == EMPTY)
     return "";
   else {
@@ -292,11 +290,11 @@ memodb_ref::operator std::string() const {
   }
 }
 
-std::ostream &operator<<(std::ostream &os, const memodb_ref &ref) {
+std::ostream &operator<<(std::ostream &os, const CID &ref) {
   return os << std::string(ref);
 }
 
-llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_ref &ref) {
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const CID &ref) {
   return os << std::string(ref);
 }
 
@@ -310,14 +308,14 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_head &head) {
 
 std::ostream &operator<<(std::ostream &os, const memodb_call &call) {
   os << "call:" << call.Name;
-  for (const memodb_ref &Arg : call.Args)
+  for (const CID &Arg : call.Args)
     os << "/" << Arg;
   return os;
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call) {
   os << "call:" << call.Name;
-  for (const memodb_ref &Arg : call.Args)
+  for (const CID &Arg : call.Args)
     os << "/" << Arg;
   return os;
 }
@@ -604,7 +602,7 @@ memodb_value::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     if (is_cid) {
       if (result.empty() || result[0] != 0x00)
         llvm::report_fatal_error("invalid encoded CID");
-      return memodb_ref::fromCID(llvm::ArrayRef(result).drop_front(1));
+      return CID::fromCID(llvm::ArrayRef(result).drop_front(1));
     }
     return memodb_value(result);
   }
@@ -752,20 +750,20 @@ void memodb_value::save_cbor(std::vector<std::uint8_t> &out) const {
              variant_);
 }
 
-memodb_value memodb_value::loadFromIPLD(const memodb_ref &CID,
+memodb_value memodb_value::loadFromIPLD(const CID &CID,
                                         llvm::ArrayRef<std::uint8_t> Content) {
   if (CID.isInline()) {
     assert(Content.empty());
     return CID.asInline();
   }
-  if (CID.type_ == memodb_ref::BLAKE2B_RAW)
+  if (CID.type_ == CID::BLAKE2B_RAW)
     return memodb_value(Content);
-  if (CID.type_ == memodb_ref::BLAKE2B_MERKLEDAG)
+  if (CID.type_ == CID::BLAKE2B_MERKLEDAG)
     return memodb_value::load_cbor(Content);
   llvm::report_fatal_error("Unsupported CID");
 }
 
-std::pair<memodb_ref, memodb_value::bytes_t>
+std::pair<CID, memodb_value::bytes_t>
 memodb_value::saveAsIPLD(bool noInline) const {
   bool raw = type() == BYTES;
   bytes_t Bytes;
@@ -775,24 +773,24 @@ memodb_value::saveAsIPLD(bool noInline) const {
     save_cbor(Bytes);
   if (!noInline && CID_PREFIX_INLINE_DAG.size() + 1 + Bytes.size() <=
                        CID_PREFIX_DAG.size() + HASH_SIZE) {
-    memodb_ref Ref;
+    CID Ref;
     Ref.id_ = std::move(Bytes);
-    Ref.type_ = raw ? memodb_ref::INLINE_RAW : memodb_ref::INLINE_DAG;
+    Ref.type_ = raw ? CID::INLINE_RAW : CID::INLINE_DAG;
     return {Ref, {}};
   } else {
-    memodb_ref Ref;
+    CID Ref;
     Ref.id_.resize(HASH_SIZE);
-    Ref.type_ = raw ? memodb_ref::BLAKE2B_RAW : memodb_ref::BLAKE2B_MERKLEDAG;
+    Ref.type_ = raw ? CID::BLAKE2B_RAW : CID::BLAKE2B_MERKLEDAG;
     crypto_generichash(Ref.id_.data(), Ref.id_.size(), Bytes.data(),
                        Bytes.size(), nullptr, 0);
     return {std::move(Ref), std::move(Bytes)};
   }
 }
 
-std::vector<memodb_path> memodb_db::list_paths_to(const memodb_ref &ref) {
+std::vector<memodb_path> memodb_db::list_paths_to(const CID &ref) {
   auto listPathsWithin =
       [](const memodb_value &Value,
-         const memodb_ref &Ref) -> std::vector<std::vector<memodb_value>> {
+         const CID &Ref) -> std::vector<std::vector<memodb_value>> {
     std::vector<std::vector<memodb_value>> Result;
     std::vector<memodb_value> CurPath;
     std::function<void(const memodb_value &)> recurse =
@@ -820,9 +818,9 @@ std::vector<memodb_path> memodb_db::list_paths_to(const memodb_ref &ref) {
 
   std::vector<memodb_path> Result;
   std::vector<memodb_value> BackwardsPath;
-  std::function<void(const memodb_ref &)> recurse = [&](const memodb_ref &Ref) {
+  std::function<void(const CID &)> recurse = [&](const CID &Ref) {
     for (const auto &Parent : list_names_using(Ref)) {
-      if (const memodb_ref *ParentRef = std::get_if<memodb_ref>(&Parent)) {
+      if (const CID *ParentRef = std::get_if<CID>(&Parent)) {
         const memodb_value Value = get(*ParentRef);
         for (const auto &Subpath : listPathsWithin(Value, Ref)) {
           BackwardsPath.insert(BackwardsPath.end(), Subpath.rbegin(),

@@ -180,18 +180,18 @@ static int Alive2() {
   ExitOnError Err("smout alive2: ");
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
-  memodb_ref Root = memodb.head_get(ModuleName);
+  CID Root = memodb.head_get(ModuleName);
   memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
 
   BrokerSocket = nng::req::v0::open();
   BrokerSocket.dial(BrokerURL.c_str());
 
-  memodb_ref AliveSettings = memodb.put(memodb_value::map({
+  CID AliveSettings = memodb.put(memodb_value::map({
       {"smt-to", 2 * (unsigned)Timeout},
       {"timeout", (unsigned)Timeout},
   }));
 
-  std::vector<std::pair<memodb_ref, memodb_ref>> AllPairs;
+  std::vector<std::pair<CID, CID>> AllPairs;
   for (auto &GroupPair : Collated.map_items()) {
     auto &Group = GroupPair.second;
     for (unsigned i = 1; i < Group.array_items().size(); i++) {
@@ -220,9 +220,8 @@ static int Alive2() {
            << " old failures\n";
   };
 
-  auto Transform = [&](const std::pair<memodb_ref, memodb_ref> &Pair) {
-    memodb_ref RefinesRef =
-        memodb.call_get("refines", {Pair.first, Pair.second});
+  auto Transform = [&](const std::pair<CID, CID> &Pair) {
+    CID RefinesRef = memodb.call_get("refines", {Pair.first, Pair.second});
     if (RefinesRef) {
       if (memodb.get(RefinesRef).as_bool())
         NumValid++;
@@ -409,7 +408,7 @@ static int Candidates() {
     }
 
     memodb_value value = db->get_db().call_or_lookup_value(
-        "smout.candidates", evaluate_candidates, memodb_ref{FuncId});
+        "smout.candidates", evaluate_candidates, CID{FuncId});
     size_t result = value.array_items().size();
     TotalCandidates += value.array_items().size();
 
@@ -518,12 +517,12 @@ ResultTy parallel_transform_reduce(ContainerTy Container, ResultTy Init,
 // profitable.
 static memodb_value evaluate_profitable(memodb_db &db,
                                         const memodb_value &func) {
-  memodb_ref FuncId = db.put(func);
+  CID FuncId = db.put(func);
   memodb_value candidates = db.get(db.call_get("smout.candidates", {FuncId}));
   memodb_value result = memodb_value::array();
   memodb_value orig_size = db.get(db.call_get("compiled.size", {FuncId}));
   for (const auto &item : candidates.array_items()) {
-    memodb_ref caller = item.map_items().at("caller").as_ref();
+    CID caller = item.map_items().at("caller").as_ref();
     memodb_value caller_size = db.get(db.call_get("compiled.size", {caller}));
     if (caller_size < orig_size)
       result.array_items().push_back(item);
@@ -540,14 +539,14 @@ static int Collate() {
   std::atomic<size_t> TotalCandidates = 0, TotalProfitable = 0;
   auto TransformProfitable = [&](StringRef FuncId) {
     memodb_value candidates =
-        db.get(db.call_get("smout.candidates", {memodb_ref(FuncId)}));
+        db.get(db.call_get("smout.candidates", {CID(FuncId)}));
     memodb_value profitable = db.call_or_lookup_value(
-        "smout.candidates.profitable", evaluate_profitable, memodb_ref(FuncId));
+        "smout.candidates.profitable", evaluate_profitable, CID(FuncId));
     TotalCandidates += candidates.array_items().size();
     TotalProfitable += profitable.array_items().size();
     StringSet Result;
     for (const auto &item : profitable.array_items()) {
-      memodb_ref callee = item.map_items().at("callee").as_ref();
+      CID callee = item.map_items().at("callee").as_ref();
       Result.insert(StringRef(callee));
     }
     return Result;
@@ -565,7 +564,7 @@ static int Collate() {
          << "\n";
   outs() << "Number of unique candidates: " << UniqueCandidates.size() << "\n";
 
-  std::vector<memodb_ref> UniqueCandidatesVec;
+  std::vector<CID> UniqueCandidatesVec;
   for (auto &Item : UniqueCandidates)
     UniqueCandidatesVec.push_back(Item.getKey());
   auto Reduce = [](memodb_value A, memodb_value B) {
@@ -579,7 +578,7 @@ static int Collate() {
     }
     return A;
   };
-  auto Transform = [&db, &Err](const memodb_ref &ref) {
+  auto Transform = [&db, &Err](const CID &ref) {
     LLVMContext Context;
     auto M = Err(parseBitcodeFile(
         MemoryBufferRef(db.get(ref).as_bytestring(), StringRef(ref)), Context));
@@ -626,7 +625,7 @@ static int Estimate() {
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   auto &memodb = db->get_db();
 
-  auto compiled_size = [&](memodb_ref ref) -> size_t {
+  auto compiled_size = [&](CID ref) -> size_t {
     return memodb.get(memodb.call_get("compiled.size", {ref})).as_integer();
   };
 
@@ -701,7 +700,7 @@ static int Estimate() {
   unsigned NextNodeConflictIndex = 0;
 
   StringMap<unsigned> CalleeIndexMap;
-  auto findOrAddCallee = [&](const memodb_ref &ref) {
+  auto findOrAddCallee = [&](const CID &ref) {
     auto inserted = CalleeIndexMap.insert(
         std::make_pair(StringRef(ref), CalleeIndexMap.size()));
     unsigned i = inserted.first->second;
@@ -718,12 +717,10 @@ static int Estimate() {
     auto FuncId = FunctionUseEntry.getKey();
     unsigned UseCount = FunctionUseEntry.second;
 
-    memodb_ref OrigSizeRef =
-        memodb.call_get("compiled.size", {memodb_ref(FuncId)});
+    CID OrigSizeRef = memodb.call_get("compiled.size", {CID(FuncId)});
     if (!OrigSizeRef)
       continue;
-    memodb_ref CandidatesRef =
-        memodb.call_get("smout.candidates", {memodb_ref(FuncId)});
+    CID CandidatesRef = memodb.call_get("smout.candidates", {CID(FuncId)});
     if (!CandidatesRef)
       continue;
     size_t OrigSize = memodb.get(OrigSizeRef).as_integer();
@@ -736,8 +733,8 @@ static int Estimate() {
     std::vector<SmallVector<unsigned, 4>> NodeUses;
 
     for (memodb_value &Candidate : Candidates.array_items()) {
-      memodb_ref CalleeRef = Candidate["callee"].as_ref();
-      memodb_ref CallerRef = Candidate["caller"].as_ref();
+      CID CalleeRef = Candidate["callee"].as_ref();
+      CID CallerRef = Candidate["caller"].as_ref();
       auto CalleeSize = compiled_size(CalleeRef);
       auto CallerSize = compiled_size(CallerRef);
       if (CallerSize >= OrigSize) {
@@ -793,7 +790,7 @@ static int Estimate() {
     for (auto &GroupPair : Collated.map_items()) {
       auto &Group = GroupPair.second;
       for (const memodb_value &FirstValue : Group.array_items()) {
-        memodb_ref FirstRef = FirstValue.as_ref();
+        CID FirstRef = FirstValue.as_ref();
         auto callee_it = CalleeIndexMap.find(StringRef(FirstRef));
         if (callee_it == CalleeIndexMap.end())
           continue;
@@ -803,9 +800,8 @@ static int Estimate() {
         for (const memodb_value &SecondValue : Group.array_items()) {
           if (FirstValue == SecondValue)
             continue;
-          memodb_ref SecondRef = SecondValue.as_ref();
-          memodb_ref RefinesRef =
-              memodb.call_get("refines", {FirstRef, SecondRef});
+          CID SecondRef = SecondValue.as_ref();
+          CID RefinesRef = memodb.call_get("refines", {FirstRef, SecondRef});
           if (!RefinesRef)
             continue;
           if (memodb.get(RefinesRef) != memodb_value{true})
@@ -971,7 +967,7 @@ static memodb_value evaluate_compiled_size(memodb_db &db,
                                            const memodb_value &func) {
   using namespace object;
   ExitOnError Err("smout compiled size evaluator: ");
-  memodb_ref FuncId = db.put(func);
+  CID FuncId = db.put(func);
   memodb_value Compiled =
       db.call_or_lookup_value("compiled", evaluate_compiled, FuncId);
   std::string FuncStr = FuncId;
@@ -1005,11 +1001,10 @@ static int Measure() {
 
   // It's okay if there are duplicates in this list; the BCDB will cache the
   // compilation result.
-  std::vector<memodb_ref> all_funcs;
+  std::vector<CID> all_funcs;
   for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
-    all_funcs.push_back(memodb_ref{FuncId});
-    memodb_ref candidates =
-        memodb.call_get("smout.candidates", {memodb_ref{FuncId}});
+    all_funcs.push_back(CID{FuncId});
+    CID candidates = memodb.call_get("smout.candidates", {CID{FuncId}});
     memodb_value candidates_value = memodb.get(candidates);
     for (const auto &item : candidates_value.array_items()) {
       all_funcs.push_back(item.map_items().at("callee").as_ref());
@@ -1024,7 +1019,7 @@ static int Measure() {
   size_t TotalInputs = all_funcs.size();
   std::mutex OutputMutex;
 
-  auto Transform = [&](memodb_ref FuncId) {
+  auto Transform = [&](CID FuncId) {
     InProgress++;
     memodb_value Size = db->get_db().call_or_lookup_value(
         "compiled.size", evaluate_compiled_size, FuncId);
@@ -1056,7 +1051,7 @@ static int ShowGroups() {
   ExitOnError Err("smout show-groups: ");
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
-  memodb_ref Root = memodb.head_get(ModuleName);
+  CID Root = memodb.head_get(ModuleName);
   memodb_value Collated = memodb.get(memodb.call_get("smout.collated", {Root}));
 
   std::vector<std::pair<size_t, memodb_value>> GroupCounts;

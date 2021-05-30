@@ -87,7 +87,7 @@ static cl::opt<std::string> CpDest(cl::Positional, cl::Required,
 static int Cp() {
   ExitOnError Err("bcdb cp: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
-  memodb_ref value = db->get_db().head_get(CpSource);
+  CID value = db->get_db().head_get(CpSource);
   db->get_db().head_set(CpDest, value);
   return 0;
 }
@@ -217,7 +217,7 @@ static int HeadGet() {
   ExitOnError Err("bcdb head-get: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
   for (StringRef Name : HeadGetNames) {
-    memodb_ref value = db->get_db().head_get(Name);
+    CID value = db->get_db().head_get(Name);
     outs() << StringRef(value) << "\n";
   }
   return 0;
@@ -373,12 +373,12 @@ static int Cache() {
   ExitOnError Err("bcdb cache: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
 
-  std::vector<memodb_ref> args;
+  std::vector<CID> args;
   for (const auto &arg_id : FuncArgs) {
-    args.push_back(memodb_ref(arg_id));
+    args.push_back(CID(arg_id));
   }
 
-  db->get_db().call_set(FuncName, args, memodb_ref(FuncResult));
+  db->get_db().call_set(FuncName, args, CID(FuncResult));
   return 0;
 }
 
@@ -386,12 +386,12 @@ static int Evaluate() {
   ExitOnError Err("bcdb evaluate: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
 
-  std::vector<memodb_ref> args;
+  std::vector<CID> args;
   for (const auto &arg_id : FuncArgs) {
-    args.push_back(memodb_ref(arg_id));
+    args.push_back(CID(arg_id));
   }
 
-  memodb_ref result = db->get_db().call_get(FuncName, args);
+  CID result = db->get_db().call_get(FuncName, args);
   if (!result) {
     Err(make_error<StringError>("Can't evaluate function " + FuncName,
                                 errc::invalid_argument));
@@ -421,7 +421,7 @@ static int Refs() {
   ExitOnError Err("bcdb refs: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
 
-  memodb_ref ref(RefsValue);
+  CID ref(RefsValue);
   for (const auto &path : db->get_db().list_paths_to(ref)) {
     outs() << path.first;
     for (const auto &item : path.second) {
