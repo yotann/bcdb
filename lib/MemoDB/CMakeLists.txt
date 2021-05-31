@@ -5,6 +5,7 @@ add_llvm_library(MemoDB
   CAR.cpp
   CID.cpp
   MemoDB.cpp
+  Multibase.cpp
   RocksDB.cpp
   SQLite.cpp
 )

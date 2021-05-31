@@ -4,6 +4,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <optional>
 
+#include "memodb/Multibase.h"
 #include "gtest/gtest.h"
 
 using namespace memodb;
