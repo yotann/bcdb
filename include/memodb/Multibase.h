@@ -47,6 +47,7 @@ public:
   static const Multibase &Base64Pad;
   static const Multibase &Base64Url;
   static const Multibase &Base64UrlPad;
+  static const Multibase &Base16k;
   static const Multibase &Proquint;
 };
 
