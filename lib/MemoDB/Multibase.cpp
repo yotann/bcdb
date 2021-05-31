@@ -185,88 +185,6 @@ ProquintBase::encodeWithoutPrefix(llvm::ArrayRef<std::uint8_t> Bytes) const {
   return Result;
 }
 
-// https://sites.google.com/site/markusicu/unicode/base16k
-// Not a standard multibase; just for fun.
-namespace {
-class Base16kBase : public Multibase {
-public:
-  Base16kBase(char Prefix, const char *Name) : Multibase(Prefix, Name) {}
-  std::optional<std::vector<std::uint8_t>>
-  decodeWithoutPrefix(llvm::StringRef Str) const override;
-  std::string
-  encodeWithoutPrefix(llvm::ArrayRef<std::uint8_t> Bytes) const override;
-};
-} // end anonymous namespace
-
-std::optional<std::vector<std::uint8_t>>
-Base16kBase::decodeWithoutPrefix(llvm::StringRef Str) const {
-  if (!Str.startswith("\x9f\xba"))
-    return {};
-  Str = Str.drop_front(2);
-  std::size_t Size = 0;
-  if (Str.empty() || Str[0] < '0' || Str[0] > '9')
-    return {};
-  while (!Str.empty() && Str[0] >= '0' && Str[0] <= '9') {
-    Size = 10 * Size + (Str[0] - '0');
-    Str = Str.drop_front();
-  }
-  std::vector<std::uint8_t> Result;
-  std::uint32_t Value = 0;
-  size_t ValidBits = 0;
-  while (Result.size() < Size) {
-    if (Str.size() < 3)
-      return {};
-    std::uint8_t Byte0 = Str[0], Byte1 = Str[1], Byte2 = Str[2];
-    Str = Str.drop_front(3);
-    if ((Byte0 & 0xf0) != 0xe0 || (Byte1 & 0xc0) != 0x80 ||
-        (Byte2 & 0xc0) != 0x80)
-      return {};
-    std::uint16_t Codepoint =
-        ((Byte0 & 0x0f) << 12) | ((Byte1 & 0x3f) << 6) | (Byte2 & 0x3f);
-    if (Codepoint < 0x5000 || Codepoint > 0x8fff)
-      return {};
-    Value = (Value << 14) | (Codepoint - 0x5000);
-    ValidBits += 14;
-    while (Result.size() < Size && ValidBits >= 8) {
-      Result.push_back((Value >> (ValidBits - 8)) & 0xff);
-      ValidBits -= 8;
-    }
-  }
-  if (!Str.empty())
-    return {};
-  return Result;
-}
-
-std::string
-Base16kBase::encodeWithoutPrefix(llvm::ArrayRef<std::uint8_t> Bytes) const {
-  std::string Result = "";
-  for (size_t Size = Bytes.size(); Size; Size /= 10)
-    Result.push_back('0' + Size % 10);
-  if (Result.empty())
-    Result = '0';
-  // The prefix \xe5 and these bytes make the character "基" (base) used in the
-  // word "基数" (radix).
-  Result = "\x9f\xba" + std::string(Result.rbegin(), Result.rend());
-  std::uint32_t Value = 0;
-  size_t ValidBits = 0;
-  while (!Bytes.empty() || ValidBits) {
-    Value = (Value << 8) | (Bytes.empty() ? 0 : Bytes[0]);
-    ValidBits += 8;
-    if (ValidBits >= 14) {
-      std::uint16_t Codepoint = 0x5000 + ((Value >> (ValidBits - 14)) & 0x3fff);
-      ValidBits -= 14;
-      Result.push_back(0xe0 | (Codepoint >> 12));
-      Result.push_back(0x80 | ((Codepoint >> 6) & 0x3f));
-      Result.push_back(0x80 | ((Codepoint >> 0) & 0x3f));
-      if (Bytes.empty())
-        break;
-    }
-    if (!Bytes.empty())
-      Bytes = Bytes.drop_front();
-  }
-  return Result;
-}
-
 static const BitwiseBase<1> Base2('0', "base2", "01", std::nullopt);
 static const BitwiseBase<3> Base8('7', "base8", "01234567", std::nullopt);
 static const BitwiseBase<4> Base16('f', "base16", "0123456789abcdef",
@@ -310,7 +228,6 @@ static const BitwiseBase<6> Base64Url(
 static const BitwiseBase<6> Base64UrlPad(
     'U', "base64urlpad",
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", '=');
-static const Base16kBase Base16k('\xe5', "base16k");
 static const ProquintBase Proquint('p', "proquint");
 
 const Multibase &Multibase::Base2 = ::Base2;
@@ -330,7 +247,6 @@ const Multibase &Multibase::Base64 = ::Base64;
 const Multibase &Multibase::Base64Pad = ::Base64Pad;
 const Multibase &Multibase::Base64Url = ::Base64Url;
 const Multibase &Multibase::Base64UrlPad = ::Base64UrlPad;
-const Multibase &Multibase::Base16k = ::Base16k;
 const Multibase &Multibase::Proquint = ::Proquint;
 
 static const Multibase *ALL_BASES[] = {
@@ -338,7 +254,7 @@ static const Multibase *ALL_BASES[] = {
     &Base32Hex,    &Base32HexUpper, &Base32HexPad, &Base32HexPadUpper,
     &Base32,       &Base32Upper,    &Base32Pad,    &Base32PadUpper,
     &Base32z,      &Base64,         &Base64Pad,    &Base64Url,
-    &Base64UrlPad, &Base16k,        &Proquint,
+    &Base64UrlPad, &Proquint,
 };
 
 std::optional<std::vector<std::uint8_t>>
