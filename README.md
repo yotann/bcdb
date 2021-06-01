@@ -61,7 +61,6 @@ You will need the following dependencies:
   may work, but this is not guaranteed). When working on the BCDB code, you
   should make sure LLVM is built with assertions enabled.
 - [Clang](https://clang.llvm.org/), same version as LLVM.
-- `xxd`, which is usually included with [Vim](https://www.vim.org/)
 - Optional dependencies:
   - [nng](https://github.com/nanomsg/nng), tested with 1.4, for outlining.
   - [nngpp](https://github.com/cwzx/nngpp), tested with 1.3, for outlining.

@@ -99,7 +99,6 @@ link_directories(${LIBSODIUM_LIBRARY_DIRS})
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 link_directories(${SQLITE3_LIBRARY_DIRS})
 find_program(CLANG clang)
-find_program(XXD xxd)
 
 find_package(Threads) # needed by nng
 find_package(nng)
