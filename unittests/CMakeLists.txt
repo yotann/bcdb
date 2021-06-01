@@ -5,3 +5,4 @@ function(add_llvm_unittest test_dirname)
 endfunction()
 
 add_subdirectory(MemoDB)
+add_subdirectory(Outlining)
