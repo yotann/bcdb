@@ -130,7 +130,8 @@ public:
   void open(const char *uri, bool create_if_missing);
   ~sqlite_db() override;
 
-  llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
+  llvm::Optional<memodb_value> getOptional(const CID &CID) override;
+  llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
   CID put(const memodb_value &value) override;
   void set(const memodb_name &Name, const CID &ref) override;
   std::vector<memodb_name> list_names_using(const CID &ref) override;
@@ -570,26 +571,30 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   }
 }
 
-llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
-  if (const CID *Ref = std::get_if<CID>(&name)) {
-    if (Ref->isIdentity())
-      return memodb_value::loadFromIPLD(*Ref, {});
-    sqlite3 *db = get_db();
-    Stmt stmt(db, "SELECT codec, content FROM blocks WHERE cid = ?1");
-    stmt.bind_blob(1, Ref->asBytes());
-    if (!checkRow(stmt.step()))
-      return llvm::None;
-    if (stmt.columnInt(0) != CODEC_RAW)
-      llvm::report_fatal_error("unsupported compression codec");
-    return memodb_value::loadFromIPLD(*Ref, stmt.columnBytes(1));
-  } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
+llvm::Optional<memodb_value> sqlite_db::getOptional(const CID &CID) {
+  if (CID.isIdentity())
+    return memodb_value::loadFromIPLD(CID, {});
+  sqlite3 *db = get_db();
+  Stmt stmt(db, "SELECT codec, content FROM blocks WHERE cid = ?1");
+  stmt.bind_blob(1, CID.asBytes());
+  if (!checkRow(stmt.step()))
+    return llvm::None;
+  if (stmt.columnInt(0) != CODEC_RAW)
+    llvm::report_fatal_error("unsupported compression codec");
+  return memodb_value::loadFromIPLD(CID, stmt.columnBytes(1));
+}
+
+llvm::Optional<CID> sqlite_db::resolveOptional(const memodb_name &Name) {
+  if (const CID *Ref = std::get_if<CID>(&Name)) {
+    return *Ref;
+  } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
     sqlite3 *db = get_db();
     Stmt stmt(db, "SELECT bid FROM heads WHERE name = ?1");
     stmt.bind_text(1, Head->Name);
     if (!checkRow(stmt.step()))
       return llvm::None;
-    return memodb_value(bid_to_cid(stmt.columnInt(0)));
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
+    return bid_to_cid(stmt.columnInt(0));
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
     sqlite3 *db = get_db();
     auto funcid = get_funcid(Call->Name);
     auto Args = encodeArgs(*Call);
@@ -598,7 +603,7 @@ llvm::Optional<memodb_value> sqlite_db::getOptional(const memodb_name &name) {
     stmt.bind_blob(2, Args);
     if (!checkRow(stmt.step()))
       return llvm::None;
-    return memodb_value(bid_to_cid(stmt.columnInt(0)));
+    return bid_to_cid(stmt.columnInt(0));
   } else {
     llvm_unreachable("impossible memodb_name type");
   }

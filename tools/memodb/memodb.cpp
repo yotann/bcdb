@@ -107,10 +107,7 @@ static CID ReadRef(memodb_db &Db, llvm::StringRef URI) {
     Buffer = Err(errorOrToExpected(MemoryBuffer::getFile(Parsed.Path)));
   } else {
     memodb_name Name = GetNameFromURI(URI);
-    if (CID *Ref = std::get_if<CID>(&Name))
-      return *Ref;
-    else
-      return Db.get(Name).as_ref();
+    return Db.resolve(Name);
   }
   memodb_value Value = memodb_value::load_cbor(
       {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
@@ -248,7 +245,7 @@ static int Export() {
       exportRef(*Ref);
       IDs.array_items().emplace_back(*Ref);
     } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-      Heads[Head->Name] = Db->get(Name);
+      Heads[Head->Name] = Db->resolve(Name);
       exportRef(Heads[Head->Name].as_ref());
     } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
       memodb_value &FuncCalls = Calls[Call->Name];
@@ -262,9 +259,9 @@ static int Export() {
         Key += std::string(Arg) + "/";
       }
       Key.pop_back();
-      auto Result = Db->get(Name);
+      auto Result = Db->resolve(Name);
       FuncCalls[Key] = memodb_value::map({{"args", Args}, {"result", Result}});
-      exportRef(Result.as_ref());
+      exportRef(Result);
     } else {
       llvm_unreachable("impossible memodb_name type");
     }
@@ -329,9 +326,8 @@ static int Export() {
 static int Get() {
   auto Name = GetNameFromURI(SourceURI);
   auto Db = memodb_db_open(GetUri());
-  auto Value = Db->getOptional(Name);
-  if (Value && !std::holds_alternative<CID>(Name))
-    Value = Db->getOptional(Value->as_ref());
+  auto CID = Db->resolveOptional(Name);
+  auto Value = CID ? Db->getOptional(*CID) : None;
   if (Value)
     WriteValue(*Value);
   else
@@ -446,13 +442,13 @@ static int Transfer() {
     if (const CID *Ref = std::get_if<CID>(&Name)) {
       transferRef(*Ref);
     } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-      auto Result = SourceDb->get(Name).as_ref();
+      auto Result = SourceDb->resolve(Name);
       transferRef(Result);
       TargetDb->set(*Head, Result);
     } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
       for (const CID &Arg : Call->Args)
         transferRef(Arg);
-      CID Result = SourceDb->get(Name).as_ref();
+      CID Result = SourceDb->resolve(Name);
       transferRef(Result);
       TargetDb->set(*Call, Result);
     } else {

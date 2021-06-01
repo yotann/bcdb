@@ -295,7 +295,9 @@ class memodb_db {
 public:
   virtual ~memodb_db() {}
 
-  virtual llvm::Optional<memodb_value> getOptional(const memodb_name &name) = 0;
+  virtual llvm::Optional<memodb_value> getOptional(const memodb::CID &CID) = 0;
+  virtual llvm::Optional<memodb::CID>
+  resolveOptional(const memodb_name &Name) = 0;
   virtual memodb::CID put(const memodb_value &value) = 0;
   virtual void set(const memodb_name &Name, const memodb::CID &ref) = 0;
   virtual std::vector<memodb_name> list_names_using(const memodb::CID &ref) = 0;
@@ -307,14 +309,27 @@ public:
   virtual void head_delete(const memodb_head &Head) = 0;
   virtual void call_invalidate(llvm::StringRef name) = 0;
 
-  virtual bool has(const memodb_name &name) {
-    return getOptional(name).hasValue();
+  virtual bool has(const memodb::CID &CID) {
+    return getOptional(CID).hasValue();
+  }
+  virtual bool has(const memodb_name &Name) {
+    if (const memodb::CID *CID = std::get_if<memodb::CID>(&Name))
+      return has(*CID);
+    return resolveOptional(Name).hasValue();
   }
 
-  memodb_value get(const memodb_name &name) { return *getOptional(name); }
+  memodb_value get(const memodb::CID &CID) { return *getOptional(CID); }
+  llvm::Optional<memodb_value> getOptional(const memodb_name &Name) {
+    auto CID = resolveOptional(Name);
+    return CID ? getOptional(*CID) : llvm::None;
+  }
+  memodb_value get(const memodb_name &Name) { return get(resolve(Name)); }
+  memodb::CID resolve(const memodb_name &Name) {
+    return *resolveOptional(Name);
+  }
 
   memodb::CID head_get(llvm::StringRef name) {
-    return get(memodb_head(name)).as_ref();
+    return resolve(memodb_head(name));
   }
 
   void head_set(llvm::StringRef name, const memodb::CID &ref) {
@@ -349,12 +364,12 @@ public:
   template <typename F, typename... Targs>
   memodb::CID call_or_lookup_ref(llvm::StringRef name, F func, Targs... Fargs) {
     memodb_call Call(name, {Fargs...});
-    auto ref = getOptional(Call);
+    auto ref = resolveOptional(Call);
     if (!ref) {
       ref = put(func(*this, get(Fargs)...));
       call_set(name, {Fargs...}, ref);
     }
-    return ref->as_ref();
+    return *ref;
   }
 
   template <typename F, typename... Targs>
@@ -362,8 +377,8 @@ public:
                                     Targs... Fargs) {
     memodb_call Call(name, {Fargs...});
     memodb_value value;
-    if (auto ref = getOptional(Call)) {
-      value = get(ref->as_ref());
+    if (auto ref = resolveOptional(Call)) {
+      value = get(*ref);
     } else {
       value = func(*this, get(Fargs)...);
       call_set(name, {Fargs...}, put(value));

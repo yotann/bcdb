@@ -392,13 +392,13 @@ static int Evaluate() {
     args.push_back(*CID::parse(arg_id));
   }
 
-  auto result = db->get_db().getOptional(memodb_call(FuncName, args));
+  auto result = db->get_db().resolveOptional(memodb_call(FuncName, args));
   if (!result) {
     Err(make_error<StringError>("Can't evaluate function " + FuncName,
                                 errc::invalid_argument));
   }
 
-  outs() << llvm::StringRef(result->as_ref()) << "\n";
+  outs() << llvm::StringRef(*result) << "\n";
   return 0;
 }
 

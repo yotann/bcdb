@@ -93,7 +93,8 @@ public:
   void open(llvm::StringRef uri, bool create_if_missing);
   ~RocksDBStore() override;
 
-  llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
+  llvm::Optional<memodb_value> getOptional(const CID &CID) override;
+  llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
   CID put(const memodb_value &value) override;
   void set(const memodb_name &Name, const CID &ref) override;
   std::vector<memodb_name> list_names_using(const CID &ref) override;
@@ -305,27 +306,30 @@ RocksDBStore::~RocksDBStore() {
   checkStatus(DB->Close());
 }
 
-llvm::Optional<memodb_value>
-RocksDBStore::getOptional(const memodb_name &name) {
-  if (const CID *Ref = std::get_if<CID>(&name)) {
-    if (Ref->isIdentity())
-      return memodb_value::loadFromIPLD(*Ref, {});
-    rocksdb::PinnableSlice Fetched;
-    if (!checkFound(
-            DB->Get({}, BlocksFamily, makeSlice(Ref->asBytes()), &Fetched)))
-      return {};
-    return memodb_value::loadFromIPLD(*Ref, makeBytes(Fetched));
-  } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
+llvm::Optional<memodb_value> RocksDBStore::getOptional(const CID &CID) {
+  if (CID.isIdentity())
+    return memodb_value::loadFromIPLD(CID, {});
+  rocksdb::PinnableSlice Fetched;
+  if (!checkFound(
+          DB->Get({}, BlocksFamily, makeSlice(CID.asBytes()), &Fetched)))
+    return {};
+  return memodb_value::loadFromIPLD(CID, makeBytes(Fetched));
+}
+
+llvm::Optional<CID> RocksDBStore::resolveOptional(const memodb_name &Name) {
+  if (const CID *Ref = std::get_if<CID>(&Name)) {
+    return *Ref;
+  } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(DB->Get({}, HeadsFamily, Head->Name, &Fetched)))
       return {};
-    return memodb_value(*CID::fromBytes(makeBytes(Fetched)));
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
+    return *CID::fromBytes(makeBytes(Fetched));
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
     auto Key = makeKeyForCall(*Call);
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(DB->Get({}, CallsFamily, Key, &Fetched)))
       return {};
-    return memodb_value(*CID::fromBytes(makeBytes(Fetched)));
+    return *CID::fromBytes(makeBytes(Fetched));
   } else {
     llvm_unreachable("impossible memodb_name type");
   }

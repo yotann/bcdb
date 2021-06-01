@@ -27,7 +27,8 @@ public:
   void open(llvm::StringRef uri, bool create_if_missing);
   ~CARStore() override;
 
-  llvm::Optional<memodb_value> getOptional(const memodb_name &name) override;
+  llvm::Optional<memodb_value> getOptional(const CID &CID) override;
+  llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
   std::vector<memodb_name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
   void eachHead(std::function<bool(const memodb_head &)> F) override;
@@ -156,27 +157,31 @@ CARStore::~CARStore() {
   llvm::sys::fs::closeFile(FileHandle);
 }
 
-llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
-  if (const CID *CIDValue = std::get_if<CID>(&name)) {
-    if (CIDValue->isIdentity())
-      return memodb_value::loadFromIPLD(*CIDValue, {});
-    if (!BlockPositions.count(*CIDValue))
-      return {};
-    auto Pos = BlockPositions[*CIDValue];
-    auto BlockSize = *readVarInt(&Pos);
-    auto BlockEnd = Pos + BlockSize;
-    CID CIDFromFile = readCID(&Pos);
-    if (*CIDValue != CIDFromFile)
-      llvm::report_fatal_error("CID mismatch (file changed while reading?)");
-    std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
-    if (!readBytes(Buffer, &Pos))
-      llvm::report_fatal_error("Unexpected end of file in content");
-    return memodb_value::loadFromIPLD(*CIDValue, Buffer);
-  } else if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
-    if (Root["heads"].map_items().count(Head->Name))
-      return Root["heads"][Head->Name];
+llvm::Optional<memodb_value> CARStore::getOptional(const CID &CID) {
+  if (CID.isIdentity())
+    return memodb_value::loadFromIPLD(CID, {});
+  if (!BlockPositions.count(CID))
     return {};
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&name)) {
+  auto Pos = BlockPositions[CID];
+  auto BlockSize = *readVarInt(&Pos);
+  auto BlockEnd = Pos + BlockSize;
+  ::CID CIDFromFile = readCID(&Pos);
+  if (CID != CIDFromFile)
+    llvm::report_fatal_error("CID mismatch (file changed while reading?)");
+  std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
+  if (!readBytes(Buffer, &Pos))
+    llvm::report_fatal_error("Unexpected end of file in content");
+  return memodb_value::loadFromIPLD(CID, Buffer);
+}
+
+llvm::Optional<memodb::CID> CARStore::resolveOptional(const memodb_name &Name) {
+  if (const CID *CIDValue = std::get_if<CID>(&Name)) {
+    return *CIDValue;
+  } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+    if (Root["heads"].map_items().count(Head->Name))
+      return Root["heads"][Head->Name].as_ref();
+    return {};
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
     if (!Root["calls"].map_items().count(Call->Name))
       return {};
     const auto &AllCalls = Root["calls"][Call->Name];
@@ -186,7 +191,7 @@ llvm::Optional<memodb_value> CARStore::getOptional(const memodb_name &name) {
     Key.pop_back();
     if (!AllCalls.map_items().count(Key))
       return {};
-    return AllCalls[Key]["result"];
+    return AllCalls[Key]["result"].as_ref();
   } else {
     llvm_unreachable("impossible memodb_name type");
   }
