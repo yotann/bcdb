@@ -153,6 +153,7 @@ endif()
 
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/third_party/magic_enum)
 
 set(GOOGLETEST_VERSION 1.10.0)
 add_subdirectory(third_party/googletest)

@@ -38,6 +38,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <nngpp/nngpp.h>
@@ -48,9 +49,12 @@
 #include "bcdb/BCDB.h"
 #include "bcdb/LLVMCompat.h"
 #include "bcdb/Outlining/Candidates.h"
+#include "bcdb/Outlining/CostModel.h"
 #include "bcdb/Outlining/Dependence.h"
 #include "bcdb/Outlining/Extractor.h"
+#include "bcdb/Outlining/LinearProgram.h"
 #include "bcdb/Split.h"
+#include "memodb/Multibase.h"
 #include "memodb/memodb.h"
 
 using namespace bcdb;
@@ -66,6 +70,10 @@ static cl::SubCommand CollateCommand("collate", "Organize candidates by type");
 
 static cl::SubCommand EstimateCommand("estimate",
                                       "Estimate benefit of outlining");
+
+static cl::SubCommand
+    MakeCostModelCommand("make-cost-model",
+                         "Make a linear program for the cost model");
 
 static cl::SubCommand MeasureCommand("measure",
                                      "Measure code size of candidates");
@@ -928,6 +936,58 @@ static int Estimate() {
   return 0;
 }
 
+// smout make-cost-model
+
+static cl::opt<unsigned>
+    ModelLimit("limit", cl::init(0),
+               cl::desc("Maximum number of compiled functions to use"),
+               cl::sub(MakeCostModelCommand));
+
+static int MakeCostModel() {
+  ExitOnError Err("smout make-cost-model: ");
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  unsigned NumSeen = 0;
+  LinearProgram Program("CostModel");
+  LinearProgram::Expr Error;
+  std::map<CostItem, LinearProgram::Var> ItemMinVars, ItemMaxVars;
+  for (CostItem Item : getAllCostItems()) {
+    auto MinVar =
+        Program.makeRealVar(("min" + getCostItemName(Item)).str(), 0, {});
+    auto MaxVar =
+        Program.makeRealVar(("max" + getCostItemName(Item)).str(), 0, {});
+    Program.addConstraint(getCostItemName(Item), MinVar <= MaxVar);
+    ItemMinVars.insert(std::make_pair(Item, MinVar));
+    ItemMaxVars.insert(std::make_pair(Item, MaxVar));
+  }
+
+  bcdb->get_db().eachCall("compiled.size", [&](const memodb_call &Call) {
+    std::string ID = Call.Args[0].asString(Multibase::Base32);
+    auto M = Err(bcdb->GetFunctionById(ID));
+    const auto &F = getSoleDefinition(*M);
+    CostModel Model;
+    Model.addFunction(F);
+    LinearProgram::Expr EstimatedMinSize, EstimatedMaxSize;
+    for (const auto &Item : Model.getItems()) {
+      EstimatedMinSize += Item.second * ItemMinVars.at(Item.first);
+      EstimatedMaxSize += Item.second * ItemMaxVars.at(Item.first);
+    }
+    auto ActualSize =
+        bcdb->get_db().get(bcdb->get_db().get(Call).as_ref()).as_integer();
+    Program.addConstraint("max" + ID, EstimatedMaxSize >= ActualSize);
+    Program.addConstraint("min" + ID, EstimatedMinSize <= ActualSize);
+    Error += std::move(EstimatedMaxSize) - std::move(EstimatedMinSize);
+    NumSeen++;
+    return ModelLimit != 0 && NumSeen >= ModelLimit;
+  });
+  Program.setObjective("error", std::move(Error));
+
+  llvm::errs() << "cost model includes " << NumSeen << " functions\n";
+
+  Program.writeFreeMPS(llvm::outs());
+
+  return 0;
+}
+
 // smout measure
 
 static memodb_value evaluate_compiled(memodb_db &db, const memodb_value &func) {
@@ -1110,6 +1170,8 @@ int main(int argc, char **argv) {
     return Collate();
   } else if (EstimateCommand) {
     return Estimate();
+  } else if (MakeCostModelCommand) {
+    return MakeCostModel();
   } else if (MeasureCommand) {
     return Measure();
   } else if (ShowGroupsCommand) {

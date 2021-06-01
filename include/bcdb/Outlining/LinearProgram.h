@@ -132,6 +132,24 @@ inline LinearProgram::Constraint operator==(LinearProgram::Expr &&A,
   return Result;
 }
 
+inline LinearProgram::Constraint operator<=(const LinearProgram::Expr &A,
+                                            const LinearProgram::Expr &B) {
+  LinearProgram::Expr LHS = A;
+  return std::move(LHS) <= B;
+}
+
+inline LinearProgram::Constraint operator>=(const LinearProgram::Expr &A,
+                                            const LinearProgram::Expr &B) {
+  LinearProgram::Expr LHS = A;
+  return std::move(LHS) >= B;
+}
+
+inline LinearProgram::Constraint operator==(const LinearProgram::Expr &A,
+                                            const LinearProgram::Expr &B) {
+  LinearProgram::Expr LHS = A;
+  return std::move(LHS) == B;
+}
+
 } // namespace bcdb
 
 #endif // BCDB_LINEARPROGRAM_H

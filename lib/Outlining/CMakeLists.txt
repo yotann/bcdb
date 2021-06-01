@@ -5,6 +5,7 @@ set(LLVM_LINK_COMPONENTS
 )
 add_llvm_loadable_module(BCDBOutliningPlugin
   Candidates.cpp
+  CostModel.cpp
   Dependence.cpp
   Extractor.cpp
   LinearProgram.cpp
@@ -14,6 +15,7 @@ add_llvm_loadable_module(BCDBOutliningPlugin
 )
 add_llvm_library(BCDBOutlining
   Candidates.cpp
+  CostModel.cpp
   Dependence.cpp
   Extractor.cpp
   LinearProgram.cpp
