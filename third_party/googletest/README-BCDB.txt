@@ -1,5 +1,5 @@
 This directory contains Google Test downloaded from
-https://github.com/google/googletest on 2020-02-15.
+https://github.com/google/googletest on 2021-06-01.
 
 Unnecessary files have been removed.
 
