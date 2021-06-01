@@ -5,4 +5,6 @@ function(add_llvm_unittest test_dirname)
 endfunction()
 
 add_subdirectory(MemoDB)
+if( ${LLVM_VERSION_MAJOR} GREATER 8 )
 add_subdirectory(Outlining)
+endif()
