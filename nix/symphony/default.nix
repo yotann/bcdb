@@ -1,4 +1,4 @@
-{ stdenv, fetchFromGitHub, pkg-config, cgl, clp, coinutils, osi }:
+{ stdenv, lib, fetchFromGitHub, pkg-config, cgl, clp, coinutils, osi }:
 
 stdenv.mkDerivation rec {
   pname = "symphony";
@@ -17,7 +17,7 @@ stdenv.mkDerivation rec {
   doCheck = true;
   enableParallelBuilding = true;
 
-  meta = with stdenv.lib; {
+  meta = with lib; {
     homepage = "https://github.com/coin-or/SYMPHONY";
     description = "Generic MILP solver, callable library, and extensible framework";
     license = licenses.epl10;

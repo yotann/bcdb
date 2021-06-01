@@ -1,4 +1,4 @@
-{ stdenv, fetchFromGitHub, pkg-config, clp, coinutils, osi }:
+{ stdenv, lib, fetchFromGitHub, pkg-config, clp, coinutils, osi }:
 
 stdenv.mkDerivation rec {
   pname = "cgl";
@@ -17,7 +17,7 @@ stdenv.mkDerivation rec {
   doCheck = true;
   enableParallelBuilding = true;
 
-  meta = with stdenv.lib; {
+  meta = with lib; {
     homepage = "https://github.com/coin-or/Cgl";
     description = "COIN-OR Cut Generation Library";
     license = licenses.epl10;

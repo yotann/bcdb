@@ -1,4 +1,4 @@
-{ stdenv, fetchFromGitHub }:
+{ stdenv, lib, fetchFromGitHub }:
 
 stdenv.mkDerivation rec {
   pname = "coinutils";
@@ -14,7 +14,7 @@ stdenv.mkDerivation rec {
   doCheck = true;
   enableParallelBuilding = true;
 
-  meta = with stdenv.lib; {
+  meta = with lib; {
     homepage = "https://www.github.com/coin-or/CoinUtils";
     description = "Collection of utilities used by other COIN-OR projects";
     license = licenses.epl10;

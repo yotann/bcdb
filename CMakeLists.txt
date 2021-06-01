@@ -125,9 +125,12 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 include(HandleLLVMOptions)
 set(LLVM_REQUIRES_EH ON) # exceptions needed by nngpp
+set(LLVM_REQUIRES_RTTI ON) # RTTI needed by exceptions
 
 # Put libs and bins in expected place.
 # XXX: We don't setup CMAKE_CFG_INTDIR to distinguish Release/Debug/etc.
+set(LLVM_TOOLS_INSTALL_DIR
+  ${CMAKE_INSTALL_BINDIR})
 set(LLVM_RUNTIME_OUTPUT_INTDIR
     ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
 set(LLVM_LIBRARY_OUTPUT_INTDIR
