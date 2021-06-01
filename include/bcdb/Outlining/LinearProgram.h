@@ -89,23 +89,23 @@ private:
 inline LinearProgram::Expr operator+(LinearProgram::Expr &&A,
                                      const LinearProgram::Expr &B) {
   A += B;
-  return A;
+  return std::move(A);
 }
 
 inline LinearProgram::Expr operator-(LinearProgram::Expr &&A,
                                      const LinearProgram::Expr &B) {
   A -= B;
-  return A;
+  return std::move(A);
 }
 
 inline LinearProgram::Expr operator*(LinearProgram::Expr &&A, double B) {
   A *= B;
-  return A;
+  return std::move(A);
 }
 
 inline LinearProgram::Expr operator*(double A, LinearProgram::Expr &&B) {
   B *= A;
-  return B;
+  return std::move(B);
 }
 
 inline LinearProgram::Constraint operator<=(LinearProgram::Expr &&A,

@@ -16,7 +16,8 @@ std::vector<CostItem> bcdb::getAllCostItems() {
 }
 
 llvm::StringRef bcdb::getCostItemName(CostItem Item) {
-  return magic_enum::enum_name(Item);
+  auto Name = magic_enum::enum_name(Item);
+  return llvm::StringRef(Name.data(), Name.size());
 }
 
 CostModel::CostModel() {}

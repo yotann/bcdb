@@ -273,9 +273,11 @@ Function *OutliningExtractor::createNewCaller() {
   // Extract outputs.
   DenseMap<size_t, Value *> OutputValues;
   unsigned ResultI = 0;
+#if 0
   Value *ReturnValue = nullptr;
   if (OutliningReturn)
     ReturnValue = ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
+#endif
   for (size_t i : ExternalOutputs.set_bits())
     OutputValues[i] =
         ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
