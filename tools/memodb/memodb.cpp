@@ -153,20 +153,6 @@ static void WriteValue(const Node &Value) {
   }
 }
 
-// helper functions
-
-template <typename T> void walkRefs(const Node &Value, T F) {
-  if (Value.type() == Node::REF) {
-    F(Value.as_ref());
-  } else if (Value.type() == Node::ARRAY) {
-    for (const Node &Item : Value.array_items())
-      walkRefs(Item, F);
-  } else if (Value.type() == Node::MAP) {
-    for (const auto &Item : Value.map_items())
-      walkRefs(Item.second, F);
-  }
-}
-
 // memodb export
 
 static cl::list<std::string> NamesToExport(cl::Positional, cl::ZeroOrMore,
@@ -198,18 +184,20 @@ static int Export() {
       OutputFile->os().write((Value & 0x7f) | 0x80);
     OutputFile->os().write(Value);
   };
-  auto getBlockSize = [&](const std::pair<CID, Node::bytes_t> &Block) {
-    size_t Result = Block.second.size() + Block.first.asBytes().size();
-    Result += getVarIntSize(Result);
-    return Result;
-  };
-  auto writeBlock = [&](const std::pair<CID, Node::bytes_t> &Block) {
-    std::vector<std::uint8_t> Buffer(Block.first.asBytes());
-    Buffer.insert(Buffer.end(), Block.second.begin(), Block.second.end());
-    writeVarInt(Buffer.size());
-    OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
-                           Buffer.size());
-  };
+  auto getBlockSize =
+      [&](const std::pair<CID, std::vector<std::uint8_t>> &Block) {
+        size_t Result = Block.second.size() + Block.first.asBytes().size();
+        Result += getVarIntSize(Result);
+        return Result;
+      };
+  auto writeBlock =
+      [&](const std::pair<CID, std::vector<std::uint8_t>> &Block) {
+        std::vector<std::uint8_t> Buffer(Block.first.asBytes());
+        Buffer.insert(Buffer.end(), Block.second.begin(), Block.second.end());
+        writeVarInt(Buffer.size());
+        OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
+                               Buffer.size());
+      };
 
   auto Db = memodb_db_open(GetUri());
 
@@ -233,33 +221,35 @@ static int Export() {
     auto Block = Value.saveAsIPLD();
     if (!Block.first.isIdentity())
       writeBlock(Block);
-    walkRefs(Value, exportRef);
+    Value.eachLink(exportRef);
     return Block.first;
   };
 
-  Node Root = Node::map();
-  Root["format"] = "MemoDB CAR";
-  Root["version"] = 0;
-  Node &Calls = Root["calls"] = Node::map();
-  Node &Heads = Root["heads"] = Node::map();
-  Node &IDs = Root["ids"] = Node::array();
+  Node Root = Node(node_map_arg, {{"format", "MemoDB CAR"},
+                                  {"version", 0},
+                                  {"calls", Node(node_map_arg)},
+                                  {"heads", Node(node_map_arg)},
+                                  {"ids", Node(node_list_arg)}});
+  Node &Calls = Root["calls"];
+  Node &Heads = Root["heads"];
+  Node &IDs = Root["ids"];
   auto addName = [&](const memodb_name &Name) {
     errs() << "exporting " << Name << "\n";
     if (const CID *Ref = std::get_if<CID>(&Name)) {
       exportRef(*Ref);
-      IDs.array_items().emplace_back(*Ref);
+      IDs.emplace_back(*Ref);
     } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
       Heads[Head->Name] = Db->resolve(Name);
-      exportRef(Heads[Head->Name].as_ref());
+      exportRef(Heads[Head->Name].as_link());
     } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
       Node &FuncCalls = Calls[Call->Name];
       if (FuncCalls == Node{})
         FuncCalls = Node::map();
-      Node Args = Node::array();
+      Node Args = Node(node_list_arg);
       std::string Key;
       for (const CID &Arg : Call->Args) {
         exportRef(Arg);
-        Args.array_items().emplace_back(Arg);
+        Args.emplace_back(Arg);
         Key += std::string(Arg) + "/";
       }
       Key.pop_back();
@@ -288,7 +278,8 @@ static int Export() {
 
   CID RootRef = exportValue(Root);
 
-  Node Header = Node::map({{"roots", Node::array({RootRef})}, {"version", 1}});
+  Node Header =
+      Node::map({{"roots", Node(node_list_arg, {RootRef})}, {"version", 1}});
   std::vector<std::uint8_t> Buffer;
   Header.save_cbor(Buffer);
   OutputFile->os().seek(0);
@@ -542,7 +533,7 @@ static int Transfer() {
     if (!TargetDb->has(Ref)) {
       Node Value = SourceDb->get(Ref);
       TargetDb->put(Value);
-      walkRefs(Value, transferRef);
+      Value.eachLink(transferRef);
     }
   };
 

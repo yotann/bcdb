@@ -54,17 +54,19 @@ TEST(ValuePrintTest, String) {
   test_print("\"foo bar\"", Node("foo bar"));
   test_print("\"\\\"\"", Node("\""));
   test_print("\"\\\\\"", Node("\\"));
-  test_print("\"\\u0000\\n\"", Node::string(llvm::StringRef("\x00\n", 2)));
+  test_print("\"\\u0000\\n\"",
+             Node(utf8_string_arg, llvm::StringRef("\x00\n", 2)));
   test_print("\"\\u0001\\u007f\"",
-             Node::string(llvm::StringRef("\x01\x7f", 2)));
+             Node(utf8_string_arg, llvm::StringRef("\x01\x7f", 2)));
   test_print("\"\xe2\x80\xa2\xf0\x9d\x84\x9e\"",
-             Node::string(llvm::StringRef("\xe2\x80\xa2\xf0\x9d\x84\x9e", 7)));
+             Node(utf8_string_arg,
+                  llvm::StringRef("\xe2\x80\xa2\xf0\x9d\x84\x9e", 7)));
 }
 
 TEST(ValuePrintTest, Array) {
-  test_print("[]", Node::array());
-  test_print("[1]", Node::array({1}));
-  test_print("[1, 2]", Node::array({1, 2}));
+  test_print("[]", Node(node_list_arg));
+  test_print("[1]", Node(node_list_arg, {1}));
+  test_print("[1, 2]", Node(node_list_arg, {1, 2}));
 }
 
 TEST(ValuePrintTest, Map) {

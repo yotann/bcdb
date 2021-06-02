@@ -149,22 +149,15 @@ void RocksDBStore::deleteRef(BatchT &Batch, char Type,
 void RocksDBStore::addRefs(rocksdb::WriteBatch &Batch, char Type,
                            const llvm::ArrayRef<uint8_t> &Key,
                            const Node &Value) {
-  if (Value.type() == Node::REF) {
-    if (Value.as_ref().isIdentity())
-      return;
-    addRef(Batch, Type, makeSlice(Key), Value.as_ref());
-  } else if (Value.type() == Node::ARRAY) {
-    for (const Node &Item : Value.array_items())
-      addRefs(Batch, Type, Key, Item);
-  } else if (Value.type() == Node::MAP) {
-    for (const auto &Item : Value.map_items())
-      addRefs(Batch, Type, Key, Item.second);
-  }
+  Value.eachLink([&](const auto &Link) {
+    if (!Link.isIdentity())
+      addRef(Batch, Type, makeSlice(Key), Link);
+  });
 }
 
 std::string RocksDBStore::makeKeyForCall(const memodb_call &Call) {
   std::vector<std::uint8_t> Buffer;
-  Node(Call.Name).save_cbor(Buffer);
+  Node(utf8_string_arg, Call.Name).save_cbor(Buffer);
   std::string Key = makeSlice(Buffer).ToString();
   for (const CID &Arg : Call.Args) {
     auto CID = Arg.asBytes();
@@ -442,7 +435,7 @@ void RocksDBStore::eachHead(std::function<bool(const memodb_head &)> F) {
 void RocksDBStore::eachCall(llvm::StringRef Func,
                             std::function<bool(const memodb_call &)> F) {
   std::vector<std::uint8_t> Prefix;
-  Node::string(Func).save_cbor(Prefix);
+  Node(utf8_string_arg, Func).save_cbor(Prefix);
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->Seek(makeSlice(Prefix)); Iterator->Valid(); Iterator->Next()) {
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))
@@ -472,7 +465,7 @@ void RocksDBStore::head_delete(const memodb_head &Head) {
 
 void RocksDBStore::call_invalidate(llvm::StringRef name) {
   std::vector<std::uint8_t> Prefix;
-  Node::string(name).save_cbor(Prefix);
+  Node(utf8_string_arg, name).save_cbor(Prefix);
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->Seek(makeSlice(Prefix)); Iterator->Valid(); Iterator->Next()) {
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))

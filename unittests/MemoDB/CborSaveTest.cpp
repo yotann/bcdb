@@ -87,30 +87,32 @@ TEST(CborSaveTest, String) {
   test_save(Node("\U00010151"), {0x64, 0xf0, 0x90, 0x85, 0x91});
 }
 
-TEST(CborSaveTest, Array) {
-  test_save(Node::array(), {0x80});
-  test_save(Node::array({1, 2, 3}), {0x83, 0x01, 0x02, 0x03});
-  test_save(Node::array({1, Node::array({2, 3}), Node::array({4, 5})}),
+TEST(CborSaveTest, List) {
+  test_save(Node(node_list_arg), {0x80});
+  test_save(Node(node_list_arg, {1, 2, 3}), {0x83, 0x01, 0x02, 0x03});
+  test_save(Node(node_list_arg,
+                 {1, Node(node_list_arg, {2, 3}), Node(node_list_arg, {4, 5})}),
             {0x83, 0x01, 0x82, 0x02, 0x03, 0x82, 0x04, 0x05});
-  test_save(Node::array({1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13,
-                         14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}),
-            {0x98, 0x19, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-             0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
-             0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x18, 0x18, 0x19});
+  test_save(
+      Node(node_list_arg, {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13,
+                           14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}),
+      {0x98, 0x19, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+       0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
+       0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x18, 0x18, 0x19});
 }
 
 TEST(CborSaveTest, Map) {
-  test_save(Node::map(), {0xa0});
-  test_save(
-      Node::map({{"a", "A"}, {"b", "B"}, {"c", "C"}, {"d", "D"}, {"e", "E"}}),
-      {0xa5, 0x61, 0x61, 0x61, 0x41, 0x61, 0x62, 0x61, 0x42, 0x61, 0x63,
-       0x61, 0x43, 0x61, 0x64, 0x61, 0x44, 0x61, 0x65, 0x61, 0x45});
+  test_save(Node(node_map_arg), {0xa0});
+  test_save(Node(node_map_arg,
+                 {{"a", "A"}, {"b", "B"}, {"c", "C"}, {"d", "D"}, {"e", "E"}}),
+            {0xa5, 0x61, 0x61, 0x61, 0x41, 0x61, 0x62, 0x61, 0x42, 0x61, 0x63,
+             0x61, 0x43, 0x61, 0x64, 0x61, 0x44, 0x61, 0x65, 0x61, 0x45});
 }
 
 TEST(CborSaveTest, Mixed) {
-  test_save(Node::array({"a", Node::map({{"b", "c"}})}),
+  test_save(Node(node_list_arg, {"a", Node(node_map_arg, {{"b", "c"}})}),
             {0x82, 0x61, 0x61, 0xa1, 0x61, 0x62, 0x61, 0x63});
-  test_save(Node::map({{"a", 1}, {"b", Node::array({2, 3})}}),
+  test_save(Node(node_map_arg, {{"a", 1}, {"b", Node(node_list_arg, {2, 3})}}),
             {0xa2, 0x61, 0x61, 0x01, 0x61, 0x62, 0x82, 0x02, 0x03});
 }
 
@@ -129,16 +131,17 @@ TEST(CborSaveTest, Ref) {
 }
 
 TEST(CborSaveTest, MapOrdering) {
-  test_save(Node::map({
-                {"", {}},
-                {"a", {}},
-                {"m", {}},
-                {"bb", {}},
-                {"nn", {}},
-                {"\xc2\x80", {}},
-                {"ccc", {}},
-                {"ooo", {}},
-            }),
+  test_save(Node(node_map_arg,
+                 {
+                     {"", {}},
+                     {"a", {}},
+                     {"m", {}},
+                     {"bb", {}},
+                     {"nn", {}},
+                     {"\xc2\x80", {}},
+                     {"ccc", {}},
+                     {"ooo", {}},
+                 }),
             {
                 0xa8, 0x60, 0xf6, 0x61, 0x61, 0xf6, 0x61, 0x6d,
                 0xf6, 0x62, 0x62, 0x62, 0xf6, 0x62, 0x6e, 0x6e,

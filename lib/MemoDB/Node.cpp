@@ -42,10 +42,19 @@ std::string memodb::utf8ToByteString(llvm::StringRef Str) {
 }
 
 void Node::validateUTF8() const {
-  auto Str = as<string_t>();
+  auto Str = std::get<string_storage>(variant_);
   auto Ptr = reinterpret_cast<const llvm::UTF8 *>(Str.data());
   if (!llvm::isLegalUTF8String(&Ptr, Ptr + Str.size()))
     llvm::report_fatal_error("invalid UTF-8 in string value");
+}
+
+void Node::validateKeysUTF8() const {
+  auto Map = std::get<map>(variant_);
+  for (const auto &Item : Map) {
+    auto Ptr = reinterpret_cast<const llvm::UTF8 *>(Item.key().data());
+    if (!llvm::isLegalUTF8String(&Ptr, Ptr + Item.key().size()))
+      llvm::report_fatal_error("invalid UTF-8 in string value");
+  }
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
@@ -72,10 +81,10 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
   };
 
   std::visit(overloaded{
-                 [&](const Node::null_t &) { os << "null"; },
-                 [&](const Node::bool_t &x) { os << (x ? "true" : "false"); },
-                 [&](const Node::integer_t &x) { os << x; },
-                 [&](const Node::float_t &x) {
+                 [&](const std::monostate &) { os << "null"; },
+                 [&](const bool &x) { os << (x ? "true" : "false"); },
+                 [&](const std::int64_t &x) { os << x; },
+                 [&](const double &x) {
                    if (std::isnan(x))
                      os << "NaN";
                    else if (std::isinf(x))
@@ -83,7 +92,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                    else
                      os << x;
                  },
-                 [&](const Node::bytes_t &x) {
+                 [&](const Node::bytes_storage &x) {
                    if (std::all_of(x.begin(), x.end(), [](std::uint8_t b) {
                          return (b >= 32 && b <= 126) || b == '\n' ||
                                 b == '\r' || b == '\t';
@@ -91,7 +100,8 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                      // NOTE: implementations are inconsistent about how ' and "
                      // should be escaped. We escape ' as \' and leave " as-is.
                      os << "'";
-                     print_escaped(value.as_bytestring(), '\'');
+                     print_escaped(value.as<llvm::StringRef>(byte_string_arg),
+                                   '\'');
                      os << "'";
                    } else {
                      os << "h'";
@@ -103,12 +113,12 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                      os << "'";
                    }
                  },
-                 [&](const Node::string_t &x) {
+                 [&](const Node::string_storage &x) {
                    os << '"';
                    print_escaped(x, '"');
                    os << '"';
                  },
-                 [&](const Node::ref_t &x) {
+                 [&](const CID &x) {
                    os << "42(h'00"; // DAG-CBOR required multibase prefix
                    for (std::uint8_t b : x.asBytes()) {
                      char buf[3];
@@ -117,7 +127,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                    }
                    os << "')";
                  },
-                 [&](const Node::array_t &x) {
+                 [&](const Node::list &x) {
                    bool first = true;
                    os << '[';
                    for (const auto &item : x) {
@@ -128,7 +138,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                    }
                    os << ']';
                  },
-                 [&](const Node::map_t &x) {
+                 [&](const Node::map &x) {
                    bool first = true;
                    os << '{';
                    for (const auto &item : x) {
@@ -136,8 +146,8 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                        os << ", ";
                      first = false;
                      os << '"';
-                     print_escaped(item.first, '"');
-                     os << "\": " << item.second;
+                     print_escaped(item.key(), '"');
+                     os << "\": " << item.value();
                    }
                    os << '}';
                  },
@@ -154,12 +164,12 @@ llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os,
   return os;
 }
 
-static Node::float_t decode_float(std::uint64_t value, int total_size,
-                                  int mantissa_size, int exponent_bias) {
+static double decode_float(std::uint64_t value, int total_size,
+                           int mantissa_size, int exponent_bias) {
   std::uint64_t exponent_mask = (1ull << (total_size - mantissa_size - 1)) - 1;
   std::uint64_t exponent = (value >> mantissa_size) & exponent_mask;
   std::uint64_t mantissa = value & ((1ull << mantissa_size) - 1);
-  Node::float_t result;
+  double result;
   if (exponent == 0)
     result =
         std::ldexp(mantissa, 1 - (mantissa_size + exponent_bias)); // denormal
@@ -171,8 +181,8 @@ static Node::float_t decode_float(std::uint64_t value, int total_size,
   return value & (1ull << (total_size - 1)) ? -result : result;
 }
 
-static bool encode_float(std::uint64_t &result, Node::float_t value,
-                         int total_size, int mantissa_size, int exponent_bias) {
+static bool encode_float(std::uint64_t &result, double value, int total_size,
+                         int mantissa_size, int exponent_bias) {
   std::uint64_t exponent_mask = (1ull << (total_size - mantissa_size - 1)) - 1;
   int exponent;
   std::uint64_t mantissa;
@@ -204,7 +214,7 @@ static bool encode_float(std::uint64_t &result, Node::float_t value,
       }
       value = std::ldexp(value, mantissa_size);
       mantissa = (std::uint64_t)value;
-      exact = (Node::float_t)mantissa == value;
+      exact = (double)mantissa == value;
     }
   }
   result = (sign ? (1ull << (total_size - 1)) : 0) |
@@ -292,9 +302,11 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
   case 1:
     if (indefinite)
       llvm::report_fatal_error("Integers may not be indefinite");
+    if (additional > std::uint64_t(std::numeric_limits<std::int64_t>::max()))
+      llvm::report_fatal_error("Integer too large");
     return -std::int64_t(additional) - 1;
   case 2: {
-    bytes_t result;
+    bytes_storage result;
     while (next_string()) {
       result.insert(result.end(), in.data(), in.data() + additional);
       in = in.drop_front(additional);
@@ -302,44 +314,48 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     if (is_cid) {
       if (result.empty() || result[0] != 0x00)
         llvm::report_fatal_error("invalid encoded CID");
-      auto CID = CID::fromBytes(llvm::ArrayRef(result).drop_front(1));
+      auto CID =
+          CID::fromBytes(llvm::ArrayRef<std::uint8_t>(result).drop_front(1));
       if (!CID)
         llvm::report_fatal_error("invalid encoded CID");
       return *CID;
     }
-    return Node(result);
+    Node node;
+    node.variant_ = result;
+    return node;
   }
   case 3: {
-    string_t result;
+    string_storage result;
     while (next_string()) {
       result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
-    return Node::string(result);
+    return Node(utf8_string_arg, std::move(result));
   }
   case 4: {
-    array_t result;
+    list result;
     while (next_item())
       result.emplace_back(load_cbor_from_sequence(in));
     return result;
   }
   case 5: {
-    map_t result;
+    map result;
     while (next_item()) {
       Node key = load_cbor_from_sequence(in);
       std::string KeyString;
-      if (key.type() == Node::STRING)
+      if (key.kind() == Kind::String)
         KeyString = key.as_string();
-      else if (key.type() == Node::BYTES)
-        KeyString = bytesToUTF8(key.as_bytes());
-      else if (key.type() == Node::ARRAY) {
+      else if (key.kind() == Kind::Bytes)
+        KeyString =
+            bytesToUTF8(key.as<llvm::ArrayRef<std::uint8_t>>(byte_string_arg));
+      else if (key.kind() == Kind::List) {
         // Needed for legacy smout.collated values.
         std::vector<std::uint8_t> KeyBytes;
         key.save_cbor(KeyBytes);
         KeyString = bytesToUTF8(KeyBytes);
       } else
         llvm::report_fatal_error("Map keys must be strings");
-      result[KeyString] = load_cbor_from_sequence(in);
+      result.insert_or_assign(KeyString, load_cbor_from_sequence(in));
     }
     return result;
   }
@@ -395,61 +411,62 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
       out.push_back((additional >> 8 * (num_bytes - i - 1)) & 0xff);
   };
 
-  std::visit(overloaded{
-                 [&](const null_t &) { start(7, 22); },
-                 [&](const bool_t &x) { start(7, x ? 21 : 20); },
-                 [&](const integer_t &x) {
-                   if (x < 0)
-                     start(1, -(x + 1));
-                   else
-                     start(0, x);
-                 },
-                 [&](const float_t &x) {
-                   std::uint64_t additional;
-                   encode_float(additional, x, 64, 52, 1023);
-                   start(7, additional, 27);
-                 },
-                 [&](const bytes_t &x) {
-                   start(2, x.size());
-                   out.insert(out.end(), x.begin(), x.end());
-                 },
-                 [&](const string_t &x) {
-                   start(3, x.size());
-                   out.insert(out.end(), x.begin(), x.end());
-                 },
-                 [&](const ref_t &x) {
-                   auto Bytes = x.asBytes();
-                   start(6, 42); // CID tag
-                   start(2, Bytes.size() + 1);
-                   out.push_back(0x00); // DAG-CBOR requires multibase prefix
-                   out.insert(out.end(), Bytes.begin(), Bytes.end());
-                 },
-                 [&](const array_t &x) {
-                   start(4, x.size());
-                   for (const Node &item : x)
-                     item.save_cbor(out);
-                 },
-                 [&](const map_t &x) {
-                   std::vector<std::pair<bytes_t, const Node *>> items;
-                   for (const auto &item : x) {
-                     items.emplace_back(bytes_t(), &item.second);
-                     Node(item.first).save_cbor(items.back().first);
-                   }
-                   std::sort(items.begin(), items.end(),
-                             [](const auto &A, const auto &B) {
-                               if (A.first.size() != B.first.size())
-                                 return A.first.size() < B.first.size();
-                               return A.first < B.first;
-                             });
-                   start(5, items.size());
-                   for (const auto &item : items) {
-                     out.insert(out.end(), item.first.begin(),
-                                item.first.end());
-                     item.second->save_cbor(out);
-                   }
-                 },
-             },
-             variant_);
+  std::visit(
+      overloaded{
+          [&](const std::monostate &) { start(7, 22); },
+          [&](const bool &x) { start(7, x ? 21 : 20); },
+          [&](const std::int64_t &x) {
+            if (x < 0)
+              start(1, -(x + 1));
+            else
+              start(0, x);
+          },
+          [&](const double &x) {
+            std::uint64_t additional;
+            encode_float(additional, x, 64, 52, 1023);
+            start(7, additional, 27);
+          },
+          [&](const bytes_storage &x) {
+            start(2, x.size());
+            out.insert(out.end(), x.begin(), x.end());
+          },
+          [&](const string_storage &x) {
+            start(3, x.size());
+            out.insert(out.end(), x.begin(), x.end());
+          },
+          [&](const CID &x) {
+            auto Bytes = x.asBytes();
+            start(6, 42); // CID tag
+            start(2, Bytes.size() + 1);
+            out.push_back(0x00); // DAG-CBOR requires multibase prefix
+            out.insert(out.end(), Bytes.begin(), Bytes.end());
+          },
+          [&](const list &x) {
+            start(4, x.size());
+            for (const Node &item : x)
+              item.save_cbor(out);
+          },
+          [&](const map &x) {
+            std::vector<std::pair<std::vector<std::uint8_t>, const Node *>>
+                items;
+            for (const auto &item : x) {
+              items.emplace_back(std::vector<std::uint8_t>(), &item.value());
+              Node(utf8_string_arg, item.key()).save_cbor(items.back().first);
+            }
+            std::sort(items.begin(), items.end(),
+                      [](const auto &A, const auto &B) {
+                        if (A.first.size() != B.first.size())
+                          return A.first.size() < B.first.size();
+                        return A.first < B.first;
+                      });
+            start(5, items.size());
+            for (const auto &item : items) {
+              out.insert(out.end(), item.first.begin(), item.first.end());
+              item.second->save_cbor(out);
+            }
+          },
+      },
+      variant_);
 }
 
 Node Node::loadFromIPLD(const CID &CID, llvm::ArrayRef<std::uint8_t> Content) {
@@ -464,11 +481,12 @@ Node Node::loadFromIPLD(const CID &CID, llvm::ArrayRef<std::uint8_t> Content) {
   llvm::report_fatal_error("Unsupported CID content type");
 }
 
-std::pair<CID, Node::bytes_t> Node::saveAsIPLD(bool noIdentity) const {
-  bool raw = type() == BYTES;
-  bytes_t Bytes;
+std::pair<CID, std::vector<std::uint8_t>>
+Node::saveAsIPLD(bool noIdentity) const {
+  bool raw = kind() == Kind::Bytes;
+  std::vector<std::uint8_t> Bytes;
   if (raw)
-    Bytes = as_bytes();
+    Bytes = llvm::ArrayRef<std::uint8_t>(std::get<bytes_storage>(variant_));
   else
     save_cbor(Bytes);
   CID Ref = CID::calculate(raw ? Multicodec::Raw : Multicodec::DAG_CBOR, Bytes,

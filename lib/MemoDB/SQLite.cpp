@@ -464,9 +464,9 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
 }
 
 std::vector<std::uint8_t> sqlite_db::encodeArgs(const memodb_call &Call) {
-  Node ArgsValue = Node::array();
+  Node ArgsValue = Node(node_list_arg);
   for (const CID &Arg : Call.Args)
-    ArgsValue.array_items().emplace_back(cid_to_bid(Arg));
+    ArgsValue.emplace_back(cid_to_bid(Arg));
   std::vector<std::uint8_t> Result;
   ArgsValue.save_cbor(Result);
   return Result;
@@ -481,8 +481,8 @@ memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
 
   std::vector<CID> Args;
   Node ArgsValue = Node::load_cbor(stmt.columnBytes(1));
-  for (const Node &ArgValue : ArgsValue.array_items())
-    Args.emplace_back(bid_to_cid(ArgValue.as_integer()));
+  for (const Node &ArgValue : ArgsValue.list_range())
+    Args.emplace_back(bid_to_cid(ArgValue.as_integer<sqlite3_int64>()));
 
   return memodb_call(stmt.columnString(0), Args);
 }
@@ -554,21 +554,13 @@ void sqlite_db::set(const memodb_name &Name, const CID &ref) {
 
 void sqlite_db::add_refs_from(sqlite3_int64 id, const Node &value) {
   sqlite3 *db = get_db();
-  if (value.type() == Node::REF) {
-    auto dest = cid_to_bid(value.as_ref());
+  value.eachLink([&](const CID &Link) {
+    auto dest = cid_to_bid(Link);
     Stmt stmt(db, "INSERT OR IGNORE INTO block_refs(src, dest) VALUES (?1,?2)");
     stmt.bind_int(1, id);
     stmt.bind_int(2, dest);
     checkDone(stmt.step());
-  } else if (value.type() == Node::ARRAY) {
-    for (const Node &item : value.array_items())
-      add_refs_from(id, item);
-  } else if (value.type() == Node::MAP) {
-    for (const auto &item : value.map_items()) {
-      add_refs_from(id, item.first);
-      add_refs_from(id, item.second);
-    }
-  }
+  });
 }
 
 llvm::Optional<Node> sqlite_db::getOptional(const CID &CID) {

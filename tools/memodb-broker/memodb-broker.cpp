@@ -62,6 +62,7 @@
 #include <arpa/inet.h>
 #include <deque>
 #include <iostream>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/ilist_node.h>
 #include <llvm/ADT/simple_ilist.h>
 #include <llvm/Support/CommandLine.h>
@@ -359,11 +360,12 @@ static std::deque<Worker> Workers;
 
 static std::vector<Service> Services;
 static std::vector<ServiceSet> ServiceSets;
-static std::map<Node, size_t> ServiceNumbers;
-static std::map<Node, size_t> ServiceSetNumbers;
+static llvm::StringMap<size_t> ServiceNumbers;
+static std::map<std::vector<size_t>, size_t> ServiceSetNumbers;
 
 static ServiceNumber lookupService(const Node &Name) {
-  auto Entry = ServiceNumbers.insert({Name, Services.size()});
+  auto Entry =
+      ServiceNumbers.try_emplace(Name.as_string_ref(), Services.size());
   if (Entry.second) {
     std::cerr << "New service: " << Name << "\n";
     Services.push_back({Name.as_string()});
@@ -372,12 +374,15 @@ static ServiceNumber lookupService(const Node &Name) {
 }
 
 static ServiceSetNumber lookupServiceSet(const Node &Names) {
-  auto Entry = ServiceSetNumbers.insert({Names, ServiceSets.size()});
+  std::vector<size_t> Numbers;
+  for (const Node &Item : Names.list_range())
+    Numbers.emplace_back(lookupService(Item));
+
+  auto Entry = ServiceSetNumbers.try_emplace(Numbers, ServiceSets.size());
   if (Entry.second) {
     std::cerr << "New service set: " << Names << "\n";
     ServiceSet NewSet;
-    for (const auto &Name : Names.array_items()) {
-      ServiceNumber SN = lookupService(Name);
+    for (size_t SN : Numbers) {
       NewSet.Services.push_back(SN);
       Services[SN].Sets.push_back(Entry.first->second);
     }
@@ -453,7 +458,7 @@ void Context::changeState(StateEnum NewState) {
 
 void Context::disconnectWorker(const Node &Id) {
   std::cerr << "disconnecting unknown worker " << Id << "\n";
-  send(Node::array({"memo01", 0x05, Id}));
+  send(Node(node_list_arg, {"memo01", 0x05, Id}));
 }
 
 Worker *Context::findWorkerExpectedState(const Node &Id, int ExpectedState) {
@@ -495,46 +500,46 @@ void Context::handleMessage() {
   // FIXME: handle CBOR errors using exceptions, don't just abort.
   Node Header = Node::load_cbor_from_sequence(Data);
 
-  if (Header.type() != Node::ARRAY || Header.array_items().size() < 3 ||
-      Header[0] != "memo01" || Header[1].type() != Node::INTEGER ||
-      Header[2].type() != Node::BYTES)
+  if (Header.kind() != Kind::List || Header.size() < 3 ||
+      Header[0] != "memo01" || Header[1].is_integer<std::uint8_t>() ||
+      Header[2].kind() != Kind::Bytes)
     return invalidMessage();
 
-  auto Operation = Header[1].as_integer();
-  const auto &Id = Header[2].as_bytes();
+  auto Operation = Header[1].as_integer<std::uint8_t>();
+  const auto &Id = Header[2];
 
   if (Operation == 0x01) { // worker READY
-    if (Header.array_items().size() != 4 || !Id.empty() || !Data.empty())
+    if (Header.size() != 4 || !Id.empty() || !Data.empty())
       return invalidMessage();
     const auto &ServiceSet = Header[3];
     return handleWorkerReady(ServiceSet);
 
   } else if (Operation == 0x02) { // client JOB
-    if (Header.array_items().size() != 5 || !Id.empty() ||
-        Header[3].type() != Node::STRING || Header[4].type() != Node::INTEGER)
+    if (Header.size() != 5 || !Id.empty() || Header[3].kind() != Kind::String ||
+        !Header[4].is_integer<std::int64_t>())
       return invalidMessage();
-    return handleClientJob(lookupService(Header[3]), Header[4].as_integer(),
-                           Data);
+    return handleClientJob(lookupService(Header[3]),
+                           Header[4].as_integer<std::int64_t>(), Data);
 
   } else if (Operation == 0x03) { // worker RESULT
-    auto NumItems = Header.array_items().size();
+    auto NumItems = Header.size();
     if (Id.empty() || NumItems < 3 || NumItems > 4)
       return invalidMessage();
-    if (NumItems >= 4 && Header[3].type() != Node::BOOL)
+    if (NumItems >= 4 && Header[3].kind() != Kind::Boolean)
       return invalidMessage();
-    bool Disconnecting = NumItems >= 4 ? Header[3].as_bool() : false;
+    bool Disconnecting = NumItems >= 4 ? Header[3].as_boolean() : false;
     Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_RESULT);
     if (!Worker)
       return disconnectWorker(Id);
     Worker->handleResult(Data);
     if (Disconnecting) {
-      send(Node::array({"memo01", 0x05, Id}));
+      send(Node(node_list_arg, {"memo01", 0x05, Id}));
       return Worker->changeState(Worker::DISCONNECTED);
     } else
       return Worker->handleRequest(this);
 
   } else if (Operation == 0x04) { // worker HEARTBEAT
-    if (Header.array_items().size() != 3 || Id.empty() || !Data.empty())
+    if (Header.size() != 3 || Id.empty() || !Data.empty())
       return invalidMessage();
     Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_HEARTBEAT);
     if (!Worker)
@@ -548,19 +553,19 @@ void Context::handleMessage() {
 }
 
 void Context::handleWorkerReady(const Node &ServiceNames) {
-  if (ServiceNames.type() != Node::ARRAY)
+  if (ServiceNames.kind() != Kind::List)
     return invalidMessage();
   StringRef PrevService = "";
-  for (const auto &Service : ServiceNames.array_items()) {
-    if (Service.type() != Node::STRING || Service.as_string().empty())
+  for (const auto &Service : ServiceNames.list_range()) {
+    if (Service.kind() != Kind::String || Service.as_string_ref().empty())
       return invalidMessage();
     // Check for correct order.
-    if (Service.as_string().size() < PrevService.size())
+    if (Service.size() < PrevService.size())
       return invalidMessage();
-    if (Service.as_string().size() == PrevService.size() &&
-        Service.as_string() <= PrevService)
+    if (Service.size() == PrevService.size() &&
+        Service.as_string_ref() <= PrevService)
       return invalidMessage();
-    PrevService = Service.as_string();
+    PrevService = Service.as_string_ref();
   }
 
   ServiceSetNumber SSN = lookupServiceSet(ServiceNames);
@@ -669,16 +674,17 @@ void Worker::changeState(StateEnum NewState) {
 }
 
 Node Worker::encodeID() {
-  return Node::bytes(StringRef((const char *)&ID, sizeof(ID)));
+  return Node(byte_string_arg, StringRef((const char *)&ID, sizeof(ID)));
 }
 
 Worker *Worker::getById(const Node &ID) {
-  if (ID.type() != Node::BYTES)
+  if (ID.kind() != Kind::Bytes)
     return nullptr;
-  if (ID.as_bytes().size() != sizeof(WorkerID))
+  auto IDBytes = ID.as<llvm::ArrayRef<std::uint8_t>>(byte_string_arg);
+  if (IDBytes.size() != sizeof(WorkerID))
     return nullptr;
   WorkerID i;
-  memcpy(&i, ID.as_bytes().data(), sizeof(WorkerID));
+  memcpy(&i, IDBytes.data(), sizeof(WorkerID));
   i -= FirstWorkerID;
   if (i >= Workers.size())
     return nullptr;
@@ -710,7 +716,10 @@ void Worker::handleRequest(Context *Context) {
 void Worker::handleResult(ArrayRef<uint8_t> Payload) {
   assert(ClientContext);
   assert(ClientContext->State == Context::JOB_PROCESSING);
-  ClientContext->send(Node::array({"memo01", 0x03, Node::bytes()}), Payload);
+  ClientContext->send(
+      Node(node_list_arg,
+           {"memo01", 0x03, Node(byte_string_arg, StringRef(""))}),
+      Payload);
   changeState(INIT);
 }
 
@@ -718,7 +727,7 @@ void Worker::sendHeartbeat() {
   assert(State == WAITING_FOR_JOB);
   assert(WorkerContext);
   assert(WorkerContext->State == Context::WORKER_WAITING);
-  WorkerContext->send(Node::array({"memo01", 0x04, encodeID()}));
+  WorkerContext->send(Node(node_list_arg, {"memo01", 0x04, encodeID()}));
   changeState(WAITING_FOR_HEARTBEAT);
 }
 
@@ -727,9 +736,10 @@ void Worker::startJob(Context *Client) {
   assert(WorkerContext->State == Context::WORKER_WAITING);
 
   WorkerContext->send(
-      Node::array({"memo01", 0x02, encodeID(),
-                   Node::string(Services[Client->JobService].Name),
-                   Client->JobTimeout}),
+      Node(node_list_arg,
+           {"memo01", 0x02, encodeID(),
+            Node(utf8_string_arg, Services[Client->JobService].Name),
+            Client->JobTimeout}),
       Client->JobPayload);
   ClientContext = Client;
   ClientContext->changeState(Context::JOB_PROCESSING);

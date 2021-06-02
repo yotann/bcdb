@@ -96,7 +96,7 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call) {
 
 std::ostream &operator<<(std::ostream &os, const memodb_name &name) {
   if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
-    os << "heads[" << Node(Head->Name) << "]";
+    os << "heads[" << Node(utf8_string_arg, Head->Name) << "]";
   } else {
     name.visit([&](auto X) { os << X; });
   }
@@ -105,7 +105,7 @@ std::ostream &operator<<(std::ostream &os, const memodb_name &name) {
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_name &name) {
   if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
-    os << "heads[" << Node(Head->Name) << "]";
+    os << "heads[" << Node(utf8_string_arg, Head->Name) << "]";
   } else {
     name.visit([&](auto X) { os << X; });
   }
@@ -119,19 +119,19 @@ std::vector<memodb_path> memodb_db::list_paths_to(const CID &ref) {
     std::vector<std::vector<Node>> Result;
     std::vector<Node> CurPath;
     std::function<void(const Node &)> recurse = [&](const Node &Value) {
-      if (Value.type() == Node::REF) {
-        if (Value.as_ref() == Ref)
+      if (Value.kind() == Kind::Link) {
+        if (Value.as_link() == Ref)
           Result.push_back(CurPath);
-      } else if (Value.type() == Node::ARRAY) {
-        for (size_t i = 0; i < Value.array_items().size(); i++) {
+      } else if (Value.kind() == Kind::List) {
+        for (size_t i = 0; i < Value.size(); i++) {
           CurPath.push_back(i);
           recurse(Value[i]);
           CurPath.pop_back();
         }
-      } else if (Value.type() == Node::MAP) {
-        for (const auto &item : Value.map_items()) {
-          CurPath.push_back(item.first);
-          recurse(item.second);
+      } else if (Value.kind() == Kind::Map) {
+        for (const auto &item : Value.map_range()) {
+          CurPath.emplace_back(utf8_string_arg, item.key());
+          recurse(item.value());
           CurPath.pop_back();
         }
       }

@@ -130,9 +130,9 @@ void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
   std::uint64_t Pos = 0;
   auto HeaderSize = *readVarInt(&Pos);
   auto Header = readValue(&Pos, HeaderSize);
-  if (Header["version"] != 1 || Header["roots"].array_items().size() != 1)
+  if (Header["version"] != 1 || Header["roots"].size() != 1)
     llvm::report_fatal_error("Unsupported CAR header");
-  CID RootRef = Header["roots"][0].as_ref();
+  CID RootRef = Header["roots"][0].as_link();
 
   while (true) {
     auto BlockStart = Pos;
@@ -178,20 +178,22 @@ llvm::Optional<memodb::CID> CARStore::resolveOptional(const memodb_name &Name) {
   if (const CID *CIDValue = std::get_if<CID>(&Name)) {
     return *CIDValue;
   } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-    if (Root["heads"].map_items().count(Head->Name))
-      return Root["heads"][Head->Name].as_ref();
-    return {};
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-    if (!Root["calls"].map_items().count(Call->Name))
+    const Node &Value = Root["heads"].at_or_null(Head->Name);
+    if (Value.is_null())
       return {};
-    const auto &AllCalls = Root["calls"][Call->Name];
+    return Value.as_link();
+  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+    const Node &AllCalls = Root["calls"].at_or_null(Call->Name);
+    if (AllCalls.is_null())
+      return {};
     std::string Key;
     for (const CID &Arg : Call->Args)
       Key += std::string(Arg) + "/";
     Key.pop_back();
-    if (!AllCalls.map_items().count(Key))
+    const Node &Value = AllCalls.at_or_null(Key);
+    if (Value.is_null())
       return {};
-    return AllCalls[Key]["result"].as_ref();
+    return Value["result"].as_link();
   } else {
     llvm_unreachable("impossible memodb_name type");
   }
@@ -205,13 +207,13 @@ std::vector<memodb_name> CARStore::list_names_using(const CID &ref) {
 
 void CARStore::eachCall(llvm::StringRef Func,
                         std::function<bool(const memodb_call &)> F) {
-  const auto &AllCalls = Root["calls"].map_items();
-  if (!AllCalls.count(std::string(Func)))
+  const Node &Calls = Root["calls"].at_or_null(Func);
+  if (Calls.is_null())
     return;
-  for (const auto &Item : Root["calls"][std::string(Func)].map_items()) {
+  for (const auto &Item : Calls.map_range()) {
     memodb_call Call(Func, {});
-    for (const Node &Arg : Item.second["args"].array_items())
-      Call.Args.emplace_back(Arg.as_ref());
+    for (const Node &Arg : Item.value()["args"].list_range())
+      Call.Args.emplace_back(Arg.as_link());
     if (F(Call))
       break;
   }
@@ -219,14 +221,14 @@ void CARStore::eachCall(llvm::StringRef Func,
 
 std::vector<std::string> CARStore::list_funcs() {
   std::vector<std::string> Result;
-  for (const auto &Item : Root["calls"].map_items())
-    Result.emplace_back(Item.first);
+  for (const auto &Item : Root["calls"].map_range())
+    Result.emplace_back(Item.key());
   return Result;
 }
 
 void CARStore::eachHead(std::function<bool(const memodb_head &)> F) {
-  for (const auto &Item : Root["heads"].map_items())
-    if (F(memodb_head(Item.first)))
+  for (const auto &Item : Root["heads"].map_range())
+    if (F(memodb_head(Item.key())))
       break;
 }
 
