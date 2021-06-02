@@ -222,7 +222,7 @@ void CARStore::eachCall(llvm::StringRef Func,
 std::vector<std::string> CARStore::list_funcs() {
   std::vector<std::string> Result;
   for (const auto &Item : Root["calls"].map_range())
-    Result.emplace_back(Item.key());
+    Result.emplace_back(Item.key().str());
   return Result;
 }
 

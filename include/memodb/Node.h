@@ -493,7 +493,7 @@ public:
 
   // Stricter than jsoncons (bytes and arrays don't work).
   std::string as_string() const {
-    return std::string(std::get<string_storage>(variant_));
+    return as_string_ref().str();
   }
 
   const CID &as_link() const { return std::get<CID>(variant_); }
