@@ -85,7 +85,7 @@ private:
   void deleteRef(BatchT &Batch, char Type, const rocksdb::Slice &From,
                  const rocksdb::Slice &To);
   void addRefs(rocksdb::WriteBatch &Batch, char Type,
-               const llvm::ArrayRef<uint8_t> &Key, const memodb_value &Value);
+               const llvm::ArrayRef<uint8_t> &Key, const Node &Value);
 
   std::string makeKeyForCall(const memodb_call &Call);
 
@@ -93,9 +93,9 @@ public:
   void open(llvm::StringRef uri, bool create_if_missing);
   ~RocksDBStore() override;
 
-  llvm::Optional<memodb_value> getOptional(const CID &CID) override;
+  llvm::Optional<Node> getOptional(const CID &CID) override;
   llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
-  CID put(const memodb_value &value) override;
+  CID put(const Node &value) override;
   void set(const memodb_name &Name, const CID &ref) override;
   std::vector<memodb_name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
@@ -148,15 +148,15 @@ void RocksDBStore::deleteRef(BatchT &Batch, char Type,
 
 void RocksDBStore::addRefs(rocksdb::WriteBatch &Batch, char Type,
                            const llvm::ArrayRef<uint8_t> &Key,
-                           const memodb_value &Value) {
-  if (Value.type() == memodb_value::REF) {
+                           const Node &Value) {
+  if (Value.type() == Node::REF) {
     if (Value.as_ref().isIdentity())
       return;
     addRef(Batch, Type, makeSlice(Key), Value.as_ref());
-  } else if (Value.type() == memodb_value::ARRAY) {
-    for (const memodb_value &Item : Value.array_items())
+  } else if (Value.type() == Node::ARRAY) {
+    for (const Node &Item : Value.array_items())
       addRefs(Batch, Type, Key, Item);
-  } else if (Value.type() == memodb_value::MAP) {
+  } else if (Value.type() == Node::MAP) {
     for (const auto &Item : Value.map_items())
       addRefs(Batch, Type, Key, Item.second);
   }
@@ -164,7 +164,7 @@ void RocksDBStore::addRefs(rocksdb::WriteBatch &Batch, char Type,
 
 std::string RocksDBStore::makeKeyForCall(const memodb_call &Call) {
   std::vector<std::uint8_t> Buffer;
-  memodb_value(Call.Name).save_cbor(Buffer);
+  Node(Call.Name).save_cbor(Buffer);
   std::string Key = makeSlice(Buffer).ToString();
   for (const CID &Arg : Call.Args) {
     auto CID = Arg.asBytes();
@@ -306,14 +306,14 @@ RocksDBStore::~RocksDBStore() {
   checkStatus(DB->Close());
 }
 
-llvm::Optional<memodb_value> RocksDBStore::getOptional(const CID &CID) {
+llvm::Optional<Node> RocksDBStore::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return memodb_value::loadFromIPLD(CID, {});
+    return Node::loadFromIPLD(CID, {});
   rocksdb::PinnableSlice Fetched;
   if (!checkFound(
           DB->Get({}, BlocksFamily, makeSlice(CID.asBytes()), &Fetched)))
     return {};
-  return memodb_value::loadFromIPLD(CID, makeBytes(Fetched));
+  return Node::loadFromIPLD(CID, makeBytes(Fetched));
 }
 
 llvm::Optional<CID> RocksDBStore::resolveOptional(const memodb_name &Name) {
@@ -335,7 +335,7 @@ llvm::Optional<CID> RocksDBStore::resolveOptional(const memodb_name &Name) {
   }
 }
 
-CID RocksDBStore::put(const memodb_value &value) {
+CID RocksDBStore::put(const Node &value) {
   auto IPLD = value.saveAsIPLD();
   if (IPLD.second.empty())
     return IPLD.first;
@@ -402,7 +402,7 @@ std::vector<memodb_name> RocksDBStore::list_names_using(const CID &ref) {
     else if (Type == TYPE_CALL) {
       auto Bytes = makeBytes(Ref);
       memodb_call Call("", {});
-      Call.Name = memodb_value::load_cbor_from_sequence(Bytes).as_string();
+      Call.Name = Node::load_cbor_from_sequence(Bytes).as_string();
       while (!Bytes.empty())
         Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
       Result.emplace_back(std::move(Call));
@@ -418,8 +418,7 @@ std::vector<std::string> RocksDBStore::list_funcs() {
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->SeekToFirst(); Iterator->Valid();) {
     auto Bytes = makeBytes(Iterator->key());
-    Result.emplace_back(
-        memodb_value::load_cbor_from_sequence(Bytes).as_string());
+    Result.emplace_back(Node::load_cbor_from_sequence(Bytes).as_string());
 
     std::vector<std::uint8_t> NextKey =
         makeBytes(Iterator->key()).drop_back(Bytes.size());
@@ -443,7 +442,7 @@ void RocksDBStore::eachHead(std::function<bool(const memodb_head &)> F) {
 void RocksDBStore::eachCall(llvm::StringRef Func,
                             std::function<bool(const memodb_call &)> F) {
   std::vector<std::uint8_t> Prefix;
-  memodb_value::string(Func).save_cbor(Prefix);
+  Node::string(Func).save_cbor(Prefix);
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->Seek(makeSlice(Prefix)); Iterator->Valid(); Iterator->Next()) {
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))
@@ -473,7 +472,7 @@ void RocksDBStore::head_delete(const memodb_head &Head) {
 
 void RocksDBStore::call_invalidate(llvm::StringRef name) {
   std::vector<std::uint8_t> Prefix;
-  memodb_value::string(name).save_cbor(Prefix);
+  Node::string(name).save_cbor(Prefix);
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->Seek(makeSlice(Prefix)); Iterator->Valid(); Iterator->Next()) {
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))

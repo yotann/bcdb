@@ -113,7 +113,7 @@ static CID ReadRef(memodb_db &Db, llvm::StringRef URI) {
     memodb_name Name = GetNameFromURI(URI);
     return Db.resolve(Name);
   }
-  memodb_value Value = memodb_value::load_cbor(
+  Node Value = Node::load_cbor(
       {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
        Buffer->getBufferSize()});
   return Db.put(Value);
@@ -142,7 +142,7 @@ static std::unique_ptr<ToolOutputFile> GetOutputFile() {
   return nullptr;
 }
 
-static void WriteValue(const memodb_value &Value) {
+static void WriteValue(const Node &Value) {
   auto OutputFile = GetOutputFile();
   if (OutputFile) {
     std::vector<std::uint8_t> Buffer;
@@ -155,13 +155,13 @@ static void WriteValue(const memodb_value &Value) {
 
 // helper functions
 
-template <typename T> void walkRefs(const memodb_value &Value, T F) {
-  if (Value.type() == memodb_value::REF) {
+template <typename T> void walkRefs(const Node &Value, T F) {
+  if (Value.type() == Node::REF) {
     F(Value.as_ref());
-  } else if (Value.type() == memodb_value::ARRAY) {
-    for (const memodb_value &Item : Value.array_items())
+  } else if (Value.type() == Node::ARRAY) {
+    for (const Node &Item : Value.array_items())
       walkRefs(Item, F);
-  } else if (Value.type() == memodb_value::MAP) {
+  } else if (Value.type() == Node::MAP) {
     for (const auto &Item : Value.map_items())
       walkRefs(Item.second, F);
   }
@@ -198,12 +198,12 @@ static int Export() {
       OutputFile->os().write((Value & 0x7f) | 0x80);
     OutputFile->os().write(Value);
   };
-  auto getBlockSize = [&](const std::pair<CID, memodb_value::bytes_t> &Block) {
+  auto getBlockSize = [&](const std::pair<CID, Node::bytes_t> &Block) {
     size_t Result = Block.second.size() + Block.first.asBytes().size();
     Result += getVarIntSize(Result);
     return Result;
   };
-  auto writeBlock = [&](const std::pair<CID, memodb_value::bytes_t> &Block) {
+  auto writeBlock = [&](const std::pair<CID, Node::bytes_t> &Block) {
     std::vector<std::uint8_t> Buffer(Block.first.asBytes());
     Buffer.insert(Buffer.end(), Block.second.begin(), Block.second.end());
     writeVarInt(Buffer.size());
@@ -222,14 +222,14 @@ static int Export() {
 
   std::set<CID> AlreadyWritten;
   std::function<void(const CID &)> exportRef;
-  std::function<CID(const memodb_value &)> exportValue;
+  std::function<CID(const Node &)> exportValue;
 
   exportRef = [&](const CID &Ref) {
     if (AlreadyWritten.insert(Ref).second)
       exportValue(Db->get(Ref));
   };
 
-  exportValue = [&](const memodb_value &Value) {
+  exportValue = [&](const Node &Value) {
     auto Block = Value.saveAsIPLD();
     if (!Block.first.isIdentity())
       writeBlock(Block);
@@ -237,12 +237,12 @@ static int Export() {
     return Block.first;
   };
 
-  memodb_value Root = memodb_value::map();
+  Node Root = Node::map();
   Root["format"] = "MemoDB CAR";
   Root["version"] = 0;
-  memodb_value &Calls = Root["calls"] = memodb_value::map();
-  memodb_value &Heads = Root["heads"] = memodb_value::map();
-  memodb_value &IDs = Root["ids"] = memodb_value::array();
+  Node &Calls = Root["calls"] = Node::map();
+  Node &Heads = Root["heads"] = Node::map();
+  Node &IDs = Root["ids"] = Node::array();
   auto addName = [&](const memodb_name &Name) {
     errs() << "exporting " << Name << "\n";
     if (const CID *Ref = std::get_if<CID>(&Name)) {
@@ -252,10 +252,10 @@ static int Export() {
       Heads[Head->Name] = Db->resolve(Name);
       exportRef(Heads[Head->Name].as_ref());
     } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-      memodb_value &FuncCalls = Calls[Call->Name];
-      if (FuncCalls == memodb_value{})
-        FuncCalls = memodb_value::map();
-      memodb_value Args = memodb_value::array();
+      Node &FuncCalls = Calls[Call->Name];
+      if (FuncCalls == Node{})
+        FuncCalls = Node::map();
+      Node Args = Node::array();
       std::string Key;
       for (const CID &Arg : Call->Args) {
         exportRef(Arg);
@@ -264,7 +264,7 @@ static int Export() {
       }
       Key.pop_back();
       auto Result = Db->resolve(Name);
-      FuncCalls[Key] = memodb_value::map({{"args", Args}, {"result", Result}});
+      FuncCalls[Key] = Node::map({{"args", Args}, {"result", Result}});
       exportRef(Result);
     } else {
       llvm_unreachable("impossible memodb_name type");
@@ -288,8 +288,7 @@ static int Export() {
 
   CID RootRef = exportValue(Root);
 
-  memodb_value Header = memodb_value::map(
-      {{"roots", memodb_value::array({RootRef})}, {"version", 1}});
+  Node Header = Node::map({{"roots", Node::array({RootRef})}, {"version", 1}});
   std::vector<std::uint8_t> Buffer;
   Header.save_cbor(Buffer);
   OutputFile->os().seek(0);
@@ -309,8 +308,8 @@ static int Export() {
       Padding[i] = "MemoDB CAR"[i % 11];
 
     for (ssize_t Size = PaddingNeeded; Size >= 0; Size--) {
-      auto Block = memodb_value(llvm::ArrayRef(Padding).take_front(Size))
-                       .saveAsIPLD(true);
+      auto Block =
+          Node(llvm::ArrayRef(Padding).take_front(Size)).saveAsIPLD(true);
       if (getBlockSize(Block) == PaddingNeeded) {
         writeBlock(Block);
         break;
@@ -541,7 +540,7 @@ static int Transfer() {
 
   std::function<void(const CID &)> transferRef = [&](const CID &Ref) {
     if (!TargetDb->has(Ref)) {
-      memodb_value Value = SourceDb->get(Ref);
+      Node Value = SourceDb->get(Ref);
       TargetDb->put(Value);
       walkRefs(Value, transferRef);
     }

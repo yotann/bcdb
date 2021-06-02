@@ -8,6 +8,7 @@ add_llvm_library(MemoDB
   Multibase.cpp
   RocksDB.cpp
   SQLite.cpp
+  Node.cpp
 )
 target_include_directories(MemoDB PRIVATE
   ${LIBSODIUM_INCLUDE_DIRS}

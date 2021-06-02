@@ -79,6 +79,7 @@
 #include "memodb/memodb.h"
 
 using namespace llvm;
+using namespace memodb;
 
 static cl::OptionCategory BrokerCategory("MemoDB Broker options");
 
@@ -251,15 +252,15 @@ struct Context : Object, ilist_node<Context> {
   ~Context() {}
   void aioCallback();
   void changeState(StateEnum NewState);
-  void disconnectWorker(const memodb_value &Id);
-  Worker *findWorkerExpectedState(const memodb_value &Id, int ExpectedState);
+  void disconnectWorker(const Node &Id);
+  Worker *findWorkerExpectedState(const Node &Id, int ExpectedState);
   void handleClientJob(ServiceNumber SN, int64_t Timeout,
                        ArrayRef<uint8_t> Payload);
   void handleMessage();
-  void handleWorkerReady(const memodb_value &ServiceNames);
+  void handleWorkerReady(const Node &ServiceNames);
   void invalidMessage();
   void reset();
-  void send(const memodb_value &Header, ArrayRef<uint8_t> Payload = {});
+  void send(const Node &Header, ArrayRef<uint8_t> Payload = {});
   void timeout() override;
 };
 } // end anonymous namespace
@@ -331,14 +332,14 @@ struct Worker : Object, ilist_node<Worker> {
   Worker(ServiceSetNumber SSN, WorkerID ID);
   ~Worker() {}
   void changeState(StateEnum NewState);
-  memodb_value encodeID();
+  Node encodeID();
   void handleRequest(Context *Context);
   void handleResult(ArrayRef<uint8_t> Payload);
   void sendHeartbeat();
   void startJob(Context *Client);
   void timeout() override;
 
-  static Worker *getById(const memodb_value &ID);
+  static Worker *getById(const Node &ID);
 };
 } // end anonymous namespace
 
@@ -358,10 +359,10 @@ static std::deque<Worker> Workers;
 
 static std::vector<Service> Services;
 static std::vector<ServiceSet> ServiceSets;
-static std::map<memodb_value, size_t> ServiceNumbers;
-static std::map<memodb_value, size_t> ServiceSetNumbers;
+static std::map<Node, size_t> ServiceNumbers;
+static std::map<Node, size_t> ServiceSetNumbers;
 
-static ServiceNumber lookupService(const memodb_value &Name) {
+static ServiceNumber lookupService(const Node &Name) {
   auto Entry = ServiceNumbers.insert({Name, Services.size()});
   if (Entry.second) {
     std::cerr << "New service: " << Name << "\n";
@@ -370,7 +371,7 @@ static ServiceNumber lookupService(const memodb_value &Name) {
   return Entry.first->second;
 }
 
-static ServiceSetNumber lookupServiceSet(const memodb_value &Names) {
+static ServiceSetNumber lookupServiceSet(const Node &Names) {
   auto Entry = ServiceSetNumbers.insert({Names, ServiceSets.size()});
   if (Entry.second) {
     std::cerr << "New service set: " << Names << "\n";
@@ -450,13 +451,12 @@ void Context::changeState(StateEnum NewState) {
   }
 }
 
-void Context::disconnectWorker(const memodb_value &Id) {
+void Context::disconnectWorker(const Node &Id) {
   std::cerr << "disconnecting unknown worker " << Id << "\n";
-  send(memodb_value::array({"memo01", 0x05, Id}));
+  send(Node::array({"memo01", 0x05, Id}));
 }
 
-Worker *Context::findWorkerExpectedState(const memodb_value &Id,
-                                         int ExpectedState) {
+Worker *Context::findWorkerExpectedState(const Node &Id, int ExpectedState) {
   Worker *Worker = Worker::getById(Id);
   if (!Worker)
     return nullptr;
@@ -493,11 +493,11 @@ void Context::handleMessage() {
   ArrayRef<uint8_t> Data(reinterpret_cast<const uint8_t *>(Msg.body().data()),
                          Msg.body().size());
   // FIXME: handle CBOR errors using exceptions, don't just abort.
-  memodb_value Header = memodb_value::load_cbor_from_sequence(Data);
+  Node Header = Node::load_cbor_from_sequence(Data);
 
-  if (Header.type() != memodb_value::ARRAY || Header.array_items().size() < 3 ||
-      Header[0] != "memo01" || Header[1].type() != memodb_value::INTEGER ||
-      Header[2].type() != memodb_value::BYTES)
+  if (Header.type() != Node::ARRAY || Header.array_items().size() < 3 ||
+      Header[0] != "memo01" || Header[1].type() != Node::INTEGER ||
+      Header[2].type() != Node::BYTES)
     return invalidMessage();
 
   auto Operation = Header[1].as_integer();
@@ -511,8 +511,7 @@ void Context::handleMessage() {
 
   } else if (Operation == 0x02) { // client JOB
     if (Header.array_items().size() != 5 || !Id.empty() ||
-        Header[3].type() != memodb_value::STRING ||
-        Header[4].type() != memodb_value::INTEGER)
+        Header[3].type() != Node::STRING || Header[4].type() != Node::INTEGER)
       return invalidMessage();
     return handleClientJob(lookupService(Header[3]), Header[4].as_integer(),
                            Data);
@@ -521,7 +520,7 @@ void Context::handleMessage() {
     auto NumItems = Header.array_items().size();
     if (Id.empty() || NumItems < 3 || NumItems > 4)
       return invalidMessage();
-    if (NumItems >= 4 && Header[3].type() != memodb_value::BOOL)
+    if (NumItems >= 4 && Header[3].type() != Node::BOOL)
       return invalidMessage();
     bool Disconnecting = NumItems >= 4 ? Header[3].as_bool() : false;
     Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_RESULT);
@@ -529,7 +528,7 @@ void Context::handleMessage() {
       return disconnectWorker(Id);
     Worker->handleResult(Data);
     if (Disconnecting) {
-      send(memodb_value::array({"memo01", 0x05, Id}));
+      send(Node::array({"memo01", 0x05, Id}));
       return Worker->changeState(Worker::DISCONNECTED);
     } else
       return Worker->handleRequest(this);
@@ -548,12 +547,12 @@ void Context::handleMessage() {
   }
 }
 
-void Context::handleWorkerReady(const memodb_value &ServiceNames) {
-  if (ServiceNames.type() != memodb_value::ARRAY)
+void Context::handleWorkerReady(const Node &ServiceNames) {
+  if (ServiceNames.type() != Node::ARRAY)
     return invalidMessage();
   StringRef PrevService = "";
   for (const auto &Service : ServiceNames.array_items()) {
-    if (Service.type() != memodb_value::STRING || Service.as_string().empty())
+    if (Service.type() != Node::STRING || Service.as_string().empty())
       return invalidMessage();
     // Check for correct order.
     if (Service.as_string().size() < PrevService.size())
@@ -604,7 +603,7 @@ void Context::reset() {
   Ctx.recv(Aio);
 }
 
-void Context::send(const memodb_value &Header, ArrayRef<uint8_t> Payload) {
+void Context::send(const Node &Header, ArrayRef<uint8_t> Payload) {
   std::vector<uint8_t> Bytes;
   Header.save_cbor(Bytes);
 
@@ -669,12 +668,12 @@ void Worker::changeState(StateEnum NewState) {
   }
 }
 
-memodb_value Worker::encodeID() {
-  return memodb_value::bytes(StringRef((const char *)&ID, sizeof(ID)));
+Node Worker::encodeID() {
+  return Node::bytes(StringRef((const char *)&ID, sizeof(ID)));
 }
 
-Worker *Worker::getById(const memodb_value &ID) {
-  if (ID.type() != memodb_value::BYTES)
+Worker *Worker::getById(const Node &ID) {
+  if (ID.type() != Node::BYTES)
     return nullptr;
   if (ID.as_bytes().size() != sizeof(WorkerID))
     return nullptr;
@@ -711,8 +710,7 @@ void Worker::handleRequest(Context *Context) {
 void Worker::handleResult(ArrayRef<uint8_t> Payload) {
   assert(ClientContext);
   assert(ClientContext->State == Context::JOB_PROCESSING);
-  ClientContext->send(
-      memodb_value::array({"memo01", 0x03, memodb_value::bytes()}), Payload);
+  ClientContext->send(Node::array({"memo01", 0x03, Node::bytes()}), Payload);
   changeState(INIT);
 }
 
@@ -720,7 +718,7 @@ void Worker::sendHeartbeat() {
   assert(State == WAITING_FOR_JOB);
   assert(WorkerContext);
   assert(WorkerContext->State == Context::WORKER_WAITING);
-  WorkerContext->send(memodb_value::array({"memo01", 0x04, encodeID()}));
+  WorkerContext->send(Node::array({"memo01", 0x04, encodeID()}));
   changeState(WAITING_FOR_HEARTBEAT);
 }
 
@@ -729,10 +727,9 @@ void Worker::startJob(Context *Client) {
   assert(WorkerContext->State == Context::WORKER_WAITING);
 
   WorkerContext->send(
-      memodb_value::array(
-          {"memo01", 0x02, encodeID(),
-           memodb_value::string(Services[Client->JobService].Name),
-           Client->JobTimeout}),
+      Node::array({"memo01", 0x02, encodeID(),
+                   Node::string(Services[Client->JobService].Name),
+                   Client->JobTimeout}),
       Client->JobPayload);
   ClientContext = Client;
   ClientContext->changeState(Context::JOB_PROCESSING);

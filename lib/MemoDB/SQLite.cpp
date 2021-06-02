@@ -113,13 +113,13 @@ class sqlite_db : public memodb_db {
   sqlite3_int64 get_funcid(llvm::StringRef name,
                            bool create_if_missing = false);
 
-  void add_refs_from(sqlite3_int64 id, const memodb_value &value);
+  void add_refs_from(sqlite3_int64 id, const Node &value);
 
   void upgrade_schema();
 
   sqlite3_int64 putInternal(const CID &CID,
                             const llvm::ArrayRef<std::uint8_t> &Bytes,
-                            const memodb_value &Value);
+                            const Node &Value);
 
   std::vector<std::uint8_t> encodeArgs(const memodb_call &Call);
   memodb_call identifyCall(sqlite3_int64 callid);
@@ -130,9 +130,9 @@ public:
   void open(const char *uri, bool create_if_missing);
   ~sqlite_db() override;
 
-  llvm::Optional<memodb_value> getOptional(const CID &CID) override;
+  llvm::Optional<Node> getOptional(const CID &CID) override;
   llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
-  CID put(const memodb_value &value) override;
+  CID put(const Node &value) override;
   void set(const memodb_name &Name, const CID &ref) override;
   std::vector<memodb_name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
@@ -411,14 +411,14 @@ sqlite3_int64 sqlite_db::cid_to_bid(const CID &ref) {
   if (!ref.isIdentity())
     fatal_error();
   std::vector<std::uint8_t> Content;
-  memodb_value Value = memodb_value::loadFromIPLD(ref, {});
+  Node Value = Node::loadFromIPLD(ref, {});
   Value.save_cbor(Content);
   return putInternal(ref, Content, Value);
 }
 
 sqlite3_int64 sqlite_db::putInternal(const CID &CID,
                                      const llvm::ArrayRef<std::uint8_t> &Bytes,
-                                     const memodb_value &Value) {
+                                     const Node &Value) {
   sqlite3 *db = get_db();
 
   // Optimistically check for an existing entry (without a transaction).
@@ -464,7 +464,7 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
 }
 
 std::vector<std::uint8_t> sqlite_db::encodeArgs(const memodb_call &Call) {
-  memodb_value ArgsValue = memodb_value::array();
+  Node ArgsValue = Node::array();
   for (const CID &Arg : Call.Args)
     ArgsValue.array_items().emplace_back(cid_to_bid(Arg));
   std::vector<std::uint8_t> Result;
@@ -480,14 +480,14 @@ memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
   requireRow(stmt.step());
 
   std::vector<CID> Args;
-  memodb_value ArgsValue = memodb_value::load_cbor(stmt.columnBytes(1));
-  for (const memodb_value &ArgValue : ArgsValue.array_items())
+  Node ArgsValue = Node::load_cbor(stmt.columnBytes(1));
+  for (const Node &ArgValue : ArgsValue.array_items())
     Args.emplace_back(bid_to_cid(ArgValue.as_integer()));
 
   return memodb_call(stmt.columnString(0), Args);
 }
 
-CID sqlite_db::put(const memodb_value &value) {
+CID sqlite_db::put(const Node &value) {
   auto IPLD = value.saveAsIPLD();
   putInternal(IPLD.first, IPLD.second, value);
   return IPLD.first;
@@ -552,18 +552,18 @@ void sqlite_db::set(const memodb_name &Name, const CID &ref) {
   }
 }
 
-void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
+void sqlite_db::add_refs_from(sqlite3_int64 id, const Node &value) {
   sqlite3 *db = get_db();
-  if (value.type() == memodb_value::REF) {
+  if (value.type() == Node::REF) {
     auto dest = cid_to_bid(value.as_ref());
     Stmt stmt(db, "INSERT OR IGNORE INTO block_refs(src, dest) VALUES (?1,?2)");
     stmt.bind_int(1, id);
     stmt.bind_int(2, dest);
     checkDone(stmt.step());
-  } else if (value.type() == memodb_value::ARRAY) {
-    for (const memodb_value &item : value.array_items())
+  } else if (value.type() == Node::ARRAY) {
+    for (const Node &item : value.array_items())
       add_refs_from(id, item);
-  } else if (value.type() == memodb_value::MAP) {
+  } else if (value.type() == Node::MAP) {
     for (const auto &item : value.map_items()) {
       add_refs_from(id, item.first);
       add_refs_from(id, item.second);
@@ -571,9 +571,9 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const memodb_value &value) {
   }
 }
 
-llvm::Optional<memodb_value> sqlite_db::getOptional(const CID &CID) {
+llvm::Optional<Node> sqlite_db::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return memodb_value::loadFromIPLD(CID, {});
+    return Node::loadFromIPLD(CID, {});
   sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT codec, content FROM blocks WHERE cid = ?1");
   stmt.bind_blob(1, CID.asBytes());
@@ -581,7 +581,7 @@ llvm::Optional<memodb_value> sqlite_db::getOptional(const CID &CID) {
     return llvm::None;
   if (stmt.columnInt(0) != CODEC_RAW)
     llvm::report_fatal_error("unsupported compression codec");
-  return memodb_value::loadFromIPLD(CID, stmt.columnBytes(1));
+  return Node::loadFromIPLD(CID, stmt.columnBytes(1));
 }
 
 llvm::Optional<CID> sqlite_db::resolveOptional(const memodb_name &Name) {

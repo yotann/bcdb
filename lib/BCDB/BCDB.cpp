@@ -65,7 +65,7 @@ Expected<std::vector<std::string>> BCDB::ListModules() {
 
 Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
   CID ref = db->head_get(Name);
-  memodb_value head = db->get(ref);
+  Node head = db->get(ref);
   std::vector<std::string> result;
   for (auto &item : head["functions"].map_items()) {
     result.push_back(std::string(llvm::StringRef(item.second.as_ref())));
@@ -139,12 +139,12 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   auto SaveModule = [&](Module &M) {
     SmallVector<char, 0> Buffer;
     WriteAlignedModule(M, Buffer);
-    auto value = memodb_value(ArrayRef<uint8_t>(
+    auto value = Node(ArrayRef<uint8_t>(
         reinterpret_cast<uint8_t *>(Buffer.data()), Buffer.size()));
     return db->put(value);
   };
 
-  memodb_value function_map = memodb_value::map();
+  Node function_map = Node::map();
   Splitter Splitter(*M);
 
   GlobalReferenceGraph Graph(*M);
@@ -173,8 +173,8 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   Splitter.Finish();
   CID remainder_value = SaveModule(*M);
 
-  auto result = memodb_value::map(
-      {{"functions", function_map}, {"remainder", remainder_value}});
+  auto result =
+      Node::map({{"functions", function_map}, {"remainder", remainder_value}});
   return db->put(result);
 }
 
@@ -190,7 +190,7 @@ static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
                                                    const CID &ref,
                                                    StringRef Name,
                                                    LLVMContext &Context) {
-  memodb_value value = db->get(ref);
+  Node value = db->get(ref);
   StringRef buffer_ref(reinterpret_cast<const char *>(value.as_bytes().data()),
                        value.as_bytes().size());
   ExitOnError Err("LoadModuleFromValue");
@@ -200,7 +200,7 @@ static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
 Expected<std::unique_ptr<Module>>
 BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
   CID head_ref = db->head_get(Name);
-  memodb_value head = db->get(head_ref);
+  Node head = db->get(head_ref);
   auto Remainder =
       LoadModuleFromValue(db, head["remainder"].as_ref(), Name, *Context);
 
@@ -219,7 +219,7 @@ Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
 
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
   CID head_ref = db->head_get(Name);
-  memodb_value head = db->get(head_ref);
+  Node head = db->get(head_ref);
 
   auto M = LoadModuleFromValue(db, head["remainder"].as_ref(), "remainder",
                                *Context);

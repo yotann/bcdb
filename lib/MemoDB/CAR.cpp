@@ -15,19 +15,19 @@ using namespace memodb;
 namespace {
 class CARStore : public memodb_db {
   llvm::sys::fs::file_t FileHandle;
-  memodb_value Root;
+  Node Root;
   std::map<CID, std::uint64_t> BlockPositions;
 
   bool readBytes(llvm::MutableArrayRef<std::uint8_t> Buf, std::uint64_t *Pos);
   std::optional<std::uint64_t> readVarInt(std::uint64_t *Pos);
   CID readCID(std::uint64_t *Pos);
-  memodb_value readValue(std::uint64_t *Pos, std::uint64_t Size);
+  Node readValue(std::uint64_t *Pos, std::uint64_t Size);
 
 public:
   void open(llvm::StringRef uri, bool create_if_missing);
   ~CARStore() override;
 
-  llvm::Optional<memodb_value> getOptional(const CID &CID) override;
+  llvm::Optional<Node> getOptional(const CID &CID) override;
   llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
   std::vector<memodb_name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
@@ -35,7 +35,7 @@ public:
   void eachCall(llvm::StringRef Func,
                 std::function<bool(const memodb_call &)> F) override;
 
-  CID put(const memodb_value &value) override;
+  CID put(const Node &value) override;
   void set(const memodb_name &Name, const CID &ref) override;
   void head_delete(const memodb_head &Head) override;
   void call_invalidate(llvm::StringRef name) override;
@@ -110,11 +110,11 @@ CID CARStore::readCID(std::uint64_t *Pos) {
   return *CID;
 }
 
-memodb_value CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
+Node CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
   std::vector<std::uint8_t> Buf(Size);
   if (!readBytes(Buf, Pos))
     llvm::report_fatal_error("Unexpected end of file in value");
-  return memodb_value::load_cbor(Buf);
+  return Node::load_cbor(Buf);
 }
 
 void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
@@ -157,9 +157,9 @@ CARStore::~CARStore() {
   llvm::sys::fs::closeFile(FileHandle);
 }
 
-llvm::Optional<memodb_value> CARStore::getOptional(const CID &CID) {
+llvm::Optional<Node> CARStore::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return memodb_value::loadFromIPLD(CID, {});
+    return Node::loadFromIPLD(CID, {});
   if (!BlockPositions.count(CID))
     return {};
   auto Pos = BlockPositions[CID];
@@ -171,7 +171,7 @@ llvm::Optional<memodb_value> CARStore::getOptional(const CID &CID) {
   std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
   if (!readBytes(Buffer, &Pos))
     llvm::report_fatal_error("Unexpected end of file in content");
-  return memodb_value::loadFromIPLD(CID, Buffer);
+  return Node::loadFromIPLD(CID, Buffer);
 }
 
 llvm::Optional<memodb::CID> CARStore::resolveOptional(const memodb_name &Name) {
@@ -210,7 +210,7 @@ void CARStore::eachCall(llvm::StringRef Func,
     return;
   for (const auto &Item : Root["calls"][std::string(Func)].map_items()) {
     memodb_call Call(Func, {});
-    for (const memodb_value &Arg : Item.second["args"].array_items())
+    for (const Node &Arg : Item.second["args"].array_items())
       Call.Args.emplace_back(Arg.as_ref());
     if (F(Call))
       break;
@@ -230,7 +230,7 @@ void CARStore::eachHead(std::function<bool(const memodb_head &)> F) {
       break;
 }
 
-CID CARStore::put(const memodb_value &value) {
+CID CARStore::put(const Node &value) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 

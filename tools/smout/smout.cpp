@@ -124,17 +124,15 @@ static StringRef GetUri() {
 
 static nng::socket BrokerSocket;
 
-static memodb_value evaluate_refines_alive2(memodb_db &db,
-                                            const memodb_value &AliveSettings,
-                                            const memodb_value &src,
-                                            const memodb_value &tgt) {
+static Node evaluate_refines_alive2(memodb_db &db, const Node &AliveSettings,
+                                    const Node &src, const Node &tgt) {
   // Allow the job to take 10x the time of the SMT timeout, in case there are
   // many SMT queries.
   auto JobTimeout = AliveSettings["timeout"].as_integer() + 30000;
-  memodb_value Header = memodb_value::array(
-      {"memo01", 0x02, memodb_value::bytes(), "alive.tv", JobTimeout});
+  Node Header =
+      Node::array({"memo01", 0x02, Node::bytes(), "alive.tv", JobTimeout});
 
-  memodb_value Job = AliveSettings;
+  Node Job = AliveSettings;
   Job["src"] = src;
   Job["tgt"] = tgt;
 
@@ -168,15 +166,15 @@ static memodb_value evaluate_refines_alive2(memodb_db &db,
   Msg = Aio.release_msg();
   llvm::ArrayRef<uint8_t> Reply(Msg.body().data<uint8_t>(), Msg.body().size());
 
-  Header = memodb_value::load_cbor_from_sequence(Reply);
-  if (Header.type() != memodb_value::ARRAY || Header.array_items().size() < 3 ||
+  Header = Node::load_cbor_from_sequence(Reply);
+  if (Header.type() != Node::ARRAY || Header.array_items().size() < 3 ||
       Header[0] != "memo01" || Header[1] != 0x03) {
     errs() << "received invalid reply header: " << Header << "\n";
     report_fatal_error("invalid reply header");
   }
 
-  memodb_value Result = memodb_value::load_cbor(Reply);
-  if (Result.type() != memodb_value::ARRAY || Result.array_items().size() < 2 ||
+  Node Result = Node::load_cbor(Reply);
+  if (Result.type() != Node::ARRAY || Result.array_items().size() < 2 ||
       Result[0] != 0) {
     errs() << "received error from worker: " << Result << "\n";
     report_fatal_error("error from worker");
@@ -190,12 +188,12 @@ static int Alive2() {
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
   CID Root = memodb.head_get(ModuleName);
-  memodb_value Collated = memodb.get(memodb_call("smout.collated", {Root}));
+  Node Collated = memodb.get(memodb_call("smout.collated", {Root}));
 
   BrokerSocket = nng::req::v0::open();
   BrokerSocket.dial(BrokerURL.c_str());
 
-  CID AliveSettings = memodb.put(memodb_value::map({
+  CID AliveSettings = memodb.put(Node::map({
       {"smt-to", 2 * (unsigned)Timeout},
       {"timeout", (unsigned)Timeout},
   }));
@@ -241,7 +239,7 @@ static int Alive2() {
       return;
     }
 
-    memodb_value AliveValue =
+    Node AliveValue =
         memodb.call_or_lookup_value("refines.alive2", evaluate_refines_alive2,
                                     AliveSettings, Pair.first, Pair.second);
     if (AliveValue.map_items().count("rc")) {
@@ -251,7 +249,7 @@ static int Alive2() {
       return;
     }
 
-    memodb_value RefinesValue = AliveValue["valid"];
+    Node RefinesValue = AliveValue["valid"];
     StringRef status = AliveValue["status"].as_string();
     StringRef stderrString;
     if (AliveValue.map_items().count("errs"))
@@ -264,32 +262,31 @@ static int Alive2() {
       NumIdentical++;
     } else if (RefinesValue == false && status == "UNSOUND") {
       NumInvalid++;
-    } else if (RefinesValue == memodb_value{} &&
-               status == "COULD_NOT_TRANSLATE") {
+    } else if (RefinesValue == Node{} && status == "COULD_NOT_TRANSLATE") {
       NumUnsupported++;
-    } else if (RefinesValue == memodb_value{} && status == "TIMEOUT") {
+    } else if (RefinesValue == Node{} && status == "TIMEOUT") {
       NumTimeout++;
-    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+    } else if (RefinesValue == Node{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains("ERROR: Timeout")) {
       NumTimeout++;
-    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+    } else if (RefinesValue == Node{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains("ERROR: SMT Error: smt tactic failed to "
                                      "show goal to be sat/unsat memout")) {
       NumMemout++;
-    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+    } else if (RefinesValue == Node{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains(
                    "ERROR: Out of memory; skipping function.")) {
       NumMemout++;
-    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+    } else if (RefinesValue == Node{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains(
                    "ERROR: Couldn't prove the correctness of the "
                    "transformation\nAlive2 approximated the semantics")) {
       NumApprox++;
     } else if (RefinesValue == false && status == "TYPE_CHECKER_FAILED") {
       NumTypeMismatch++;
-    } else if (RefinesValue == memodb_value{} && status == "CRASHED") {
+    } else if (RefinesValue == Node{} && status == "CRASHED") {
       NumCrash++;
-    } else if (RefinesValue == memodb_value{} && status == "FAILED_TO_PROVE" &&
+    } else if (RefinesValue == Node{} && status == "FAILED_TO_PROVE" &&
                stderrString.contains(
                    "ERROR: SMT Error: interrupted from keyboard")) {
       NumCrash++;
@@ -301,7 +298,7 @@ static int Alive2() {
     }
     NumTotal++;
 
-    if (RefinesValue != memodb_value{})
+    if (RefinesValue != Node{})
       memodb.call_set("refines", {Pair.first, Pair.second},
                       memodb.put(RefinesValue));
 
@@ -327,8 +324,7 @@ static int Alive2() {
 
 // smout candidates
 
-static memodb_value evaluate_candidates(memodb_db &db,
-                                        const memodb_value &func) {
+static Node evaluate_candidates(memodb_db &db, const Node &func) {
   ExitOnError Err("smout candidates evaluator: ");
   BCDB bcdb(db);
 
@@ -343,7 +339,7 @@ static memodb_value evaluate_candidates(memodb_db &db,
   // Make sure all functions are named so we can track them after saving.
   nameUnamedGlobals(*M);
 
-  SmallVector<memodb_value, 8> NodesValues;
+  SmallVector<Node, 8> NodesValues;
   SmallVector<std::string, 8> CalleeNames;
   SmallVector<std::string, 8> CallerNames;
 
@@ -352,31 +348,31 @@ static memodb_value evaluate_candidates(memodb_db &db,
     for (auto &Candidate :
          cast<MDNode>(*NMD->getOperand(0)->getOperand(1)).operands()) {
       // [Nodes, callee, caller]
-      MDNode &Node = cast<MDNode>(*Candidate);
+      MDNode &MDN = cast<MDNode>(*Candidate);
       ConstantDataSequential &NodesArray = cast<ConstantDataSequential>(
-          *cast<ConstantAsMetadata>(*Node.getOperand(0)).getValue());
+          *cast<ConstantAsMetadata>(*MDN.getOperand(0)).getValue());
       Constant *Callee =
-          cast<ConstantAsMetadata>(*Node.getOperand(1)).getValue();
+          cast<ConstantAsMetadata>(*MDN.getOperand(1)).getValue();
       Constant *Caller =
-          cast<ConstantAsMetadata>(*Node.getOperand(2)).getValue();
+          cast<ConstantAsMetadata>(*MDN.getOperand(2)).getValue();
       if (Callee->isNullValue() || Caller->isNullValue())
         continue; // ignore unsupported sequences
 
       CalleeNames.push_back(Callee->getName().str());
       CallerNames.push_back(Caller->getName().str());
-      memodb_value NodesValue = memodb_value::array();
+      Node NodesValue = Node::array();
       for (size_t i = 0; i < NodesArray.getNumElements(); i++)
         NodesValue.array_items().push_back(NodesArray.getElementAsInteger(i));
       NodesValues.push_back(std::move(NodesValue));
     }
   }
 
-  memodb_value Module = db.get(Err(bcdb.AddWithoutHead(std::move(M))));
-  memodb_value Functions = Module.map_items()["functions"];
+  Node Module = db.get(Err(bcdb.AddWithoutHead(std::move(M))));
+  Node Functions = Module.map_items()["functions"];
 
-  memodb_value Result = memodb_value::array();
+  Node Result = Node::array();
   for (size_t i = 0; i < NodesValues.size(); i++) {
-    Result.array_items().push_back(memodb_value::map({
+    Result.array_items().push_back(Node::map({
         {"nodes", std::move(NodesValues[i])},
         {"callee",
          std::move(Functions.map_items()[bytesToUTF8(CalleeNames[i])])},
@@ -417,7 +413,7 @@ static int Candidates() {
       errs() << "starting " << FuncId << "\n";
     }
 
-    memodb_value value = db->get_db().call_or_lookup_value(
+    Node value = db->get_db().call_or_lookup_value(
         "smout.candidates", evaluate_candidates, *CID::parse(FuncId));
     size_t result = value.array_items().size();
     TotalCandidates += value.array_items().size();
@@ -439,8 +435,8 @@ static int Candidates() {
 
 // smout collate: organize candidates by type and globals
 
-static memodb_value GroupForType(Type *T) {
-  memodb_value result = memodb_value::array({(int)T->getTypeID()});
+static Node GroupForType(Type *T) {
+  Node result = Node::array({(int)T->getTypeID()});
   if (T->isIntegerTy()) {
     result.array_items().push_back(T->getIntegerBitWidth());
   } else if (T->isArrayTy()) {
@@ -474,15 +470,15 @@ static memodb_value GroupForType(Type *T) {
   return result;
 }
 
-static memodb_value GroupForGlobals(Module &M) {
-  memodb_value result = memodb_value::array();
+static Node GroupForGlobals(Module &M) {
+  Node result = Node::array();
   for (GlobalVariable &GV : M.globals())
     if (GV.hasName())
-      result.array_items().push_back(memodb_value::bytes(GV.getName()));
+      result.array_items().push_back(Node::bytes(GV.getName()));
   for (Function &F : M.functions())
     if (F.hasName() && !F.isIntrinsic() &&
         F.getName() != "__gxx_personality_v0")
-      result.array_items().push_back(memodb_value::bytes(F.getName()));
+      result.array_items().push_back(Node::bytes(F.getName()));
   std::sort(result.array_items().begin(), result.array_items().end());
   return result;
 }
@@ -525,15 +521,14 @@ ResultTy parallel_transform_reduce(ContainerTy Container, ResultTy Init,
 
 // Exclude candidates that would make the caller larger; they can never be
 // profitable.
-static memodb_value evaluate_profitable(memodb_db &db,
-                                        const memodb_value &func) {
+static Node evaluate_profitable(memodb_db &db, const Node &func) {
   CID FuncId = db.put(func);
-  memodb_value candidates = db.get(memodb_call("smout.candidates", {FuncId}));
-  memodb_value result = memodb_value::array();
-  memodb_value orig_size = db.get(memodb_call("compiled.size", {FuncId}));
+  Node candidates = db.get(memodb_call("smout.candidates", {FuncId}));
+  Node result = Node::array();
+  Node orig_size = db.get(memodb_call("compiled.size", {FuncId}));
   for (const auto &item : candidates.array_items()) {
     CID caller = item.map_items().at("caller").as_ref();
-    memodb_value caller_size = db.get(memodb_call("compiled.size", {caller}));
+    Node caller_size = db.get(memodb_call("compiled.size", {caller}));
     if (caller_size < orig_size)
       result.array_items().push_back(item);
   }
@@ -548,9 +543,9 @@ static int Collate() {
 
   std::atomic<size_t> TotalCandidates = 0, TotalProfitable = 0;
   auto TransformProfitable = [&](StringRef FuncId) {
-    memodb_value candidates = db.get(
+    Node candidates = db.get(
         db.resolve(memodb_call("smout.candidates", {*CID::parse(FuncId)})));
-    memodb_value profitable =
+    Node profitable =
         db.call_or_lookup_value("smout.candidates.profitable",
                                 evaluate_profitable, *CID::parse(FuncId));
     TotalCandidates += candidates.array_items().size();
@@ -578,10 +573,10 @@ static int Collate() {
   std::vector<CID> UniqueCandidatesVec;
   for (auto &Item : UniqueCandidates)
     UniqueCandidatesVec.push_back(*CID::parse(Item.getKey()));
-  auto Reduce = [](memodb_value A, memodb_value B) {
+  auto Reduce = [](Node A, Node B) {
     for (auto &Item : B.map_items()) {
-      memodb_value &value = A[Item.first];
-      if (value.type() != memodb_value::ARRAY)
+      Node &value = A[Item.first];
+      if (value.type() != Node::ARRAY)
         value = Item.second;
       else
         for (auto &X : Item.second.array_items())
@@ -594,15 +589,14 @@ static int Collate() {
     auto M = Err(parseBitcodeFile(
         MemoryBufferRef(db.get(ref).as_bytestring(), StringRef(ref)), Context));
     Function &Def = getSoleDefinition(*M);
-    memodb_value Key = memodb_value::array(
-        {GroupForType(Def.getFunctionType()), GroupForGlobals(*M)});
+    Node Key =
+        Node::array({GroupForType(Def.getFunctionType()), GroupForGlobals(*M)});
     std::vector<std::uint8_t> KeyBytes;
     Key.save_cbor(KeyBytes);
-    return memodb_value::map(
-        {{bytesToUTF8(KeyBytes), memodb_value::array({ref})}});
+    return Node::map({{bytesToUTF8(KeyBytes), Node::array({ref})}});
   };
-  memodb_value Groups = parallel_transform_reduce(
-      UniqueCandidatesVec, memodb_value::map(), Reduce, Transform);
+  Node Groups = parallel_transform_reduce(UniqueCandidatesVec, Node::map(),
+                                          Reduce, Transform);
   outs() << "Number of groups: " << Groups.map_items().size() << "\n";
 
   // Erase groups with only a single element.
@@ -738,14 +732,14 @@ static int Estimate() {
       continue;
     size_t OrigSize = memodb.get(*OrigSizeRef).as_integer();
     TotalOrigSize += UseCount * OrigSize;
-    memodb_value Candidates = memodb.get(*CandidatesRef);
+    Node Candidates = memodb.get(*CandidatesRef);
 
     // For each instruction/node in the original function, a list of the
     // callers/candidates that would outline that node. Used to determine
     // conflicts.
     std::vector<SmallVector<unsigned, 4>> NodeUses;
 
-    for (memodb_value &Candidate : Candidates.array_items()) {
+    for (Node &Candidate : Candidates.array_items()) {
       CID CalleeRef = Candidate["callee"].as_ref();
       CID CallerRef = Candidate["caller"].as_ref();
       auto CalleeSize = compiled_size(CalleeRef);
@@ -768,7 +762,7 @@ static int Estimate() {
       CallerToCallee.push_back(callee_m);
       CalleeToCaller[callee_m].push_back(caller_i);
 
-      for (const memodb_value &Node : Candidate["nodes"].array_items()) {
+      for (const Node &Node : Candidate["nodes"].array_items()) {
         unsigned i = Node.as_integer();
         if (NodeUses.size() <= i)
           NodeUses.resize(i + 1);
@@ -798,11 +792,11 @@ static int Estimate() {
 
   // Find callees that are equivalent to the ones we're already considering.
   if (!IgnoreEquivalence) {
-    memodb_value Collated = memodb.get(
+    Node Collated = memodb.get(
         memodb_call("smout.collated", {memodb.head_get(ModuleName)}));
     for (auto &GroupPair : Collated.map_items()) {
       auto &Group = GroupPair.second;
-      for (const memodb_value &FirstValue : Group.array_items()) {
+      for (const Node &FirstValue : Group.array_items()) {
         CID FirstRef = FirstValue.as_ref();
         auto callee_it = CalleeIndexMap.find(StringRef(FirstRef));
         if (callee_it == CalleeIndexMap.end())
@@ -810,7 +804,7 @@ static int Estimate() {
         if (callee_it->second >= NumCalleesUsedDirectly)
           continue;
         unsigned callee_m = callee_it->second;
-        for (const memodb_value &SecondValue : Group.array_items()) {
+        for (const Node &SecondValue : Group.array_items()) {
           if (FirstValue == SecondValue)
             continue;
           CID SecondRef = SecondValue.as_ref();
@@ -818,7 +812,7 @@ static int Estimate() {
               memodb_call("refines", {FirstRef, SecondRef}));
           if (!RefinesRef)
             continue;
-          if (memodb.get(*RefinesRef) != memodb_value{true})
+          if (memodb.get(*RefinesRef) != Node{true})
             continue;
           unsigned refined_m = findOrAddCallee(SecondRef);
           assert(callee_m != refined_m);
@@ -982,7 +976,7 @@ static int MakeCostModel() {
 
 // smout measure
 
-static memodb_value evaluate_compiled(memodb_db &db, const memodb_value &func) {
+static Node evaluate_compiled(memodb_db &db, const Node &func) {
   ExitOnError Err("smout compiled evaluator: ");
   LLVMContext Context;
 
@@ -1025,21 +1019,20 @@ static memodb_value evaluate_compiled(memodb_db &db, const memodb_value &func) {
 
   PM.run(*M);
   assert(Buffer.size() > 0);
-  return memodb_value::bytes(Buffer);
+  return Node::bytes(Buffer);
 }
 
-static memodb_value evaluate_compiled_size(memodb_db &db,
-                                           const memodb_value &func) {
+static Node evaluate_compiled_size(memodb_db &db, const Node &func) {
   using namespace object;
   ExitOnError Err("smout compiled size evaluator: ");
   CID FuncId = db.put(func);
-  memodb_value Compiled =
+  Node Compiled =
       db.call_or_lookup_value("compiled", evaluate_compiled, FuncId);
   std::string FuncStr = FuncId;
   MemoryBufferRef MB(Compiled.as_bytestring(), FuncStr);
   auto Binary = Err(createBinary(MB));
   if (ObjectFile *Obj = dyn_cast<ObjectFile>(Binary.get())) {
-    memodb_value::integer_t Size = 0;
+    Node::integer_t Size = 0;
     for (const SectionRef &Section : Obj->sections()) {
       if (Section.isText() || Section.isData() || Section.isBSS() ||
           Section.isBerkeleyText() || Section.isBerkeleyData())
@@ -1071,7 +1064,7 @@ static int Measure() {
     all_funcs.push_back(*CID::parse(FuncId));
     CID candidates =
         memodb.resolve(memodb_call("smout.candidates", {*CID::parse(FuncId)}));
-    memodb_value candidates_value = memodb.get(candidates);
+    Node candidates_value = memodb.get(candidates);
     for (const auto &item : candidates_value.array_items()) {
       all_funcs.push_back(item.map_items().at("callee").as_ref());
       all_funcs.push_back(item.map_items().at("caller").as_ref());
@@ -1087,7 +1080,7 @@ static int Measure() {
 
   auto Transform = [&](CID FuncId) {
     InProgress++;
-    memodb_value Size = db->get_db().call_or_lookup_value(
+    Node Size = db->get_db().call_or_lookup_value(
         "compiled.size", evaluate_compiled_size, FuncId);
     size_t Pending = TotalInputs - InProgress - FinishedInputs;
     std::unique_lock<std::mutex> OutputLock(OutputMutex, std::try_to_lock);
@@ -1118,9 +1111,9 @@ static int ShowGroups() {
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
   CID Root = memodb.head_get(ModuleName);
-  memodb_value Collated = memodb.get(memodb_call("smout.collated", {Root}));
+  Node Collated = memodb.get(memodb_call("smout.collated", {Root}));
 
-  std::vector<std::pair<size_t, memodb_value>> GroupCounts;
+  std::vector<std::pair<size_t, Node>> GroupCounts;
   for (const auto &Item : Collated.map_items()) {
     GroupCounts.emplace_back(Item.second.array_items().size(), Item.first);
   }
