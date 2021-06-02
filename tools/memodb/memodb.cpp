@@ -1,4 +1,7 @@
 #include <cstdlib>
+#include <duktape.h>
+#include <iostream>
+#include <linenoise.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Errc.h>
@@ -26,6 +29,7 @@ cl::OptionCategory MemoDBCategory("MemoDB options");
 
 static cl::SubCommand ExportCommand("export", "Export values to a CAR file");
 static cl::SubCommand GetCommand("get", "Get a value");
+static cl::SubCommand JSCommand("js", "Interactive Javascript REPL");
 static cl::SubCommand ListCallsCommand("list-calls",
                                        "List all cached calls of a function");
 static cl::SubCommand ListFuncsCommand("list-funcs",
@@ -335,6 +339,112 @@ static int Get() {
   return 0;
 }
 
+// memodb js
+
+namespace {
+#include "repl_init.inc"
+}
+
+static void jsFatalHandler(void *, const char *Msg) {
+  llvm::report_fatal_error(Msg);
+}
+
+static duk_ret_t jsPrintAlert(duk_context *Ctx) {
+  duk_push_literal(Ctx, " ");
+  duk_insert(Ctx, 0);
+  duk_join(Ctx, duk_get_top(Ctx) - 1);
+  (duk_get_current_magic(Ctx) == 2 ? errs() : outs())
+      << duk_require_string(Ctx, -1) << '\n';
+  return 0;
+}
+
+static duk_context *CompletionCtx = nullptr;
+
+static duk_ret_t jsAddCompletion(duk_context *Ctx) {
+  const char *Str = duk_require_string(Ctx, 0);
+  auto Arg =
+      reinterpret_cast<linenoiseCompletions *>(duk_require_pointer(Ctx, 1));
+  linenoiseAddCompletion(Arg, Str);
+  return 0;
+}
+
+static void jsCompletion(const char *Input, linenoiseCompletions *Arg) {
+  if (!CompletionCtx)
+    return;
+  duk_push_global_stash(CompletionCtx);
+  duk_get_prop_string(CompletionCtx, -1, "linenoiseCompletion");
+  duk_push_string(CompletionCtx, Input ? Input : "");
+  duk_push_c_lightfunc(CompletionCtx, jsAddCompletion, 2, 2, 0);
+  duk_push_pointer(CompletionCtx, (void *)Arg);
+  duk_call(CompletionCtx, 3);
+  duk_pop(CompletionCtx);
+}
+
+static char *jsHints(const char *Input, int *Color, int *Bold) {
+  if (!CompletionCtx)
+    return nullptr;
+  duk_push_global_stash(CompletionCtx);
+  duk_get_prop_string(CompletionCtx, -1, "linenoiseHints");
+  duk_push_string(CompletionCtx, Input ? Input : "");
+  duk_call(CompletionCtx, 1);
+  if (!duk_is_object(CompletionCtx, -1)) {
+    duk_pop_2(CompletionCtx);
+    return nullptr;
+  }
+  duk_get_prop_string(CompletionCtx, -1, "hints");
+  const char *Tmp = duk_get_string(CompletionCtx, -1);
+  char *Result = Tmp ? strdup(Tmp) : nullptr;
+  duk_pop(CompletionCtx);
+  duk_pop_2(CompletionCtx);
+  return Result;
+}
+
+static void jsFreeHints(void *Hints) { free(Hints); }
+
+static int JS() {
+  duk_context *Ctx =
+      duk_create_heap(nullptr, nullptr, nullptr, nullptr, jsFatalHandler);
+  if (!Ctx)
+    llvm::report_fatal_error("Couldn't create Duktape heap");
+
+  duk_push_c_lightfunc(Ctx, jsPrintAlert, DUK_VARARGS, 1, 1);
+  duk_put_global_literal(Ctx, "print");
+  duk_push_c_lightfunc(Ctx, jsPrintAlert, DUK_VARARGS, 1, 2);
+  duk_put_global_literal(Ctx, "alert");
+
+  duk_eval_lstring(Ctx, reinterpret_cast<const char *>(repl_init_js),
+                   repl_init_js_len);
+  duk_push_global_stash(Ctx);
+  duk_call(Ctx, 1);
+
+  CompletionCtx = Ctx;
+  linenoiseSetCompletionCallback(jsCompletion);
+  linenoiseSetFreeHintsCallback(jsFreeHints);
+  linenoiseSetHintsCallback(jsHints);
+  linenoiseSetMultiLine(1);
+  linenoiseHistorySetMaxLen(1000);
+
+  while (const char *line = linenoise("> ")) {
+    linenoiseHistoryAdd(line);
+    int RC = duk_peval_string(Ctx, line);
+    if (RC) {
+      errs() << duk_safe_to_stacktrace(Ctx, -1) << '\n';
+      duk_pop(Ctx);
+    } else {
+      duk_push_global_stash(Ctx);
+      duk_get_prop_literal(Ctx, -1, "dukFormat");
+      duk_dup(Ctx, -3);
+      duk_call(Ctx, 1);
+      outs() << "= " << duk_to_string(Ctx, -1) << '\n';
+      duk_pop_3(Ctx);
+    }
+    outs().flush();
+    errs().flush();
+  }
+  duk_destroy_heap(Ctx);
+  return 0;
+}
+
 // memodb list-calls
 
 static cl::opt<std::string> FuncName(cl::Positional, cl::Required,
@@ -489,6 +599,8 @@ int main(int argc, char **argv) {
     return Export();
   } else if (GetCommand) {
     return Get();
+  } else if (JSCommand) {
+    return JS();
   } else if (ListCallsCommand) {
     return ListCalls();
   } else if (ListFuncsCommand) {
