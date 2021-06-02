@@ -155,6 +155,20 @@ struct byte_string_arg_t {
 };
 constexpr byte_string_arg_t byte_string_arg{};
 
+template <class T> struct unimplemented : std::false_type {};
+
+template <class T, class Enable = void> struct NodeTypeTraits {
+  static constexpr bool is(const Node &) noexcept { return false; }
+
+  static T as(const Node &) {
+    static_assert(unimplemented<T>::value, "not implemented");
+  }
+
+  static T as(const Node &, byte_string_arg_t) {
+    static_assert(unimplemented<T>::value, "not implemented");
+  }
+};
+
 enum class Kind {
   Null,
   Boolean,
@@ -238,6 +252,10 @@ public:
 
   llvm::StringRef as_string_ref() const {
     return std::get<string_storage>(variant_);
+  }
+
+  llvm::ArrayRef<std::uint8_t> as_bytes_ref() const {
+    return std::get<bytes_storage>(variant_);
   }
 
   // NOTE: default is null (jsoncons default is empty map).
@@ -363,13 +381,13 @@ public:
     return 0;
   }
 
-  bool is_string() const noexcept {
+  constexpr bool is_string() const noexcept {
     return std::holds_alternative<string_storage>(variant_);
   }
 
-  bool is_string_view() const noexcept { return is_string(); }
+  constexpr bool is_string_view() const noexcept { return is_string(); }
 
-  bool is_bytes() const noexcept {
+  constexpr bool is_bytes() const noexcept {
     return std::holds_alternative<bytes_storage>(variant_);
   }
 
@@ -418,15 +436,14 @@ public:
       value->resize(n, val);
   }
 
-  template <class T> T as(byte_string_arg_t) const {
-    const auto &bytes = std::get<bytes_storage>(variant_);
-    return T(bytes.begin(), bytes.end());
+  template <class T> constexpr bool is() const {
+    return NodeTypeTraits<T>::is(*this);
   }
 
-  template <> llvm::StringRef as<llvm::StringRef>(byte_string_arg_t) const {
-    const auto &bytes = std::get<bytes_storage>(variant_);
-    return llvm::StringRef(reinterpret_cast<const char *>(bytes.data()),
-                           bytes.size());
+  template <class T> T as() const { return NodeTypeTraits<T>::as(*this); }
+
+  template <class T> T as(byte_string_arg_t) const {
+    return NodeTypeTraits<T>::as(*this, byte_string_arg);
   }
 
   // Stricter than jsoncons (integers don't work).
@@ -439,22 +456,22 @@ public:
     return static_cast<IntegerType>(std::get<std::int64_t>(variant_));
   }
 
-  template <class IntegerType,
-            std::enable_if_t<std::is_integral<IntegerType>::value &&
-                                 std::is_signed<IntegerType>::value,
-                             int> = 0>
-  bool is_integer() const noexcept {
+  template <class IntegerType>
+  std::enable_if_t<std::is_integral<IntegerType>::value &&
+                       std::is_signed<IntegerType>::value,
+                   bool>
+  is_integer() const noexcept {
     if (const std::int64_t *value = std::get_if<std::int64_t>(&variant_))
       return *value >= std::numeric_limits<IntegerType>::lowest() &&
              *value <= std::numeric_limits<IntegerType>::max();
     return false;
   }
 
-  template <class IntegerType,
-            std::enable_if_t<std::is_integral<IntegerType>::value &&
-                                 std::is_unsigned<IntegerType>::value,
-                             int> = 0>
-  bool is_integer() const noexcept {
+  template <class IntegerType>
+  std::enable_if_t<std::is_integral<IntegerType>::value &&
+                       std::is_unsigned<IntegerType>::value,
+                   bool>
+  is_integer() const noexcept {
     if (const std::int64_t *value = std::get_if<std::int64_t>(&variant_))
       return *value >= 0 && static_cast<std::int64_t>(
                                 static_cast<IntegerType>(*value)) == *value;
@@ -610,6 +627,55 @@ public:
 
 std::ostream &operator<<(std::ostream &os, const Node &value);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Node &value);
+
+template <class T>
+struct NodeTypeTraits<
+    T, typename std::enable_if<std::is_integral<T>::value>::type> {
+  static constexpr bool is(const Node &node) noexcept {
+    return node.is_integer<T>();
+  }
+
+  static T as(const Node &node) { return node.as_integer<T>(); }
+};
+
+template <> struct NodeTypeTraits<llvm::ArrayRef<std::uint8_t>> {
+  static constexpr bool is(const Node &node) noexcept {
+    return node.is_bytes();
+  }
+
+  static llvm::ArrayRef<std::uint8_t> as(const Node &val,
+                                         byte_string_arg_t = byte_string_arg) {
+    return val.as_bytes_ref();
+  }
+};
+
+template <> struct NodeTypeTraits<llvm::StringRef> {
+  static constexpr bool is(const Node &node) noexcept {
+    return node.is_string();
+  }
+
+  static llvm::StringRef as(const Node &node) { return node.as_string_ref(); }
+
+  static llvm::StringRef as(const Node &node, byte_string_arg_t) {
+    auto bytes = node.as_bytes_ref();
+    return llvm::StringRef(reinterpret_cast<const char *>(bytes.data()),
+                           bytes.size());
+  }
+};
+
+template <> struct NodeTypeTraits<std::string> {
+  static constexpr bool is(const Node &node) noexcept {
+    return node.is_string();
+  }
+
+  static std::string as(const Node &node) { return node.as_string_ref().str(); }
+
+  static std::string as(const Node &node, byte_string_arg_t) {
+    auto bytes = node.as_bytes_ref();
+    return std::string(reinterpret_cast<const char *>(bytes.data()),
+                       bytes.size());
+  }
+};
 
 } // end namespace memodb
 

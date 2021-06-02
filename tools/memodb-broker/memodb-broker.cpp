@@ -365,10 +365,10 @@ static std::map<std::vector<size_t>, size_t> ServiceSetNumbers;
 
 static ServiceNumber lookupService(const Node &Name) {
   auto Entry =
-      ServiceNumbers.try_emplace(Name.as_string_ref(), Services.size());
+      ServiceNumbers.try_emplace(Name.as<StringRef>(), Services.size());
   if (Entry.second) {
     std::cerr << "New service: " << Name << "\n";
-    Services.push_back({Name.as_string()});
+    Services.push_back({Name.as<std::string>()});
   }
   return Entry.first->second;
 }
@@ -501,11 +501,11 @@ void Context::handleMessage() {
   Node Header = Node::load_cbor_from_sequence(Data);
 
   if (Header.kind() != Kind::List || Header.size() < 3 ||
-      Header[0] != "memo01" || Header[1].is_integer<std::uint8_t>() ||
+      Header[0] != "memo01" || !Header[1].is<std::uint8_t>() ||
       Header[2].kind() != Kind::Bytes)
     return invalidMessage();
 
-  auto Operation = Header[1].as_integer<std::uint8_t>();
+  auto Operation = Header[1].as<std::uint8_t>();
   const auto &Id = Header[2];
 
   if (Operation == 0x01) { // worker READY
@@ -516,10 +516,10 @@ void Context::handleMessage() {
 
   } else if (Operation == 0x02) { // client JOB
     if (Header.size() != 5 || !Id.empty() || Header[3].kind() != Kind::String ||
-        !Header[4].is_integer<std::int64_t>())
+        !Header[4].is<std::int64_t>())
       return invalidMessage();
     return handleClientJob(lookupService(Header[3]),
-                           Header[4].as_integer<std::int64_t>(), Data);
+                           Header[4].as<std::int64_t>(), Data);
 
   } else if (Operation == 0x03) { // worker RESULT
     auto NumItems = Header.size();
@@ -527,7 +527,7 @@ void Context::handleMessage() {
       return invalidMessage();
     if (NumItems >= 4 && Header[3].kind() != Kind::Boolean)
       return invalidMessage();
-    bool Disconnecting = NumItems >= 4 ? Header[3].as_boolean() : false;
+    bool Disconnecting = NumItems >= 4 ? Header[3].as<bool>() : false;
     Worker *Worker = findWorkerExpectedState(Id, Worker::WAITING_FOR_RESULT);
     if (!Worker)
       return disconnectWorker(Id);
@@ -555,17 +555,16 @@ void Context::handleMessage() {
 void Context::handleWorkerReady(const Node &ServiceNames) {
   if (ServiceNames.kind() != Kind::List)
     return invalidMessage();
-  StringRef PrevService = "";
+  Node PrevService = "";
   for (const auto &Service : ServiceNames.list_range()) {
-    if (Service.kind() != Kind::String || Service.as_string_ref().empty())
+    if (Service.kind() != Kind::String || Service.empty())
       return invalidMessage();
     // Check for correct order.
     if (Service.size() < PrevService.size())
       return invalidMessage();
-    if (Service.size() == PrevService.size() &&
-        Service.as_string_ref() <= PrevService)
+    if (Service.size() == PrevService.size() && !(PrevService < Service))
       return invalidMessage();
-    PrevService = Service.as_string_ref();
+    PrevService = Service;
   }
 
   ServiceSetNumber SSN = lookupServiceSet(ServiceNames);

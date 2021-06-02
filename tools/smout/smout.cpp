@@ -128,8 +128,7 @@ static Node evaluate_refines_alive2(memodb_db &db, const Node &AliveSettings,
                                     const Node &src, const Node &tgt) {
   // Allow the job to take 10x the time of the SMT timeout, in case there are
   // many SMT queries.
-  auto JobTimeout =
-      AliveSettings["timeout"].as_integer<std::uint64_t>() + 30000;
+  auto JobTimeout = AliveSettings["timeout"].as<std::uint64_t>() + 30000;
   Node Header = Node(node_list_arg, {"memo01", 0x02, Node(byte_string_arg),
                                      "alive.tv", JobTimeout});
 
@@ -527,7 +526,7 @@ static Node evaluate_profitable(memodb_db &db, const Node &func) {
   for (const auto &item : candidates.list_range()) {
     CID caller = item.at("caller").as_link();
     Node caller_size = db.get(memodb_call("compiled.size", {caller}));
-    if (caller_size.as_integer<size_t>() < orig_size.as_integer<size_t>())
+    if (caller_size.as<size_t>() < orig_size.as<size_t>())
       result.push_back(item);
   }
   return result;
@@ -629,7 +628,7 @@ static int Estimate() {
   auto &memodb = db->get_db();
 
   auto compiled_size = [&](CID ref) -> size_t {
-    return memodb.get(memodb_call("compiled.size", {ref})).as_integer<size_t>();
+    return memodb.get(memodb_call("compiled.size", {ref})).as<size_t>();
   };
 
   // Number of cases where the outlined caller is larger than the original
@@ -728,7 +727,7 @@ static int Estimate() {
         memodb_call("smout.candidates", {*CID::parse(FuncId)}));
     if (!CandidatesRef)
       continue;
-    size_t OrigSize = memodb.get(*OrigSizeRef).as_integer<size_t>();
+    size_t OrigSize = memodb.get(*OrigSizeRef).as<size_t>();
     TotalOrigSize += UseCount * OrigSize;
     Node Candidates = memodb.get(*CandidatesRef);
 
@@ -761,7 +760,7 @@ static int Estimate() {
       CalleeToCaller[callee_m].push_back(caller_i);
 
       for (const Node &Node : Candidate["nodes"].list_range()) {
-        unsigned i = Node.as_integer<unsigned>();
+        unsigned i = Node.as<unsigned>();
         if (NodeUses.size() <= i)
           NodeUses.resize(i + 1);
         NodeUses[i].push_back(caller_i);
@@ -956,7 +955,7 @@ static int MakeCostModel() {
       EstimatedMinSize += Item.second * ItemMinVars.at(Item.first);
       EstimatedMaxSize += Item.second * ItemMaxVars.at(Item.first);
     }
-    auto ActualSize = bcdb->get_db().get(Call).as_integer<size_t>();
+    auto ActualSize = bcdb->get_db().get(Call).as<size_t>();
     Program.addConstraint("max" + ID, EstimatedMaxSize >= ActualSize);
     Program.addConstraint("min" + ID, EstimatedMinSize <= ActualSize);
     Error += std::move(EstimatedMaxSize) - std::move(EstimatedMinSize);

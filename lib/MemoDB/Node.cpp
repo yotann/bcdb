@@ -346,8 +346,7 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
       if (key.kind() == Kind::String)
         KeyString = key.as_string();
       else if (key.kind() == Kind::Bytes)
-        KeyString =
-            bytesToUTF8(key.as<llvm::ArrayRef<std::uint8_t>>(byte_string_arg));
+        KeyString = bytesToUTF8(key.as<llvm::ArrayRef<std::uint8_t>>());
       else if (key.kind() == Kind::List) {
         // Needed for legacy smout.collated values.
         std::vector<std::uint8_t> KeyBytes;

@@ -482,7 +482,7 @@ memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
   std::vector<CID> Args;
   Node ArgsValue = Node::load_cbor(stmt.columnBytes(1));
   for (const Node &ArgValue : ArgsValue.list_range())
-    Args.emplace_back(bid_to_cid(ArgValue.as_integer<sqlite3_int64>()));
+    Args.emplace_back(bid_to_cid(ArgValue.as<sqlite3_int64>()));
 
   return memodb_call(stmt.columnString(0), Args);
 }
