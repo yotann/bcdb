@@ -115,10 +115,7 @@ std::unique_ptr<Module> bcdb::CloneModuleCorrectly(
   for (const Function &I : M) {
     Function *NF =
         Function::Create(cast<FunctionType>(I.getValueType()), I.getLinkage(),
-#if LLVM_VERSION_MAJOR >= 8
-                         I.getAddressSpace(),
-#endif
-                         I.getName(), New.get());
+                         I.getAddressSpace(), I.getName(), New.get());
     NF->copyAttributesFrom(&I);
     VMap[&I] = NF;
   }
@@ -135,10 +132,7 @@ std::unique_ptr<Module> bcdb::CloneModuleCorrectly(
       if (I->getValueType()->isFunctionTy())
         GV = Function::Create(cast<FunctionType>(I->getValueType()),
                               GlobalValue::ExternalLinkage,
-#if LLVM_VERSION_MAJOR >= 8
-                              I->getAddressSpace(),
-#endif
-                              I->getName(), New.get());
+                              I->getAddressSpace(), I->getName(), New.get());
       else
         GV = new GlobalVariable(*New, I->getValueType(), false,
                                 GlobalValue::ExternalLinkage, nullptr,

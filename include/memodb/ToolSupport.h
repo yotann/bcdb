@@ -10,14 +10,10 @@
 namespace memodb {
 static inline bool OptionHasCategory(llvm::cl::Option &O,
                                      llvm::cl::OptionCategory &C) {
-#if LLVM_VERSION_MAJOR < 9
-  return O.Category == &C;
-#else
   for (llvm::cl::OptionCategory *C2 : O.Categories)
     if (C2 == &C)
       return true;
   return false;
-#endif
 }
 
 template <typename F> static inline void ReorganizeOptions(F f) {

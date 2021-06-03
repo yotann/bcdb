@@ -5,9 +5,6 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Attributes.h>
-#if LLVM_VERSION_MAJOR < 8
-#include <llvm/IR/CallSite.h>
-#endif
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -250,17 +247,10 @@ void NeededTypeMap::VisitInstruction(Instruction *I) {
   if (auto *GEP = dyn_cast<GetElementPtrInst>(I))
     VisitType(GEP->getSourceElementType());
 
-#if LLVM_VERSION_MAJOR >= 8
   if (CallBase *CB = dyn_cast<CallBase>(I))
     for (unsigned i = 0; i != CB->getNumArgOperands(); ++i)
       if (CB->isPassPointeeByValueArgument(i))
         VisitType(CB->getArgOperand(i)->getType()->getPointerElementType());
-#else
-  if (auto CS = CallSite(I))
-    for (unsigned i = 0; i != CS.getNumArgOperands(); ++i)
-      if (CS.isByValOrInAllocaArgument(i))
-        VisitType(CS.getArgument(i)->getType()->getPointerElementType());
-#endif
 }
 
 void NeededTypeMap::VisitFunction(Function &F) {
@@ -294,7 +284,6 @@ public:
 } // end anonymous namespace
 
 AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
-#if LLVM_VERSION_MAJOR >= 9
   // See LLVM's IRLinker::mapAttributeTypes().
   for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
     if (Attrs.hasAttribute(i, Attribute::ByVal)) {
@@ -313,7 +302,6 @@ AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
           Attribute::getWithByValType(DM.getContext(), TypeMap.get(Ty)));
     }
   }
-#endif
   return Attrs;
 }
 
@@ -340,10 +328,7 @@ Value *DeclMaterializer::materialize(Value *V) {
   } else if (auto *SF = dyn_cast<Function>(SGV)) {
     auto *DF = Function::Create(TypeMap.get(SF->getFunctionType()),
                                 GlobalValue::ExternalLinkage,
-#if LLVM_VERSION_MAJOR >= 8
-                                SF->getAddressSpace(),
-#endif
-                                SF->getName(), &DM);
+                                SF->getAddressSpace(), SF->getName(), &DM);
     DF->copyAttributesFrom(SF);
     DF->setAttributes(mapAttributeTypes(DF->getAttributes()));
     NewGV = DF;
@@ -393,10 +378,7 @@ static std::unique_ptr<Module> ExtractFunction(Module &M, Function &SF) {
   // See LLVM's IRLinker::linkFunctionBody().
   Function *DF = Function::Create(TypeMap.get(SF.getFunctionType()),
                                   GlobalValue::ExternalLinkage,
-#if LLVM_VERSION_MAJOR >= 8
-                                  SF.getAddressSpace(),
-#endif
-                                  "", MPart.get());
+                                  SF.getAddressSpace(), "", MPart.get());
   DF->stealArgumentListFrom(SF);
   for (auto I : zip(SF.args(), DF->args()))
     std::get<0>(I).setName(std::get<1>(I).getName());

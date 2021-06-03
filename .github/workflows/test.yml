@@ -7,8 +7,6 @@ jobs:
     strategy:
       matrix:
         variant:
-        - bcdb-llvm7
-        - bcdb-llvm8
         - bcdb-llvm9
         - bcdb-llvm10
         - bcdb-llvm11

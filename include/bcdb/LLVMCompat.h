@@ -5,14 +5,6 @@
 
 #include <llvm/Config/llvm-config.h>
 
-#if LLVM_VERSION_MAJOR < 8 && defined(LLVM_SUPPORT_COMMANDLINE_H)
-namespace llvm {
-namespace cl {
-static const FormattingFlags AlwaysPrefix = Prefix;
-} // end namespace cl
-} // end namespace llvm
-#endif
-
 #if LLVM_VERSION_MAJOR < 11
 #define hasPassPointeeByValueAttr hasByValOrInAllocaAttr
 #define isPassPointeeByValueArgument isByValOrInAllocaArgument

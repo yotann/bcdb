@@ -859,10 +859,8 @@ std::unique_ptr<Module> GLMerger::Finish() {
       F->setDSOLocal(false);
       if (WeakModule) {
         F = Function::Create(F->getFunctionType(), GlobalValue::WeakAnyLinkage,
-#if LLVM_VERSION_MAJOR >= 8
-                             F->getAddressSpace(),
-#endif
-                             F->getName(), WeakModule.get());
+                             F->getAddressSpace(), F->getName(),
+                             WeakModule.get());
         BasicBlock *BB = BasicBlock::Create(F->getContext(), "", F);
         IRBuilder<> Builder(BB);
         Builder.CreateCall(WeakDefCalled,

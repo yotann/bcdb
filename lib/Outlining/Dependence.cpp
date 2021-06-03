@@ -361,9 +361,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   switch (I->getOpcode()) {
   case Instruction::Alloca:
   case Instruction::IndirectBr:
-#if LLVM_VERSION_MAJOR >= 9
   case Instruction::CallBr:
-#endif
     PreventsOutlining.set(NodeIndices[I]);
     break;
   case Instruction::Invoke:
@@ -403,9 +401,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::dbg_value:
     case Intrinsic::eh_dwarf_cfa:
     case Intrinsic::eh_exceptioncode:
-#if LLVM_VERSION_MAJOR >= 8
     case Intrinsic::eh_recoverfp:
-#endif
     case Intrinsic::eh_return_i32:
     case Intrinsic::eh_return_i64:
     case Intrinsic::eh_sjlj_callsite:
@@ -438,9 +434,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::siglongjmp:
     case Intrinsic::sigsetjmp:
 #endif
-#if LLVM_VERSION_MAJOR >= 8
     case Intrinsic::sponentry:
-#endif
     case Intrinsic::stackguard:
     case Intrinsic::stackprotector:
     case Intrinsic::stackrestore:

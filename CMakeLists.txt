@@ -72,8 +72,8 @@ MARK_AS_ADVANCED(
 find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-if( ${LLVM_PACKAGE_VERSION} VERSION_LESS 7.0 )
-  message(FATAL_ERROR "LLVM 7.0 or newer is required")
+if( ${LLVM_PACKAGE_VERSION} VERSION_LESS 9.0 )
+  message(FATAL_ERROR "LLVM 9.0 or newer is required")
 endif()
 if( ${LLVM_PACKAGE_VERSION} STREQUAL 13.0.0git )
   message(WARNING "Support for this version of LLVM is unstable")
@@ -142,15 +142,6 @@ endif()
 
 link_directories(${LLVM_LIBRARY_DIR})
 include_directories(${LLVM_INCLUDE_DIR})
-
-
-
-# LLVM stopped using add_llvm_loadable_module in version 8.
-if( ${LLVM_VERSION_MAJOR} GREATER 7 )
-  function(add_llvm_loadable_module name)
-    add_llvm_library(${name} MODULE ${ARGN})
-  endfunction()
-endif()
 
 
 

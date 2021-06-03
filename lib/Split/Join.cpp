@@ -68,7 +68,6 @@ Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
 
 static AttributeList copyByValAttributes(LLVMContext &C, AttributeList Source,
                                          AttributeList Attrs) {
-#if LLVM_VERSION_MAJOR >= 9
   assert(Attrs.getNumAttrSets() == Source.getNumAttrSets());
   for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
     Attrs = Attrs.removeAttribute(C, i, Attribute::ByVal);
@@ -76,7 +75,6 @@ static AttributeList copyByValAttributes(LLVMContext &C, AttributeList Source,
     if (Ty)
       Attrs = Attrs.addAttribute(C, i, Attribute::getWithByValType(C, Ty));
   }
-#endif
   return Attrs;
 }
 

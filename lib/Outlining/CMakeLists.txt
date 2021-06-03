@@ -4,7 +4,7 @@ set(LLVM_LINK_COMPONENTS
   TransformUtils
 )
 
-add_llvm_loadable_module(BCDBOutliningPlugin
+add_llvm_library(BCDBOutliningPlugin MODULE
   Candidates.cpp
   CostModel.cpp
   Dependence.cpp
