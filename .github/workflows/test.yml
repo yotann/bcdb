@@ -12,7 +12,7 @@ jobs:
         - bcdb-llvm11
         - bcdb-llvm12
         - bcdb-llvmAlive
-        - bcdb-clang-asan
+        - bcdb-clang-sanitize
         - bcdb-without-nng
     runs-on: ubuntu-latest
     steps:

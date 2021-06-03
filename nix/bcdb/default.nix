@@ -1,6 +1,6 @@
 { stdenv, lib, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite,
 rocksdb ? null, nng ? null, nngpp ? null,
-asan ? false }:
+sanitize ? false }:
 
 let
   gitFilter = patterns: root: with nix-gitignore;
@@ -37,7 +37,7 @@ in stdenv.mkDerivation {
 
   enableParallelBuilding = true;
 
-  cmakeFlags = lib.optional asan "-DCMAKE_BUILD_TYPE=ASAN";
-  preCheck = lib.optionalString asan
+  cmakeFlags = lib.optional sanitize "-DCMAKE_BUILD_TYPE=SANITIZE";
+  preCheck = lib.optionalString sanitize
     "export LSAN_OPTIONS=suppressions=$src/utils/lsan.supp";
 }

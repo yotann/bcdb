@@ -51,11 +51,11 @@ in rec {
   };
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
-  # Also use ASAN to catch leaks and memory errors.
-  bcdb-clang-asan = pkgs.callPackage ./nix/bcdb {
+  # Also use ASAN and UBSAN to catch leaks and undefined behavior.
+  bcdb-clang-sanitize = pkgs.callPackage ./nix/bcdb {
     inherit nng nngpp rocksdb;
     inherit (pkgs.llvmPackages_12) stdenv llvm clang;
-    asan = true;
+    sanitize = true;
   };
 
   bcdb = bcdb-llvm12;
