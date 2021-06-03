@@ -492,9 +492,7 @@ public:
   }
 
   // Stricter than jsoncons (bytes and arrays don't work).
-  std::string as_string() const {
-    return as_string_ref().str();
-  }
+  std::string as_string() const { return as_string_ref().str(); }
 
   const CID &as_link() const { return std::get<CID>(variant_); }
 
@@ -533,6 +531,16 @@ public:
     const map &value = std::get<map>(variant_);
     auto iter = value.find(name);
     return iter == value.end() ? null_node : iter->value();
+  }
+
+  template <class T, class U>
+  T get_value_or(const llvm::StringRef &name, U &&default_value) const {
+    if (is_null())
+      return static_cast<T>(std::forward<U>(default_value));
+    const map &value = std::get<map>(variant_);
+    auto iter = value.find(name);
+    return iter == value.end() ? static_cast<T>(std::forward<U>(default_value))
+                               : iter->value();
   }
 
   void clear() {

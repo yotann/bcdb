@@ -17,12 +17,13 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "bcdb/LLVMCompat.h"
 #include "bcdb/WholeProgram.h"
+#include "memodb/ToolSupport.h"
 
 using namespace bcdb;
 using namespace llvm;
 using namespace llvm::object;
+using namespace memodb;
 
 static cl::SubCommand
     AnnotateCommand("annotate",
@@ -132,9 +133,8 @@ static int ClangArgs() {
   return 0;
 }
 
-int main(int argc, const char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+int main(int argc, char **argv) {
+  InitTool X(argc, argv);
 
   ReorganizeOptions([](cl::Option *O) {
     // Hide LLVM's options, since they're mostly irrelevant.

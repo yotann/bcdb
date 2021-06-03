@@ -15,6 +15,7 @@ public:
   const char *Name;
 
   Multibase(char Prefix, const char *Name) : Prefix(Prefix), Name(Name) {}
+  virtual ~Multibase() {}
 
   // Decode any multibase with a prefix.
   static std::optional<std::vector<std::uint8_t>> decode(llvm::StringRef Str);

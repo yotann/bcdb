@@ -19,11 +19,12 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
+#include "memodb/ToolSupport.h"
 
 using namespace bcdb;
 using namespace llvm;
+using namespace memodb;
 
 static cl::OptionCategory Category("Joining options");
 
@@ -50,9 +51,8 @@ static std::unique_ptr<llvm::Module> loadModule(LLVMContext &Context,
   return M;
 }
 
-int main(int argc, const char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+int main(int argc, char **argv) {
+  InitTool X(argc, argv);
 
   HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "Module joining");

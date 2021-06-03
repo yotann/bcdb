@@ -123,7 +123,8 @@ static void RenameAnonymousConstants(Module &M) {
 
 static void PreprocessModule(Module &M) {
   if (!NoRenameConstants) {
-    createConstantMergePass()->runOnModule(M);
+    std::unique_ptr<ModulePass> CMP(createConstantMergePass());
+    CMP->runOnModule(M);
     RenameAnonymousConstants(M);
   }
 

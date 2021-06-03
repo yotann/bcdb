@@ -28,6 +28,7 @@ public:
     if (Pad)
       Values[(std::uint8_t)*Pad] = PAD_VALUE;
   }
+  ~BitwiseBase() override {}
 
   std::optional<std::vector<std::uint8_t>>
   decodeWithoutPrefix(llvm::StringRef Str) const override;
@@ -113,6 +114,7 @@ namespace {
 class ProquintBase : public Multibase {
 public:
   ProquintBase(char Prefix, const char *Name) : Multibase(Prefix, Name) {}
+  ~ProquintBase() override {}
   std::optional<std::vector<std::uint8_t>>
   decodeWithoutPrefix(llvm::StringRef Str) const override;
   std::string

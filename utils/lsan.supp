@@ -1,0 +1,4 @@
+# Suppressions for ASAN's leak sanitizer.
+
+# LLVM's RegisterHandlers allocates memory for sigaltstack and never frees it.
+leak:RegisterHandlers

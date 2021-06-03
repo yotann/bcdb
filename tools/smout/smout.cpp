@@ -55,6 +55,7 @@
 #include "bcdb/Outlining/LinearProgram.h"
 #include "bcdb/Split.h"
 #include "memodb/Multibase.h"
+#include "memodb/ToolSupport.h"
 #include "memodb/memodb.h"
 
 using namespace bcdb;
@@ -1132,8 +1133,7 @@ static int ShowGroups() {
 // main
 
 int main(int argc, char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+  InitTool X(argc, argv);
 
   // Reorganize options into subcommands.
   ReorganizeOptions([](cl::Option *O) {

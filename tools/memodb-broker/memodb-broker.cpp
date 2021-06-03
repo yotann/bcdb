@@ -77,6 +77,7 @@
 #include <string>
 #include <utility>
 
+#include "memodb/ToolSupport.h"
 #include "memodb/memodb.h"
 
 using namespace llvm;
@@ -746,8 +747,8 @@ void Worker::startJob(Context *Client) {
 }
 
 int main(int argc, char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+  InitTool X(argc, argv);
+
   cl::HideUnrelatedOptions(BrokerCategory);
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Broker");
 

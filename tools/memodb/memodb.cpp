@@ -7,6 +7,7 @@
 #include <llvm/Support/Errc.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
@@ -19,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include "bcdb/LLVMCompat.h"
+#include "memodb/ToolSupport.h"
 #include "memodb/memodb.h"
 
 using namespace llvm;
@@ -572,12 +573,11 @@ static int Transfer() {
 // main
 
 int main(int argc, char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+  InitTool X(argc, argv);
 
   // Hide LLVM's options, since they're mostly irrelevant.
-  bcdb::ReorganizeOptions([](cl::Option *O) {
-    if (!bcdb::OptionHasCategory(*O, MemoDBCategory)) {
+  ReorganizeOptions([](cl::Option *O) {
+    if (!OptionHasCategory(*O, MemoDBCategory)) {
       O->setHiddenFlag(cl::Hidden);
       O->addSubCommand(*cl::AllSubCommands);
     }

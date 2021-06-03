@@ -833,7 +833,8 @@ std::unique_ptr<Module> GLMerger::Finish() {
     }
 
     // Remove anything we didn't decide to export.
-    createGlobalDCEPass()->runOnModule(WrapperModule);
+    std::unique_ptr<ModulePass> DCEPass(createGlobalDCEPass());
+    DCEPass->runOnModule(WrapperModule);
   }
 
   // Make weak definitions for everything declared in the merged module. That

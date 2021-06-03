@@ -13,10 +13,11 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "bcdb/AlignBitcode.h"
-#include "bcdb/LLVMCompat.h"
+#include "memodb/ToolSupport.h"
 
 using namespace bcdb;
 using namespace llvm;
+using namespace memodb;
 
 static cl::OptionCategory Category("Alignment options");
 
@@ -59,9 +60,8 @@ static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
   Out->keep();
 }
 
-int main(int argc, const char **argv) {
-  PrettyStackTraceProgram StackPrinter(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
+int main(int argc, char **argv) {
+  InitTool X(argc, argv);
 
   cl::HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "bitcode aligner");
