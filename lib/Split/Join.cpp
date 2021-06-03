@@ -66,14 +66,19 @@ Joiner::Joiner(llvm::Module &Remainder) : M(&Remainder), Mover(*M) {
     GlobalNames.push_back(std::string(F.getName()));
 }
 
-static AttributeList copyByValAttributes(LLVMContext &C, AttributeList Source,
-                                         AttributeList Attrs) {
+static AttributeList copyTypeAttributes(LLVMContext &C, AttributeList Source,
+                                        AttributeList Attrs) {
   assert(Attrs.getNumAttrSets() == Source.getNumAttrSets());
-  for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
-    Attrs = Attrs.removeAttribute(C, i, Attribute::ByVal);
-    Type *Ty = Source.getAttribute(i, Attribute::ByVal).getValueAsType();
-    if (Ty)
-      Attrs = Attrs.addAttribute(C, i, Attribute::getWithByValType(C, Ty));
+  for (unsigned i = 0; i < Source.getNumAttrSets(); ++i) {
+    for (const Attribute &attr : Source.getAttributes(i)) {
+      if (attr.isTypeAttribute()) {
+        Type *Ty = attr.getValueAsType();
+        if (Ty) {
+          Attrs = Attrs.removeAttribute(C, i, attr.getKindAsEnum());
+          Attrs = Attrs.addAttribute(C, i, attr);
+        }
+      }
+    }
   }
   return Attrs;
 }
@@ -90,7 +95,7 @@ void Joiner::JoinGlobal(llvm::StringRef Name,
   AttributeList OldAttrs = Def->getAttributes();
   Def->copyAttributesFrom(Stub);
   Def->setAttributes(
-      copyByValAttributes(Def->getContext(), OldAttrs, Def->getAttributes()));
+      copyTypeAttributes(Def->getContext(), OldAttrs, Def->getAttributes()));
   Def->setComdat(Stub->getComdat());
 
   // Move the definition into the main module.

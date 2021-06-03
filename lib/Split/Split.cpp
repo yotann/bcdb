@@ -285,23 +285,29 @@ public:
 
 AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
   // See LLVM's IRLinker::mapAttributeTypes().
-  for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
-    if (Attrs.hasAttribute(i, Attribute::ByVal)) {
-      Type *Ty = Attrs.getAttribute(i, Attribute::ByVal).getValueAsType();
-      if (!Ty)
-        continue;
-
-      // LLVM bug: byval doesn't work properly with unnamed types.
-      if (StructType *ST = dyn_cast<StructType>(TypeMap.get(Ty)))
-        if (!ST->isLiteral())
-          ST->setName("s");
-
-      Attrs = Attrs.removeAttribute(DM.getContext(), i, Attribute::ByVal);
-      Attrs = Attrs.addAttribute(
-          DM.getContext(), i,
-          Attribute::getWithByValType(DM.getContext(), TypeMap.get(Ty)));
+  AttributeList orig_attrs = Attrs;
+  for (unsigned i = 0; i < orig_attrs.getNumAttrSets(); ++i) {
+    for (Attribute attr : orig_attrs.getAttributes(i)) {
+      if (attr.isTypeAttribute()) {
+        Type *Ty = attr.getValueAsType();
+        if (Ty) {
+#if LLVM_VERSION_MAJOR <= 9
+          // LLVM bug: byval doesn't work properly with unnamed types.
+          if (StructType *ST = dyn_cast<StructType>(TypeMap.get(Ty)))
+            if (!ST->isLiteral())
+              ST->setName("s");
+#endif
+          Attrs =
+              Attrs.removeAttribute(DM.getContext(), i, attr.getKindAsEnum());
+          Attrs = Attrs.addAttribute(DM.getContext(), i,
+                                     Attribute::get(DM.getContext(),
+                                                    attr.getKindAsEnum(),
+                                                    TypeMap.get(Ty)));
+        }
+      }
     }
   }
+
   return Attrs;
 }
 
