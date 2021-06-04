@@ -1,0 +1,1 @@
+// RUN: memodb js %s

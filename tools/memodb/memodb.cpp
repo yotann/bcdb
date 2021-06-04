@@ -1,7 +1,6 @@
 #include <cstdlib>
 #include <duktape.h>
 #include <iostream>
-#include <linenoise.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Errc.h>
@@ -20,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "memodb/Scripting.h"
 #include "memodb/ToolSupport.h"
 #include "memodb/memodb.h"
 
@@ -332,106 +332,21 @@ static int Get() {
 
 // memodb js
 
-namespace {
-#include "repl_init.inc"
-}
-
-static void jsFatalHandler(void *, const char *Msg) {
-  llvm::report_fatal_error(Msg);
-}
-
-static duk_ret_t jsPrintAlert(duk_context *Ctx) {
-  duk_push_literal(Ctx, " ");
-  duk_insert(Ctx, 0);
-  duk_join(Ctx, duk_get_top(Ctx) - 1);
-  (duk_get_current_magic(Ctx) == 2 ? errs() : outs())
-      << duk_require_string(Ctx, -1) << '\n';
-  return 0;
-}
-
-static duk_context *CompletionCtx = nullptr;
-
-static duk_ret_t jsAddCompletion(duk_context *Ctx) {
-  const char *Str = duk_require_string(Ctx, 0);
-  auto Arg =
-      reinterpret_cast<linenoiseCompletions *>(duk_require_pointer(Ctx, 1));
-  linenoiseAddCompletion(Arg, Str);
-  return 0;
-}
-
-static void jsCompletion(const char *Input, linenoiseCompletions *Arg) {
-  if (!CompletionCtx)
-    return;
-  duk_push_global_stash(CompletionCtx);
-  duk_get_prop_string(CompletionCtx, -1, "linenoiseCompletion");
-  duk_push_string(CompletionCtx, Input ? Input : "");
-  duk_push_c_lightfunc(CompletionCtx, jsAddCompletion, 2, 2, 0);
-  duk_push_pointer(CompletionCtx, (void *)Arg);
-  duk_call(CompletionCtx, 3);
-  duk_pop(CompletionCtx);
-}
-
-static char *jsHints(const char *Input, int *Color, int *Bold) {
-  if (!CompletionCtx)
-    return nullptr;
-  duk_push_global_stash(CompletionCtx);
-  duk_get_prop_string(CompletionCtx, -1, "linenoiseHints");
-  duk_push_string(CompletionCtx, Input ? Input : "");
-  duk_call(CompletionCtx, 1);
-  if (!duk_is_object(CompletionCtx, -1)) {
-    duk_pop_2(CompletionCtx);
-    return nullptr;
-  }
-  duk_get_prop_string(CompletionCtx, -1, "hints");
-  const char *Tmp = duk_get_string(CompletionCtx, -1);
-  char *Result = Tmp ? strdup(Tmp) : nullptr;
-  duk_pop(CompletionCtx);
-  duk_pop_2(CompletionCtx);
-  return Result;
-}
-
-static void jsFreeHints(void *Hints) { free(Hints); }
+static cl::opt<std::string> JSFilename(cl::Positional, cl::Optional,
+                                       cl::desc("<script filename>"),
+                                       cl::value_desc("filename"),
+                                       cl::cat(MemoDBCategory),
+                                       cl::sub(JSCommand));
 
 static int JS() {
-  duk_context *Ctx =
-      duk_create_heap(nullptr, nullptr, nullptr, nullptr, jsFatalHandler);
-  if (!Ctx)
-    llvm::report_fatal_error("Couldn't create Duktape heap");
-
-  duk_push_c_lightfunc(Ctx, jsPrintAlert, DUK_VARARGS, 1, 1);
-  duk_put_global_literal(Ctx, "print");
-  duk_push_c_lightfunc(Ctx, jsPrintAlert, DUK_VARARGS, 1, 2);
-  duk_put_global_literal(Ctx, "alert");
-
-  duk_eval_lstring(Ctx, reinterpret_cast<const char *>(repl_init_js),
-                   repl_init_js_len);
-  duk_push_global_stash(Ctx);
-  duk_call(Ctx, 1);
-
-  CompletionCtx = Ctx;
-  linenoiseSetCompletionCallback(jsCompletion);
-  linenoiseSetFreeHintsCallback(jsFreeHints);
-  linenoiseSetHintsCallback(jsHints);
-  linenoiseSetMultiLine(1);
-  linenoiseHistorySetMaxLen(1000);
-
-  while (const char *line = linenoise("> ")) {
-    linenoiseHistoryAdd(line);
-    int RC = duk_peval_string(Ctx, line);
-    if (RC) {
-      errs() << duk_safe_to_stacktrace(Ctx, -1) << '\n';
-      duk_pop(Ctx);
-    } else {
-      duk_push_global_stash(Ctx);
-      duk_get_prop_literal(Ctx, -1, "dukFormat");
-      duk_dup(Ctx, -3);
-      duk_call(Ctx, 1);
-      outs() << "= " << duk_to_string(Ctx, -1) << '\n';
-      duk_pop_3(Ctx);
-    }
-    outs().flush();
-    errs().flush();
-  }
+  duk_context *Ctx = newScriptingContext();
+  duk_push_global_object(Ctx);
+  setUpScripting(Ctx, -1);
+  duk_pop(Ctx);
+  if (!JSFilename.empty())
+    runScriptingFile(Ctx, JSFilename);
+  else
+    startREPL(Ctx);
   duk_destroy_heap(Ctx);
   return 0;
 }

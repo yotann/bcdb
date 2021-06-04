@@ -132,15 +132,15 @@ TEST(CIDTest, FromInvalidString) {
   EXPECT_EQ(CID::parse("@"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase2) {
+TEST(CIDTest, to_base2) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base2);
+    return identityCID(Bytes).asString(Multibase::base2);
   };
   EXPECT_EQ("000000001010101010000000000000000", to({}));
   EXPECT_EQ("00000000101010101000000000000000111111111", to({0xff}));
 }
 
-TEST(CIDTest, FromBase16) {
+TEST(CIDTest, from_base16) {
   EXPECT_EQ(CID::parse("f01550000"), identityCID({}));
   EXPECT_EQ(CID::parse("f0155000100"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("f015500020000"), identityCID({0x00, 0x00}));
@@ -154,9 +154,9 @@ TEST(CIDTest, FromBase16) {
   EXPECT_EQ(CID::parse("f015500010g"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase16) {
+TEST(CIDTest, to_base16) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base16);
+    return identityCID(Bytes).asString(Multibase::base16);
   };
   EXPECT_EQ("f01550000", to({}));
   EXPECT_EQ("f0155000100", to({0x00}));
@@ -165,7 +165,7 @@ TEST(CIDTest, ToBase16) {
             to({0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}));
 }
 
-TEST(CIDTest, FromBase16Upper) {
+TEST(CIDTest, from_base16upper) {
   EXPECT_EQ(CID::parse("F01550000"), identityCID({}));
   EXPECT_EQ(CID::parse("F0155000100"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("F015500020000"), identityCID({0x00, 0x00}));
@@ -179,9 +179,9 @@ TEST(CIDTest, FromBase16Upper) {
   EXPECT_EQ(CID::parse("F015500010G"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase16Upper) {
+TEST(CIDTest, to_base16upper) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base16Upper);
+    return identityCID(Bytes).asString(Multibase::base16upper);
   };
   EXPECT_EQ("F01550000", to({}));
   EXPECT_EQ("F0155000100", to({0x00}));
@@ -190,9 +190,9 @@ TEST(CIDTest, ToBase16Upper) {
             to({0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}));
 }
 
-TEST(CIDTest, ToBase32Hex) {
+TEST(CIDTest, to_base32hex) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32Hex);
+    return identityCID(Bytes).asString(Multibase::base32hex);
   };
   EXPECT_EQ("v05ag000", to({}));
   EXPECT_EQ("v05ag0080", to({0x00}));
@@ -206,9 +206,9 @@ TEST(CIDTest, ToBase32Hex) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, ToBase32HexUpper) {
+TEST(CIDTest, to_base32hexupper) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32HexUpper);
+    return identityCID(Bytes).asString(Multibase::base32hexupper);
   };
   EXPECT_EQ("V05AG000", to({}));
   EXPECT_EQ("V05AG0080", to({0x00}));
@@ -222,9 +222,9 @@ TEST(CIDTest, ToBase32HexUpper) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, ToBase32HexPad) {
+TEST(CIDTest, to_base32hexpad) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32HexPad);
+    return identityCID(Bytes).asString(Multibase::base32hexpad);
   };
   EXPECT_EQ("t05ag000=", to({}));
   EXPECT_EQ("t05ag0080", to({0x00}));
@@ -238,9 +238,9 @@ TEST(CIDTest, ToBase32HexPad) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, ToBase32HexPadUpper) {
+TEST(CIDTest, to_base32hexpadupper) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32HexPadUpper);
+    return identityCID(Bytes).asString(Multibase::base32hexpadupper);
   };
   EXPECT_EQ("T05AG000=", to({}));
   EXPECT_EQ("T05AG0080", to({0x00}));
@@ -254,7 +254,7 @@ TEST(CIDTest, ToBase32HexPadUpper) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, FromBase32) {
+TEST(CIDTest, from_base32) {
   EXPECT_EQ(CID::parse("bafkqaaa"), identityCID({}));
   EXPECT_EQ(CID::parse("bafkqaaia"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("bafkqaaqaaa"), identityCID({0x00, 0x00}));
@@ -274,9 +274,9 @@ TEST(CIDTest, FromBase32) {
   EXPECT_EQ(CID::parse("bafkqaaiaa"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase32) {
+TEST(CIDTest, to_base32) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32);
+    return identityCID(Bytes).asString(Multibase::base32);
   };
   EXPECT_EQ("bafkqaaa", to({}));
   EXPECT_EQ("bafkqaaia", to({0x00}));
@@ -290,7 +290,7 @@ TEST(CIDTest, ToBase32) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, FromBase32Upper) {
+TEST(CIDTest, from_base32upper) {
   EXPECT_EQ(CID::parse("BAFKQAAA"), identityCID({}));
   EXPECT_EQ(CID::parse("BAFKQAAIA"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("BAFKQAAQAAA"), identityCID({0x00, 0x00}));
@@ -310,9 +310,9 @@ TEST(CIDTest, FromBase32Upper) {
   EXPECT_EQ(CID::parse("BAFKQAAIAA"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase32Upper) {
+TEST(CIDTest, to_base32upper) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32Upper);
+    return identityCID(Bytes).asString(Multibase::base32upper);
   };
   EXPECT_EQ("BAFKQAAA", to({}));
   EXPECT_EQ("BAFKQAAIA", to({0x00}));
@@ -326,7 +326,7 @@ TEST(CIDTest, ToBase32Upper) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, FromBase32Pad) {
+TEST(CIDTest, from_base32pad) {
   EXPECT_EQ(CID::parse("cafkqaaa="), identityCID({}));
   EXPECT_EQ(CID::parse("cafkqaaia"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("cafkqaaqaaa======"), identityCID({0x00, 0x00}));
@@ -346,9 +346,9 @@ TEST(CIDTest, FromBase32Pad) {
   EXPECT_EQ(CID::parse("cafkqabiaaaaaaa=a"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase32Pad) {
+TEST(CIDTest, to_base32pad) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32Pad);
+    return identityCID(Bytes).asString(Multibase::base32pad);
   };
   EXPECT_EQ("cafkqaaa=", to({}));
   EXPECT_EQ("cafkqaaia", to({0x00}));
@@ -362,7 +362,7 @@ TEST(CIDTest, ToBase32Pad) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, FromBase32PadUpper) {
+TEST(CIDTest, from_base32padupper) {
   EXPECT_EQ(CID::parse("CAFKQAAA="), identityCID({}));
   EXPECT_EQ(CID::parse("CAFKQAAIA"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("CAFKQAAQAAA======"), identityCID({0x00, 0x00}));
@@ -382,9 +382,9 @@ TEST(CIDTest, FromBase32PadUpper) {
   EXPECT_EQ(CID::parse("CAFKQABIAAAAAAA=A"), std::nullopt);
 }
 
-TEST(CIDTest, ToBase32PadUpper) {
+TEST(CIDTest, to_base32padupper) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base32PadUpper);
+    return identityCID(Bytes).asString(Multibase::base32padupper);
   };
   EXPECT_EQ("CAFKQAAA=", to({}));
   EXPECT_EQ("CAFKQAAIA", to({0x00}));
@@ -398,7 +398,7 @@ TEST(CIDTest, ToBase32PadUpper) {
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
-TEST(CIDTest, FromBase64) {
+TEST(CIDTest, from_base64) {
   EXPECT_EQ(CID::parse("mAVUAAA"), identityCID({}));
   EXPECT_EQ(CID::parse("mAVUAAQA"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("mAVUAAgAA"), identityCID({0x00, 0x00}));
@@ -417,9 +417,9 @@ TEST(CIDTest, FromBase64) {
   EXPECT_EQ(CID::parse("mAVUAA==="), std::nullopt);
 }
 
-TEST(CIDTest, ToBase64) {
+TEST(CIDTest, to_base64) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base64);
+    return identityCID(Bytes).asString(Multibase::base64);
   };
   EXPECT_EQ("mAVUAAA", to({}));
   EXPECT_EQ("mAVUAAQA", to({0x00}));
@@ -433,7 +433,7 @@ TEST(CIDTest, ToBase64) {
                 0xb3, 0xd3, 0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf}));
 }
 
-TEST(CIDTest, FromBase64Pad) {
+TEST(CIDTest, from_base64pad) {
   EXPECT_EQ(CID::parse("MAVUAAA=="), identityCID({}));
   EXPECT_EQ(CID::parse("MAVUAAQA="), identityCID({0x00}));
   EXPECT_EQ(CID::parse("MAVUAAgAA"), identityCID({0x00, 0x00}));
@@ -451,9 +451,9 @@ TEST(CIDTest, FromBase64Pad) {
   EXPECT_EQ(CID::parse("MAVUAAgAA===="), std::nullopt);
 }
 
-TEST(CIDTest, ToBase64Pad) {
+TEST(CIDTest, to_base64pad) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base64Pad);
+    return identityCID(Bytes).asString(Multibase::base64pad);
   };
   EXPECT_EQ("MAVUAAA==", to({}));
   EXPECT_EQ("MAVUAAQA=", to({0x00}));
@@ -467,7 +467,7 @@ TEST(CIDTest, ToBase64Pad) {
                 0xb3, 0xd3, 0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf}));
 }
 
-TEST(CIDTest, FromBase64Url) {
+TEST(CIDTest, from_base64url) {
   EXPECT_EQ(CID::parse("uAVUAAA"), identityCID({}));
   EXPECT_EQ(CID::parse("uAVUAAQA"), identityCID({0x00}));
   EXPECT_EQ(CID::parse("uAVUAAgAA"), identityCID({0x00, 0x00}));
@@ -486,9 +486,9 @@ TEST(CIDTest, FromBase64Url) {
   EXPECT_EQ(CID::parse("uAVUAA==="), std::nullopt);
 }
 
-TEST(CIDTest, ToBase64Url) {
+TEST(CIDTest, to_base64url) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base64Url);
+    return identityCID(Bytes).asString(Multibase::base64url);
   };
   EXPECT_EQ("uAVUAAA", to({}));
   EXPECT_EQ("uAVUAAQA", to({0x00}));
@@ -502,7 +502,7 @@ TEST(CIDTest, ToBase64Url) {
                 0xb3, 0xd3, 0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf}));
 }
 
-TEST(CIDTest, FromBase64UrlPad) {
+TEST(CIDTest, from_base64urlpad) {
   EXPECT_EQ(CID::parse("UAVUAAA=="), identityCID({}));
   EXPECT_EQ(CID::parse("UAVUAAQA="), identityCID({0x00}));
   EXPECT_EQ(CID::parse("UAVUAAgAA"), identityCID({0x00, 0x00}));
@@ -520,9 +520,9 @@ TEST(CIDTest, FromBase64UrlPad) {
   EXPECT_EQ(CID::parse("UAVUAAgAA===="), std::nullopt);
 }
 
-TEST(CIDTest, ToBase64UrlPad) {
+TEST(CIDTest, to_base64urlpad) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Base64UrlPad);
+    return identityCID(Bytes).asString(Multibase::base64urlpad);
   };
   EXPECT_EQ("UAVUAAA==", to({}));
   EXPECT_EQ("UAVUAAQA=", to({0x00}));
@@ -536,7 +536,7 @@ TEST(CIDTest, ToBase64UrlPad) {
                 0xb3, 0xd3, 0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf}));
 }
 
-TEST(CIDTest, FromProquint) {
+TEST(CIDTest, from_proquint) {
   EXPECT_EQ(CID::parse("pro-bajij-babad-zus"), identityCID({0xff}));
   EXPECT_EQ(CID::parse("pro-bajij-babah-lusab-babad"),
             identityCID({0x7f, 0x00, 0x00, 0x01}));
@@ -552,9 +552,9 @@ TEST(CIDTest, FromProquint) {
   EXPECT_EQ(CID::parse("pro-bajij-babad-zusa"), std::nullopt);
 }
 
-TEST(CIDTest, ToProquint) {
+TEST(CIDTest, to_proquint) {
   auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::Proquint);
+    return identityCID(Bytes).asString(Multibase::proquint);
   };
   EXPECT_EQ("pro-bajij-babad-zus", to({0xff}));
   EXPECT_EQ("pro-bajij-babah-lusab-babad", to({0x7f, 0x00, 0x00, 0x01}));

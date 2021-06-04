@@ -146,7 +146,7 @@ std::string CID::asString() const {
   auto Base = Multibase::findByName(MultibaseOption);
   if (Base)
     return asString(*Base);
-  return asString(Multibase::Base32);
+  return asString(Multibase::base32);
 }
 
 CID::operator std::string() const { return asString(); }

@@ -946,7 +946,7 @@ static int MakeCostModel() {
   }
 
   bcdb->get_db().eachCall("compiled.size", [&](const memodb_call &Call) {
-    std::string ID = Call.Args[0].asString(Multibase::Base32);
+    std::string ID = Call.Args[0].asString(Multibase::base32);
     auto M = Err(bcdb->GetFunctionById(ID));
     const auto &F = getSoleDefinition(*M);
     CostModel Model;
