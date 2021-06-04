@@ -343,12 +343,13 @@ static int JS() {
   duk_push_global_object(Ctx);
   setUpScripting(Ctx, -1);
   duk_pop(Ctx);
+  int rc = 0;
   if (!JSFilename.empty())
-    runScriptingFile(Ctx, JSFilename);
+    rc = runScriptingFile(Ctx, JSFilename);
   else
     startREPL(Ctx);
   duk_destroy_heap(Ctx);
-  return 0;
+  return rc;
 }
 
 // memodb list-calls

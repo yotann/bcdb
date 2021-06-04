@@ -182,23 +182,29 @@ void memodb::setUpScripting(duk_context *ctx, duk_idx_t parent_idx) {
   duk_call(ctx, 1);
 }
 
-void memodb::runScriptingFile(duk_context *ctx, llvm::StringRef filename) {
+int memodb::runScriptingFile(duk_context *ctx, llvm::StringRef filename) {
   auto mb_or_err = llvm::MemoryBuffer::getFile(filename);
-  if (!mb_or_err)
-    llvm::report_fatal_error("Could not read file " + filename);
+  if (!mb_or_err) {
+    llvm::errs() << "Could not read file \"" << filename << "\"\n";
+    return 1;
+  }
   duk_push_lstring(ctx, filename.data(), filename.size());
   auto rc = duk_pcompile_lstring_filename(
       ctx, 0, (*mb_or_err)->getBufferStart(), (*mb_or_err)->getBufferSize());
   if (rc) {
-    llvm::report_fatal_error("Could not compile file " + filename + ":\n" +
-                             llvm::StringRef(duk_safe_to_string(ctx, -1)));
+    llvm::errs() << "Could not compile file \"" << filename << "\":\n";
+    llvm::errs() << duk_safe_to_string(ctx, -1);
+    return 1;
   } else {
     rc = duk_pcall(ctx, 0);
-    if (rc)
-      llvm::report_fatal_error(
-          "Error running file " + filename + ":\n" +
-          llvm::StringRef(duk_safe_to_stacktrace(ctx, -1)));
+    if (rc) {
+      llvm::errs() << "Error running file \"" << filename << "\":\n";
+      llvm::errs() << duk_safe_to_stacktrace(ctx, -1);
+      duk_pop(ctx);
+      return 1;
+    }
     duk_pop(ctx);
+    return 0;
   }
 }
 
