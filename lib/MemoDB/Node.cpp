@@ -342,19 +342,10 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     map result;
     while (next_item()) {
       Node key = load_cbor_from_sequence(in);
-      std::string KeyString;
-      if (key.kind() == Kind::String)
-        KeyString = key.as_string();
-      else if (key.kind() == Kind::Bytes)
-        KeyString = bytesToUTF8(key.as<llvm::ArrayRef<std::uint8_t>>());
-      else if (key.kind() == Kind::List) {
-        // Needed for legacy smout.collated values.
-        std::vector<std::uint8_t> KeyBytes;
-        key.save_cbor(KeyBytes);
-        KeyString = bytesToUTF8(KeyBytes);
-      } else
+      if (!key.is<llvm::StringRef>())
         llvm::report_fatal_error("Map keys must be strings");
-      result.insert_or_assign(KeyString, load_cbor_from_sequence(in));
+      result.insert_or_assign(key.as<llvm::StringRef>(),
+                              load_cbor_from_sequence(in));
     }
     return result;
   }
