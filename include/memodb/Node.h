@@ -387,23 +387,25 @@ public:
                       variant_);
   }
 
-  bool is_null() const noexcept {
+  constexpr bool is_null() const noexcept {
     return std::holds_alternative<std::monostate>(variant_);
   }
 
-  bool is_boolean() const noexcept {
+  constexpr bool is_boolean() const noexcept {
     return std::holds_alternative<bool>(variant_);
   }
 
-  bool is_integer() const noexcept {
+  constexpr bool is_integer() const noexcept {
     return std::holds_alternative<std::int64_t>(variant_);
   }
 
-  bool is_float() const noexcept {
+  constexpr bool is_float() const noexcept {
     return std::holds_alternative<double>(variant_);
   }
 
-  bool is_number() const noexcept { return is_integer() || is_float(); }
+  constexpr bool is_number() const noexcept {
+    return is_integer() || is_float();
+  }
 
   constexpr bool is_string() const noexcept {
     return std::holds_alternative<StringStorage>(variant_);
@@ -413,13 +415,15 @@ public:
     return std::holds_alternative<BytesStorage>(variant_);
   }
 
-  bool is_list() const noexcept {
+  constexpr bool is_list() const noexcept {
     return std::holds_alternative<List>(variant_);
   }
 
-  bool is_map() const noexcept { return std::holds_alternative<Map>(variant_); }
+  constexpr bool is_map() const noexcept {
+    return std::holds_alternative<Map>(variant_);
+  }
 
-  bool is_link() const noexcept {
+  constexpr bool is_link() const noexcept {
     return std::holds_alternative<CID>(variant_);
   }
 
@@ -644,7 +648,7 @@ struct NodeTypeTraits<
     IntegerType,
     typename std::enable_if<std::is_integral<IntegerType>::value &&
                             std::is_unsigned<IntegerType>::value>::type> {
-  static constexpr bool is(const Node &node) noexcept {
+  static bool is(const Node &node) noexcept {
     if (!node.is<std::int64_t>())
       return false;
     const std::int64_t value = node.as<std::int64_t>();
@@ -664,7 +668,7 @@ struct NodeTypeTraits<
     IntegerType,
     typename std::enable_if<std::is_integral<IntegerType>::value &&
                             std::is_signed<IntegerType>::value>::type> {
-  static constexpr bool is(const Node &node) noexcept {
+  static bool is(const Node &node) noexcept {
     if (!node.is<std::int64_t>())
       return false;
     const std::int64_t value = node.as<std::int64_t>();
