@@ -324,7 +324,7 @@ in {
     mesonFlags = o.mesonFlags ++ ["-Dgnu-efi=false"];
     # Remove stray references that are left in libsystemd.so because we disable
     # -Wl,--gc-sections.
-    postFixup = o.postFixup + ''
+    postFixup = (o.postFixup or "") + ''
       nukedRef=$(echo $out | sed -e "s,$NIX_STORE/[^-]*-\(.*\),$NIX_STORE/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-\1,")
       cat $lib/lib/libsystemd.so | perl -pe "s|$out|$nukedRef|" > $lib/lib/libsystemd.so.tmp
       mv $lib/lib/libsystemd.so.tmp $(readlink -f $lib/lib/libsystemd.so)
