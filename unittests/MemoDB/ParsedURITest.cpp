@@ -2,6 +2,8 @@
 
 #include "gtest/gtest.h"
 
+using namespace memodb;
+
 namespace {
 
 typedef std::vector<std::string> Segments;

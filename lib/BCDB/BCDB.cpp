@@ -143,7 +143,7 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
     return db->put(Node(byte_string_arg, Buffer));
   };
 
-  Node function_map = Node::map();
+  Node function_map = Node::Map();
   Splitter Splitter(*M);
 
   GlobalReferenceGraph Graph(*M);
@@ -173,7 +173,7 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   CID remainder_value = SaveModule(*M);
 
   auto result =
-      Node::map({{"functions", function_map}, {"remainder", remainder_value}});
+      Node::Map({{"functions", function_map}, {"remainder", remainder_value}});
   return db->put(result);
 }
 

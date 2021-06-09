@@ -70,8 +70,8 @@ TEST(ValuePrintTest, Array) {
 }
 
 TEST(ValuePrintTest, Map) {
-  test_print("{}", Node::map());
-  test_print("{\"x\": 1, \"y\": 2}", Node::map({{"x", 1}, {"y", 2}}));
+  test_print("{}", Node::Map());
+  test_print("{\"x\": 1, \"y\": 2}", Node::Map({{"x", 1}, {"y", 2}}));
 }
 
 TEST(ValuePrintTest, Ref) {

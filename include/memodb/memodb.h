@@ -20,16 +20,6 @@
 #include "CID.h"
 #include "Node.h"
 
-struct ParsedURI {
-public:
-  ParsedURI(llvm::StringRef URI);
-
-  // If input is "x:/foo%2Fbar", Path will be "/foo/bar" and PathSegments will
-  // be ["", "foo%2Fbar"].
-  std::string Scheme, Authority, Path, Query, Fragment;
-  std::vector<std::string> PathSegments;
-};
-
 struct memodb_head {
   std::string Name;
 

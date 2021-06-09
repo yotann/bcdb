@@ -193,7 +193,7 @@ static int Alive2() {
   BrokerSocket = nng::req::v0::open();
   BrokerSocket.dial(BrokerURL.c_str());
 
-  CID AliveSettings = memodb.put(Node::map({
+  CID AliveSettings = memodb.put(Node::Map({
       {"smt-to", 2 * (unsigned)Timeout},
       {"timeout", (unsigned)Timeout},
   }));
@@ -373,7 +373,7 @@ static Node evaluate_candidates(memodb_db &db, const Node &func) {
 
   Node Result = Node(node_list_arg);
   for (size_t i = 0; i < NodesValues.size(); i++) {
-    Result.push_back(Node::map({
+    Result.push_back(Node::Map({
         {"nodes", std::move(NodesValues[i])},
         {"callee", std::move(Functions[bytesToUTF8(CalleeNames[i])])},
         {"caller", std::move(Functions[bytesToUTF8(CallerNames[i])])},
@@ -592,10 +592,10 @@ static int Collate() {
                     {GroupForType(Def.getFunctionType()), GroupForGlobals(*M)});
     std::vector<std::uint8_t> KeyBytes;
     Key.save_cbor(KeyBytes);
-    return Node::map({{bytesToUTF8(KeyBytes), Node(node_list_arg, {ref})}});
+    return Node::Map({{bytesToUTF8(KeyBytes), Node(node_list_arg, {ref})}});
   };
   Node Groups = parallel_transform_reduce(UniqueCandidatesVec,
-                                          Node(Node::map()), Reduce, Transform);
+                                          Node(Node::Map()), Reduce, Transform);
   outs() << "Number of groups: " << Groups.size() << "\n";
 
   // Erase groups with only a single element.

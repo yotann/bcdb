@@ -13,10 +13,11 @@ add_llvm_library(MemoDB
   CID.cpp
   MemoDB.cpp
   Multibase.cpp
+  Node.cpp
   RocksDB.cpp
   SQLite.cpp
   Scripting.cpp
-  Node.cpp
+  Support.cpp
 )
 target_include_directories(MemoDB PRIVATE
   ${LIBSODIUM_INCLUDE_DIRS}

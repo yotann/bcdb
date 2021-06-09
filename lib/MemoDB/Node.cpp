@@ -5,52 +5,16 @@
 
 using namespace memodb;
 
-std::string memodb::bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes) {
-  std::string Result;
-  for (std::uint8_t Byte : Bytes) {
-    if (Byte < 0x80) {
-      Result.push_back((char)Byte);
-    } else {
-      Result.push_back((char)(0xc0 | (Byte >> 6)));
-      Result.push_back((char)(0x80 | (Byte & 0x3f)));
-    }
-  }
-  return Result;
-}
-
-std::string memodb::bytesToUTF8(llvm::StringRef Bytes) {
-  return bytesToUTF8(llvm::ArrayRef(
-      reinterpret_cast<const std::uint8_t *>(Bytes.data()), Bytes.size()));
-}
-
-std::string memodb::utf8ToByteString(llvm::StringRef Str) {
-  std::string Result;
-  while (!Str.empty()) {
-    std::uint8_t x = (std::uint8_t)Str[0];
-    if (x < 0x80) {
-      Result.push_back((char)x);
-      Str = Str.drop_front(1);
-    } else {
-      std::uint8_t y = Str.size() >= 2 ? (std::uint8_t)Str[1] : 0;
-      if ((x & 0xfc) != 0xc0 || (y & 0xc0) != 0x80)
-        llvm::report_fatal_error("invalid UTF-8 bytes");
-      Result.push_back((char)((x & 3) << 6 | (y & 0x3f)));
-      Str = Str.drop_front(2);
-    }
-  }
-  return Result;
-}
-
 void Node::validateUTF8() const {
-  auto Str = std::get<string_storage>(variant_);
+  auto Str = std::get<StringStorage>(variant_);
   auto Ptr = reinterpret_cast<const llvm::UTF8 *>(Str.data());
   if (!llvm::isLegalUTF8String(&Ptr, Ptr + Str.size()))
     llvm::report_fatal_error("invalid UTF-8 in string value");
 }
 
 void Node::validateKeysUTF8() const {
-  auto Map = std::get<map>(variant_);
-  for (const auto &Item : Map) {
+  auto map = std::get<Map>(variant_);
+  for (const auto &Item : map) {
     auto Ptr = reinterpret_cast<const llvm::UTF8 *>(Item.key().data());
     if (!llvm::isLegalUTF8String(&Ptr, Ptr + Item.key().size()))
       llvm::report_fatal_error("invalid UTF-8 in string value");
@@ -80,7 +44,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
     }
   };
 
-  std::visit(overloaded{
+  std::visit(Overloaded{
                  [&](const std::monostate &) { os << "null"; },
                  [&](const bool &x) { os << (x ? "true" : "false"); },
                  [&](const std::int64_t &x) { os << x; },
@@ -92,7 +56,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                    else
                      os << x;
                  },
-                 [&](const Node::bytes_storage &x) {
+                 [&](const Node::BytesStorage &x) {
                    if (std::all_of(x.begin(), x.end(), [](std::uint8_t b) {
                          return (b >= 32 && b <= 126) || b == '\n' ||
                                 b == '\r' || b == '\t';
@@ -113,7 +77,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                      os << "'";
                    }
                  },
-                 [&](const Node::string_storage &x) {
+                 [&](const Node::StringStorage &x) {
                    os << '"';
                    print_escaped(x, '"');
                    os << '"';
@@ -127,7 +91,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                    }
                    os << "')";
                  },
-                 [&](const Node::list &x) {
+                 [&](const Node::List &x) {
                    bool first = true;
                    os << '[';
                    for (const auto &item : x) {
@@ -138,7 +102,7 @@ std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
                    }
                    os << ']';
                  },
-                 [&](const Node::map &x) {
+                 [&](const Node::Map &x) {
                    bool first = true;
                    os << '{';
                    for (const auto &item : x) {
@@ -306,7 +270,7 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
       llvm::report_fatal_error("Integer too large");
     return -std::int64_t(additional) - 1;
   case 2: {
-    bytes_storage result;
+    BytesStorage result;
     while (next_string()) {
       result.insert(result.end(), in.data(), in.data() + additional);
       in = in.drop_front(additional);
@@ -325,7 +289,7 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     return node;
   }
   case 3: {
-    string_storage result;
+    StringStorage result;
     while (next_string()) {
       result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
@@ -333,13 +297,13 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     return Node(utf8_string_arg, std::move(result));
   }
   case 4: {
-    list result;
+    List result;
     while (next_item())
       result.emplace_back(load_cbor_from_sequence(in));
     return result;
   }
   case 5: {
-    map result;
+    Map result;
     while (next_item()) {
       Node key = load_cbor_from_sequence(in);
       if (!key.is<llvm::StringRef>())
@@ -402,7 +366,7 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
   };
 
   std::visit(
-      overloaded{
+      Overloaded{
           [&](const std::monostate &) { start(7, 22); },
           [&](const bool &x) { start(7, x ? 21 : 20); },
           [&](const std::int64_t &x) {
@@ -416,11 +380,11 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
             encode_float(additional, x, 64, 52, 1023);
             start(7, additional, 27);
           },
-          [&](const bytes_storage &x) {
+          [&](const BytesStorage &x) {
             start(2, x.size());
             out.insert(out.end(), x.begin(), x.end());
           },
-          [&](const string_storage &x) {
+          [&](const StringStorage &x) {
             start(3, x.size());
             out.insert(out.end(), x.begin(), x.end());
           },
@@ -431,12 +395,12 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
             out.push_back(0x00); // DAG-CBOR requires multibase prefix
             out.insert(out.end(), Bytes.begin(), Bytes.end());
           },
-          [&](const list &x) {
+          [&](const List &x) {
             start(4, x.size());
             for (const Node &item : x)
               item.save_cbor(out);
           },
-          [&](const map &x) {
+          [&](const Map &x) {
             std::vector<std::pair<std::vector<std::uint8_t>, const Node *>>
                 items;
             for (const auto &item : x) {
@@ -476,7 +440,7 @@ Node::saveAsIPLD(bool noIdentity) const {
   bool raw = kind() == Kind::Bytes;
   std::vector<std::uint8_t> Bytes;
   if (raw)
-    Bytes = llvm::ArrayRef<std::uint8_t>(std::get<bytes_storage>(variant_));
+    Bytes = llvm::ArrayRef<std::uint8_t>(std::get<BytesStorage>(variant_));
   else
     save_cbor(Bytes);
   CID Ref = CID::calculate(raw ? Multicodec::Raw : Multicodec::DAG_CBOR, Bytes,

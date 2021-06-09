@@ -245,7 +245,7 @@ static int Export() {
     } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
       Node &FuncCalls = Calls[Call->Name];
       if (FuncCalls == Node{})
-        FuncCalls = Node::map();
+        FuncCalls = Node::Map();
       Node Args = Node(node_list_arg);
       std::string Key;
       for (const CID &Arg : Call->Args) {
@@ -255,7 +255,7 @@ static int Export() {
       }
       Key.pop_back();
       auto Result = Db->resolve(Name);
-      FuncCalls[Key] = Node::map({{"args", Args}, {"result", Result}});
+      FuncCalls[Key] = Node::Map({{"args", Args}, {"result", Result}});
       exportRef(Result);
     } else {
       llvm_unreachable("impossible memodb_name type");
@@ -280,7 +280,7 @@ static int Export() {
   CID RootRef = exportValue(Root);
 
   Node Header =
-      Node::map({{"roots", Node(node_list_arg, {RootRef})}, {"version", 1}});
+      Node::Map({{"roots", Node(node_list_arg, {RootRef})}, {"version", 1}});
   std::vector<std::uint8_t> Buffer;
   Header.save_cbor(Buffer);
   OutputFile->os().seek(0);
