@@ -7,7 +7,7 @@ self: super: let
   original = self;
 in {
   bitcodeWrapper = self.callPackage ../bitcode-cc-wrapper {
-    inherit (self.llvmPackages_10) clang llvm bintools;
+    inherit (self.llvmPackages_10) clang;
   };
 
   bitcodeStdenv = let
