@@ -21,6 +21,8 @@ namespace memodb {
 
 class Node;
 
+using BytesRef = llvm::ArrayRef<std::uint8_t>;
+
 // An alternative to std::pair for holding key-value pairs.
 template <class KeyT, class ValueT> class KeyValue {
 private:
@@ -212,6 +214,12 @@ private:
   void validateKeysUTF8() const;
 
   friend std::ostream &operator<<(std::ostream &, const Node &);
+  friend struct NodeTypeTraits<bool>;
+  friend struct NodeTypeTraits<std::int64_t>;
+  friend struct NodeTypeTraits<double>;
+  friend struct NodeTypeTraits<BytesRef>;
+  friend struct NodeTypeTraits<llvm::StringRef>;
+  friend struct NodeTypeTraits<CID>;
 
 public:
   // Constructors and assignment.
@@ -286,7 +294,7 @@ public:
                          reinterpret_cast<const std::uint8_t *>(source.data()) +
                              source.size())) {}
 
-  Node(llvm::ArrayRef<std::uint8_t> bytes) : Node(byte_string_arg, bytes) {}
+  Node(BytesRef bytes) : Node(byte_string_arg, bytes) {}
 
   explicit Node(NodeListArg) : Node(List()) {}
 
@@ -334,7 +342,7 @@ public:
 
   // Load a Node from DAG-CBOR bytes:
   // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
-  static Node load_cbor(llvm::ArrayRef<std::uint8_t> in) {
+  static Node load_cbor(BytesRef in) {
     Node result = load_cbor_from_sequence(in);
     if (!in.empty())
       llvm::report_fatal_error("Extra bytes after CBOR node");
@@ -344,7 +352,7 @@ public:
   // Load a Node from DAG-CBOR bytes at the beginning of a sequence. When this
   // returns, "in" will refer to the rest of the bytes after the DAG-CBOR
   // value.
-  static Node load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in);
+  static Node load_cbor_from_sequence(BytesRef &in);
 
   // Save a Node to DAG-CBOR bytes.
   void save_cbor(std::vector<std::uint8_t> &out) const;
@@ -353,8 +361,7 @@ public:
   // content type may be either Raw (bytes returned as a bytestring Node) or
   // DAG-CBOR. The CID hash type may be Identity, in which case the value is
   // loaded directly from the CID.
-  static Node loadFromIPLD(const CID &CID,
-                           llvm::ArrayRef<std::uint8_t> Content);
+  static Node loadFromIPLD(const CID &CID, BytesRef Content);
 
   // Save a Node as a CID and the corresponding content bytes. The CID content
   // type will be either Raw (if this is a bytestring Node) or DAG-CBOR. If
@@ -605,66 +612,6 @@ public:
                },
                variant_);
   }
-
-  // Obsolete accessors (don't use these; use is<>() and as<>() instead).
-
-  llvm::StringRef as_string_ref() const {
-    return std::get<StringStorage>(variant_);
-  }
-
-  llvm::ArrayRef<std::uint8_t> as_bytes_ref() const {
-    return std::get<BytesStorage>(variant_);
-  }
-
-  // Stricter than jsoncons (integers don't work).
-  bool as_boolean() const { return std::get<bool>(variant_); }
-
-  // Stricter than jsoncons (floats and booleans don't work).
-  template <class IntegerType> IntegerType as_integer() const {
-    if (!is_integer<IntegerType>())
-      llvm::report_fatal_error("Integer overflow or not an integer");
-    return static_cast<IntegerType>(std::get<std::int64_t>(variant_));
-  }
-
-  template <class IntegerType>
-  std::enable_if_t<std::is_integral<IntegerType>::value &&
-                       std::is_signed<IntegerType>::value,
-                   bool>
-  is_integer() const noexcept {
-    if (const std::int64_t *value = std::get_if<std::int64_t>(&variant_))
-      return *value >= std::numeric_limits<IntegerType>::lowest() &&
-             *value <= std::numeric_limits<IntegerType>::max();
-    return false;
-  }
-
-  template <class IntegerType>
-  std::enable_if_t<std::is_integral<IntegerType>::value &&
-                       std::is_unsigned<IntegerType>::value,
-                   bool>
-  is_integer() const noexcept {
-    if (const std::int64_t *value = std::get_if<std::int64_t>(&variant_))
-      return *value >= 0 && static_cast<std::int64_t>(
-                                static_cast<IntegerType>(*value)) == *value;
-    return false;
-  }
-
-  double as_float() const {
-    return std::visit(
-        Overloaded{
-            [](const double &value) { return value; },
-            [](const std::int64_t &value) { return double(value); },
-            [](const auto &) {
-              llvm::report_fatal_error("Not a number");
-              return 0.0;
-            },
-        },
-        variant_);
-  }
-
-  // Stricter than jsoncons (bytes and arrays don't work).
-  std::string as_string() const { return as_string_ref().str(); }
-
-  const CID &as_link() const { return std::get<CID>(variant_); }
 };
 
 // Print a Node. The format currently used is CBOR's extended diagnostic
@@ -674,24 +621,90 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Node &value);
 
 // Various basic types to be used with Node::is and Node::as.
 
-template <class T>
-struct NodeTypeTraits<
-    T, typename std::enable_if<std::is_integral<T>::value>::type> {
+template <> struct NodeTypeTraits<bool> {
   static constexpr bool is(const Node &node) noexcept {
-    return node.is_integer<T>();
+    return node.is_boolean();
   }
 
-  static T as(const Node &node) { return node.as_integer<T>(); }
+  static bool as(const Node &node) { return std::get<bool>(node.variant_); }
 };
 
-template <> struct NodeTypeTraits<llvm::ArrayRef<std::uint8_t>> {
+template <> struct NodeTypeTraits<std::int64_t> {
+  static constexpr bool is(const Node &node) noexcept {
+    return node.is_integer();
+  }
+
+  static std::int64_t as(const Node &node) {
+    return std::get<std::int64_t>(node.variant_);
+  }
+};
+
+template <class IntegerType>
+struct NodeTypeTraits<
+    IntegerType,
+    typename std::enable_if<std::is_integral<IntegerType>::value &&
+                            std::is_unsigned<IntegerType>::value>::type> {
+  static constexpr bool is(const Node &node) noexcept {
+    if (!node.is<std::int64_t>())
+      return false;
+    const std::int64_t value = node.as<std::int64_t>();
+    return value >= 0 &&
+           static_cast<std::int64_t>(static_cast<IntegerType>(value)) == value;
+  }
+
+  static IntegerType as(const Node &node) {
+    if (!is(node))
+      llvm::report_fatal_error("Integer overflow or not an integer");
+    return static_cast<IntegerType>(node.as<std::int64_t>());
+  }
+};
+
+template <class IntegerType>
+struct NodeTypeTraits<
+    IntegerType,
+    typename std::enable_if<std::is_integral<IntegerType>::value &&
+                            std::is_signed<IntegerType>::value>::type> {
+  static constexpr bool is(const Node &node) noexcept {
+    if (!node.is<std::int64_t>())
+      return false;
+    const std::int64_t value = node.as<std::int64_t>();
+    return value >= std::numeric_limits<IntegerType>::lowest() &&
+           value <= std::numeric_limits<IntegerType>::max();
+  }
+
+  static IntegerType as(const Node &node) {
+    if (!is(node))
+      llvm::report_fatal_error("Integer overflow or not an integer");
+    return static_cast<IntegerType>(node.as<std::int64_t>());
+  }
+};
+
+template <> struct NodeTypeTraits<double> {
+  static constexpr bool is(const Node &node) noexcept {
+    return node.is_number();
+  }
+
+  static double as(const Node &node) {
+    return std::visit(
+        Overloaded{
+            [](const double &value) { return value; },
+            [](const std::int64_t &value) { return double(value); },
+            [](const auto &) {
+              llvm::report_fatal_error("Not a number");
+              return 0.0;
+            },
+        },
+        node.variant_);
+  }
+};
+
+template <> struct NodeTypeTraits<BytesRef> {
   static constexpr bool is(const Node &node) noexcept {
     return node.is_bytes();
   }
 
-  static llvm::ArrayRef<std::uint8_t> as(const Node &val,
-                                         ByteStringArg = byte_string_arg) {
-    return val.as_bytes_ref();
+  static BytesRef as(const Node &node, ByteStringArg = byte_string_arg) {
+    return std::get<Node::BytesStorage>(node.variant_);
   }
 };
 
@@ -700,10 +713,12 @@ template <> struct NodeTypeTraits<llvm::StringRef> {
     return node.is_string();
   }
 
-  static llvm::StringRef as(const Node &node) { return node.as_string_ref(); }
+  static llvm::StringRef as(const Node &node) {
+    return std::get<Node::StringStorage>(node.variant_);
+  }
 
   static llvm::StringRef as(const Node &node, ByteStringArg) {
-    auto bytes = node.as_bytes_ref();
+    auto bytes = node.as<BytesRef>();
     return llvm::StringRef(reinterpret_cast<const char *>(bytes.data()),
                            bytes.size());
   }
@@ -714,12 +729,22 @@ template <> struct NodeTypeTraits<std::string> {
     return node.is_string();
   }
 
-  static std::string as(const Node &node) { return node.as_string_ref().str(); }
+  static std::string as(const Node &node) {
+    return node.as<llvm::StringRef>().str();
+  }
 
   static std::string as(const Node &node, ByteStringArg) {
-    auto bytes = node.as_bytes_ref();
+    auto bytes = node.as<BytesRef>();
     return std::string(reinterpret_cast<const char *>(bytes.data()),
                        bytes.size());
+  }
+};
+
+template <> struct NodeTypeTraits<CID> {
+  static constexpr bool is(const Node &node) noexcept { return node.is_link(); }
+
+  static const CID &as(const Node &node) {
+    return std::get<CID>(node.variant_);
   }
 };
 

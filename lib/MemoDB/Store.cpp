@@ -70,7 +70,7 @@ std::vector<Path> Store::list_paths_to(const CID &ref) {
     std::vector<Node> CurPath;
     std::function<void(const Node &)> recurse = [&](const Node &Value) {
       if (Value.kind() == Kind::Link) {
-        if (Value.as_link() == Ref)
+        if (Value.as<CID>() == Ref)
           Result.push_back(CurPath);
       } else if (Value.kind() == Kind::List) {
         for (size_t i = 0; i < Value.size(); i++) {

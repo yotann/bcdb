@@ -395,7 +395,7 @@ std::vector<Name> RocksDBStore::list_names_using(const CID &ref) {
     else if (Type == TYPE_CALL) {
       auto Bytes = makeBytes(Ref);
       Call Call("", {});
-      Call.Name = Node::load_cbor_from_sequence(Bytes).as_string();
+      Call.Name = Node::load_cbor_from_sequence(Bytes).as<std::string>();
       while (!Bytes.empty())
         Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
       Result.emplace_back(std::move(Call));
@@ -411,7 +411,8 @@ std::vector<std::string> RocksDBStore::list_funcs() {
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->SeekToFirst(); Iterator->Valid();) {
     auto Bytes = makeBytes(Iterator->key());
-    Result.emplace_back(Node::load_cbor_from_sequence(Bytes).as_string());
+    Result.emplace_back(
+        Node::load_cbor_from_sequence(Bytes).as<llvm::StringRef>());
 
     std::vector<std::uint8_t> NextKey =
         makeBytes(Iterator->key()).drop_back(Bytes.size());

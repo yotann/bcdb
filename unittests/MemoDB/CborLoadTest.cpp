@@ -35,7 +35,7 @@ TEST(CborLoadTest, Float) {
   auto check = [](double expected, const std::vector<uint8_t> &cbor) {
     Node value = Node::load_cbor(cbor);
     ASSERT_EQ(Kind::Float, value.kind());
-    double actual = value.as_float();
+    double actual = value.as<double>();
     if (std::isnan(expected))
       ASSERT_TRUE(std::isnan(actual));
     else

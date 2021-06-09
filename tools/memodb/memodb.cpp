@@ -241,7 +241,7 @@ static int Export() {
       IDs.emplace_back(*Ref);
     } else if (const Head *head = std::get_if<Head>(&Name)) {
       Heads[head->Name] = Db->resolve(Name);
-      exportRef(Heads[head->Name].as_link());
+      exportRef(Heads[head->Name].as<CID>());
     } else if (const Call *call = std::get_if<Call>(&Name)) {
       Node &FuncCalls = Calls[call->Name];
       if (FuncCalls == Node{})

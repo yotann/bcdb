@@ -203,8 +203,8 @@ static int Alive2() {
     auto &Group = GroupPair.value();
     for (unsigned i = 1; i < Group.size(); i++) {
       for (unsigned j = 0; j < i; j++) {
-        AllPairs.emplace_back(Group[i].as_link(), Group[j].as_link());
-        AllPairs.emplace_back(Group[j].as_link(), Group[i].as_link());
+        AllPairs.emplace_back(Group[i].as<CID>(), Group[j].as<CID>());
+        AllPairs.emplace_back(Group[j].as<CID>(), Group[i].as<CID>());
       }
     }
   }
@@ -231,7 +231,7 @@ static int Alive2() {
     auto RefinesRef =
         memodb.resolveOptional(Call("refines", {Pair.first, Pair.second}));
     if (RefinesRef) {
-      if (memodb.get(*RefinesRef).as_boolean())
+      if (memodb.get(*RefinesRef).as<bool>())
         NumValid++;
       else
         NumInvalid++;
@@ -250,10 +250,10 @@ static int Alive2() {
     }
 
     Node RefinesValue = AliveValue["valid"];
-    StringRef status = AliveValue["status"].as_string_ref();
+    StringRef status = AliveValue["status"].as<StringRef>();
     StringRef stderrString;
     if (AliveValue.contains("errs"))
-      stderrString = AliveValue["errs"].as_string_ref();
+      stderrString = AliveValue["errs"].as<StringRef>();
 
     if (RefinesValue == true && status == "CORRECT" && stderrString.empty()) {
       NumValid++;
@@ -525,7 +525,7 @@ static Node evaluate_profitable(Store &db, const Node &func) {
   Node result = Node(node_list_arg);
   Node orig_size = db.get(Call("compiled.size", {FuncId}));
   for (const auto &item : candidates.list_range()) {
-    CID caller = item.at("caller").as_link();
+    CID caller = item.at("caller").as<CID>();
     Node caller_size = db.get(Call("compiled.size", {caller}));
     if (caller_size.as<size_t>() < orig_size.as<size_t>())
       result.push_back(item);
@@ -550,7 +550,7 @@ static int Collate() {
     TotalProfitable += profitable.size();
     StringSet Result;
     for (const auto &item : profitable.list_range()) {
-      CID callee = item.at("callee").as_link();
+      CID callee = item.at("callee").as<CID>();
       Result.insert(StringRef(callee));
     }
     return Result;
@@ -738,8 +738,8 @@ static int Estimate() {
     std::vector<SmallVector<unsigned, 4>> NodeUses;
 
     for (Node &Candidate : Candidates.list_range()) {
-      CID CalleeRef = Candidate["callee"].as_link();
-      CID CallerRef = Candidate["caller"].as_link();
+      CID CalleeRef = Candidate["callee"].as<CID>();
+      CID CallerRef = Candidate["caller"].as<CID>();
       auto CalleeSize = compiled_size(CalleeRef);
       auto CallerSize = compiled_size(CallerRef);
       if (CallerSize >= OrigSize) {
@@ -795,7 +795,7 @@ static int Estimate() {
     for (auto &GroupPair : Collated.map_range()) {
       auto &Group = GroupPair.value();
       for (const Node &FirstValue : Group.list_range()) {
-        CID FirstRef = FirstValue.as_link();
+        CID FirstRef = FirstValue.as<CID>();
         auto callee_it = CalleeIndexMap.find(StringRef(FirstRef));
         if (callee_it == CalleeIndexMap.end())
           continue;
@@ -805,7 +805,7 @@ static int Estimate() {
         for (const Node &SecondValue : Group.list_range()) {
           if (FirstValue == SecondValue)
             continue;
-          CID SecondRef = SecondValue.as_link();
+          CID SecondRef = SecondValue.as<CID>();
           auto RefinesRef =
               memodb.resolveOptional(Call("refines", {FirstRef, SecondRef}));
           if (!RefinesRef)
@@ -1064,8 +1064,8 @@ static int Measure() {
         memodb.resolve(Call("smout.candidates", {*CID::parse(FuncId)}));
     Node candidates_value = memodb.get(candidates);
     for (const auto &item : candidates_value.list_range()) {
-      all_funcs.push_back(item.at("callee").as_link());
-      all_funcs.push_back(item.at("caller").as_link());
+      all_funcs.push_back(item.at("callee").as<CID>());
+      all_funcs.push_back(item.at("caller").as<CID>());
     }
   }
   outs() << "Number of unique original functions, outlined callees, and "
@@ -1118,11 +1118,7 @@ static int ShowGroups() {
   }
 
   std::sort(GroupCounts.begin(), GroupCounts.end(),
-            [](const auto &a, const auto &b) {
-              if (b.first != a.first)
-                return b.first < a.first;
-              return b.second.as_string_ref() < a.second.as_string_ref();
-            });
+            [](const auto &a, const auto &b) { return b < a; });
   for (const auto &Item : GroupCounts) {
     outs() << Item.first << " " << Item.second << "\n";
   }

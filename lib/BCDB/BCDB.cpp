@@ -68,7 +68,7 @@ Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
   Node head = db->get(ref);
   std::vector<std::string> result;
   for (auto &item : head["functions"].map_range()) {
-    result.push_back(std::string(item.value().as_link()));
+    result.push_back(std::string(item.value().as<CID>()));
   }
   return result;
 }
@@ -199,11 +199,11 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
   CID head_ref = db->head_get(Name);
   Node head = db->get(head_ref);
   auto Remainder =
-      LoadModuleFromValue(db, head["remainder"].as_link(), Name, *Context);
+      LoadModuleFromValue(db, head["remainder"].as<CID>(), Name, *Context);
 
   for (auto &Item : head["functions"].map_range()) {
     auto Name = utf8ToByteString(Item.key());
-    CID ref = Item.value().as_link();
+    CID ref = Item.value().as<CID>();
     PartIDs[std::string(Name)] = llvm::StringRef(ref);
   }
 
@@ -218,13 +218,13 @@ Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
   CID head_ref = db->head_get(Name);
   Node head = db->get(head_ref);
 
-  auto M = LoadModuleFromValue(db, head["remainder"].as_link(), "remainder",
+  auto M = LoadModuleFromValue(db, head["remainder"].as<CID>(), "remainder",
                                *Context);
   Joiner Joiner(*M);
   for (auto &Item : head["functions"].map_range()) {
     auto Name = utf8ToByteString(Item.key());
     auto MPart =
-        LoadModuleFromValue(db, Item.value().as_link(), Name, *Context);
+        LoadModuleFromValue(db, Item.value().as<CID>(), Name, *Context);
     Joiner.JoinGlobal(Name, std::move(MPart));
   }
 

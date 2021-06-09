@@ -132,7 +132,7 @@ void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
   auto Header = readValue(&Pos, HeaderSize);
   if (Header["version"] != 1 || Header["roots"].size() != 1)
     llvm::report_fatal_error("Unsupported CAR header");
-  CID RootRef = Header["roots"][0].as_link();
+  CID RootRef = Header["roots"][0].as<CID>();
 
   while (true) {
     auto BlockStart = Pos;
@@ -181,7 +181,7 @@ llvm::Optional<memodb::CID> CARStore::resolveOptional(const Name &Name) {
     const Node &Value = Root["heads"].at_or_null(head->Name);
     if (Value.is_null())
       return {};
-    return Value.as_link();
+    return Value.as<CID>();
   } else if (const Call *call = std::get_if<Call>(&Name)) {
     const Node &AllCalls = Root["calls"].at_or_null(call->Name);
     if (AllCalls.is_null())
@@ -193,7 +193,7 @@ llvm::Optional<memodb::CID> CARStore::resolveOptional(const Name &Name) {
     const Node &Value = AllCalls.at_or_null(Key);
     if (Value.is_null())
       return {};
-    return Value["result"].as_link();
+    return Value["result"].as<CID>();
   } else {
     llvm_unreachable("impossible Name type");
   }
@@ -213,7 +213,7 @@ void CARStore::eachCall(llvm::StringRef Func,
   for (const auto &Item : Calls.map_range()) {
     Call Call(Func, {});
     for (const Node &Arg : Item.value()["args"].list_range())
-      Call.Args.emplace_back(Arg.as_link());
+      Call.Args.emplace_back(Arg.as<CID>());
     if (F(Call))
       break;
   }
