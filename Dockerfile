@@ -25,10 +25,16 @@ COPY .gitignore flake.lock *.nix ./
 RUN nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \
     nix-store --optimize
 
+# Build a small program using the bitcode overlay, just to make sure the
+# necessary dependencies are cached by Docker.
+COPY nix/bitcode-cc-wrapper nix/bitcode-cc-wrapper
+COPY nix/bitcode-overlay nix/bitcode-overlay
+RUN nix-build nix/bitcode-overlay -A pkgsBitcode.pv && \
+    nix-store --optimize
+
 # Copy the full BCDB source code.
 RUN rm -rf *
 COPY . ./
 
 # Build, test, and install BCDB.
-RUN nix-env -f . -iA bcdb && \
-    nix-store --optimize
+RUN nix-env -f . -iA bcdb
