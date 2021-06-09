@@ -7,7 +7,7 @@ self: super: let
   original = self;
 in {
   bitcodeWrapper = self.callPackage ../bitcode-cc-wrapper {
-    inherit (self.llvmPackages_10) clang;
+    inherit (self.llvmPackages_12) clang;
   };
 
   bitcodeStdenv = let
@@ -236,8 +236,13 @@ in {
   llvmPackages_9 = fixLLVM {} super.llvmPackages_9;
   llvmPackages_10 = fixLLVM {} super.llvmPackages_10;
   llvmPackages_10_dylib = fixLLVM { shared-libs = false; dylib = true; } super.llvmPackages_10;
+  llvmPackages_11 = fixLLVM {} super.llvmPackages_11;
+  llvmPackages_12 = fixLLVM {} super.llvmPackages_12;
+  llvmPackages_12_dylib = fixLLVM { shared-libs = false; dylib = true; } super.llvmPackages_12;
   clang_10_dylib = self.llvmPackages_10_dylib.clang;
   llvm_10_dylib = self.llvmPackages_10_dylib.llvm;
+  clang_12_dylib = self.llvmPackages_12_dylib.clang;
+  llvm_12_dylib = self.llvmPackages_12_dylib.llvm;
 
   mariadb = let
     client = super.mariadb.client;
