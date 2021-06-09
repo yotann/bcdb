@@ -9,10 +9,9 @@
 #include <string>
 #include <vector>
 
-class memodb_db;
-
 namespace memodb {
 class CID;
+class Store;
 } // end namespace memodb
 
 namespace llvm {
@@ -30,17 +29,17 @@ extern llvm::cl::OptionCategory MergeCategory;
 
 class BCDB {
   std::unique_ptr<llvm::LLVMContext> Context;
-  std::unique_ptr<memodb_db> unique_db;
-  memodb_db *db;
+  std::unique_ptr<memodb::Store> unique_db;
+  memodb::Store *db;
 
 public:
-  BCDB(std::unique_ptr<memodb_db> db); // freed when BCDB destroyed
-  BCDB(memodb_db &db);                 // not freed when BCDB destroyed
+  BCDB(std::unique_ptr<memodb::Store> db); // freed when BCDB destroyed
+  BCDB(memodb::Store &db);                 // not freed when BCDB destroyed
   ~BCDB();
   static llvm::Error Init(llvm::StringRef uri);
   static llvm::Expected<std::unique_ptr<BCDB>> Open(llvm::StringRef uri);
 
-  memodb_db &get_db() { return *db; }
+  memodb::Store &get_db() { return *db; }
 
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
   llvm::Expected<memodb::CID> AddWithoutHead(std::unique_ptr<llvm::Module> M);

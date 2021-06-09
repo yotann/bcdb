@@ -81,7 +81,7 @@ static const char SQLITE_INIT_STMTS[] =
     "CREATE INDEX call_ref_by_funcid ON call_refs(funcid);\n";
 
 namespace {
-class sqlite_db : public memodb_db {
+class sqlite_db : public Store {
   // Used by each thread to look up its own connection to the database.
   // TODO: entries in this map are never removed, even when the sqlite_db is
   // destroyed, which could cause memory leaks.
@@ -121,8 +121,8 @@ class sqlite_db : public memodb_db {
                             const llvm::ArrayRef<std::uint8_t> &Bytes,
                             const Node &Value);
 
-  std::vector<std::uint8_t> encodeArgs(const memodb_call &Call);
-  memodb_call identifyCall(sqlite3_int64 callid);
+  std::vector<std::uint8_t> encodeArgs(const Call &Call);
+  Call identifyCall(sqlite3_int64 callid);
 
   friend class ExclusiveTransaction;
 
@@ -131,15 +131,15 @@ public:
   ~sqlite_db() override;
 
   llvm::Optional<Node> getOptional(const CID &CID) override;
-  llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
+  llvm::Optional<CID> resolveOptional(const Name &Name) override;
   CID put(const Node &value) override;
-  void set(const memodb_name &Name, const CID &ref) override;
-  std::vector<memodb_name> list_names_using(const CID &ref) override;
+  void set(const Name &Name, const CID &ref) override;
+  std::vector<Name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
-  void eachHead(std::function<bool(const memodb_head &)> F) override;
+  void eachHead(std::function<bool(const Head &)> F) override;
   void eachCall(llvm::StringRef Func,
-                std::function<bool(const memodb_call &)> F) override;
-  void head_delete(const memodb_head &Head) override;
+                std::function<bool(const Call &)> F) override;
+  void head_delete(const Head &Head) override;
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
@@ -463,7 +463,7 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
   return new_id;
 }
 
-std::vector<std::uint8_t> sqlite_db::encodeArgs(const memodb_call &Call) {
+std::vector<std::uint8_t> sqlite_db::encodeArgs(const Call &Call) {
   Node ArgsValue = Node(node_list_arg);
   for (const CID &Arg : Call.Args)
     ArgsValue.emplace_back(cid_to_bid(Arg));
@@ -472,7 +472,7 @@ std::vector<std::uint8_t> sqlite_db::encodeArgs(const memodb_call &Call) {
   return Result;
 }
 
-memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
+Call sqlite_db::identifyCall(sqlite3_int64 callid) {
   sqlite3 *db = get_db();
   Stmt stmt(
       db, "SELECT name, args FROM calls NATURAL JOIN funcs WHERE callid = ?1");
@@ -484,7 +484,7 @@ memodb_call sqlite_db::identifyCall(sqlite3_int64 callid) {
   for (const Node &ArgValue : ArgsValue.list_range())
     Args.emplace_back(bid_to_cid(ArgValue.as<sqlite3_int64>()));
 
-  return memodb_call(stmt.columnString(0), Args);
+  return Call(stmt.columnString(0), Args);
 }
 
 CID sqlite_db::put(const Node &value) {
@@ -493,19 +493,19 @@ CID sqlite_db::put(const Node &value) {
   return IPLD.first;
 }
 
-void sqlite_db::set(const memodb_name &Name, const CID &ref) {
+void sqlite_db::set(const Name &Name, const CID &ref) {
   sqlite3 *db = get_db();
-  if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+  if (const Head *head = std::get_if<Head>(&Name)) {
     Stmt stmt(db, "INSERT OR REPLACE INTO heads(name, bid) VALUES(?1,?2)");
-    stmt.bind_text(1, Head->Name);
+    stmt.bind_text(1, head->Name);
     stmt.bind_int(2, cid_to_bid(ref));
     checkDone(stmt.step());
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-    auto funcid = get_funcid(Call->Name, /* create_if_missing */ true);
+  } else if (const Call *call = std::get_if<Call>(&Name)) {
+    auto funcid = get_funcid(call->Name, /* create_if_missing */ true);
 
     ExclusiveTransaction transaction(*this);
 
-    auto Args = encodeArgs(*Call);
+    auto Args = encodeArgs(*call);
 
     bool existing;
     sqlite3_int64 CallID;
@@ -537,7 +537,7 @@ void sqlite_db::set(const memodb_name &Name, const CID &ref) {
       {
         Stmt stmt(db, "INSERT OR IGNORE INTO call_refs(funcid, callid, dest) "
                       "VALUES(?1,?2,?3)");
-        for (const CID &Arg : Call->Args) {
+        for (const CID &Arg : call->Args) {
           stmt.bind_int(1, funcid);
           stmt.bind_int(2, CallID);
           stmt.bind_int(3, cid_to_bid(Arg));
@@ -576,20 +576,20 @@ llvm::Optional<Node> sqlite_db::getOptional(const CID &CID) {
   return Node::loadFromIPLD(CID, stmt.columnBytes(1));
 }
 
-llvm::Optional<CID> sqlite_db::resolveOptional(const memodb_name &Name) {
+llvm::Optional<CID> sqlite_db::resolveOptional(const Name &Name) {
   if (const CID *Ref = std::get_if<CID>(&Name)) {
     return *Ref;
-  } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+  } else if (const Head *head = std::get_if<Head>(&Name)) {
     sqlite3 *db = get_db();
     Stmt stmt(db, "SELECT bid FROM heads WHERE name = ?1");
-    stmt.bind_text(1, Head->Name);
+    stmt.bind_text(1, head->Name);
     if (!checkRow(stmt.step()))
       return llvm::None;
     return bid_to_cid(stmt.columnInt(0));
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
+  } else if (const Call *call = std::get_if<Call>(&Name)) {
     sqlite3 *db = get_db();
-    auto funcid = get_funcid(Call->Name);
-    auto Args = encodeArgs(*Call);
+    auto funcid = get_funcid(call->Name);
+    auto Args = encodeArgs(*call);
     Stmt stmt(db, "SELECT result FROM calls WHERE funcid = ?1 AND args = ?2");
     stmt.bind_int(1, funcid);
     stmt.bind_blob(2, Args);
@@ -597,13 +597,13 @@ llvm::Optional<CID> sqlite_db::resolveOptional(const memodb_name &Name) {
       return llvm::None;
     return bid_to_cid(stmt.columnInt(0));
   } else {
-    llvm_unreachable("impossible memodb_name type");
+    llvm_unreachable("impossible Name type");
   }
 }
 
-std::vector<memodb_name> sqlite_db::list_names_using(const CID &ref) {
+std::vector<Name> sqlite_db::list_names_using(const CID &ref) {
   sqlite3 *db = get_db();
-  std::vector<memodb_name> Result;
+  std::vector<Name> Result;
 
   auto BID = cid_to_bid(ref);
 
@@ -618,7 +618,7 @@ std::vector<memodb_name> sqlite_db::list_names_using(const CID &ref) {
     Stmt stmt(db, "SELECT name FROM heads WHERE bid = ?1");
     stmt.bind_int(1, BID);
     while (checkRow(stmt.step()))
-      Result.emplace_back(memodb_head(stmt.columnString(0)));
+      Result.emplace_back(Head(stmt.columnString(0)));
   }
 
   {
@@ -639,7 +639,7 @@ std::vector<memodb_name> sqlite_db::list_names_using(const CID &ref) {
 }
 
 void sqlite_db::eachCall(llvm::StringRef Func,
-                         std::function<bool(const memodb_call &)> F) {
+                         std::function<bool(const Call &)> F) {
   sqlite3 *db = get_db();
   sqlite3_int64 FuncID = get_funcid(Func);
   Stmt stmt(db, "SELECT callid FROM calls WHERE funcid = ?");
@@ -658,15 +658,15 @@ std::vector<std::string> sqlite_db::list_funcs() {
   return result;
 }
 
-void sqlite_db::eachHead(std::function<bool(const memodb_head &)> F) {
+void sqlite_db::eachHead(std::function<bool(const Head &)> F) {
   sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT name FROM heads");
   while (checkRow(stmt.step()))
-    if (F(memodb_head(stmt.columnString(0))))
+    if (F(Head(stmt.columnString(0))))
       break;
 }
 
-void sqlite_db::head_delete(const memodb_head &Head) {
+void sqlite_db::head_delete(const Head &Head) {
   sqlite3 *db = get_db();
   Stmt delete_stmt(db, "DELETE FROM heads WHERE name = ?1");
   delete_stmt.bind_text(1, Head.Name);
@@ -715,8 +715,8 @@ void sqlite_db::call_invalidate(llvm::StringRef name) {
   transaction.commit();
 }
 
-std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
-                                              bool create_if_missing) {
+std::unique_ptr<Store> memodb_sqlite_open(llvm::StringRef path,
+                                          bool create_if_missing) {
   auto uri = "file:" + path;
   auto db = std::make_unique<sqlite_db>();
   db->open(uri.str().c_str(), create_if_missing);

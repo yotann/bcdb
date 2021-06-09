@@ -1,4 +1,4 @@
-#include "memodb/memodb.h"
+#include "memodb/Store.h"
 
 #include "memodb_internal.h"
 
@@ -9,8 +9,8 @@
 
 using namespace memodb;
 
-std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
-                                          bool create_if_missing) {
+std::unique_ptr<Store> Store::open(llvm::StringRef uri,
+                                   bool create_if_missing) {
   if (uri.startswith("sqlite:")) {
     return memodb_sqlite_open(uri.substr(7), create_if_missing);
   } else if (uri.startswith("car:")) {
@@ -22,47 +22,47 @@ std::unique_ptr<memodb_db> memodb_db_open(llvm::StringRef uri,
   }
 }
 
-std::ostream &operator<<(std::ostream &os, const memodb_head &head) {
+std::ostream &memodb::operator<<(std::ostream &os, const Head &head) {
   return os << head.Name;
 }
 
-llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_head &head) {
+llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Head &head) {
   return os << head.Name;
 }
 
-std::ostream &operator<<(std::ostream &os, const memodb_call &call) {
+std::ostream &memodb::operator<<(std::ostream &os, const Call &call) {
   os << "call:" << call.Name;
   for (const CID &Arg : call.Args)
     os << "/" << Arg;
   return os;
 }
 
-llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_call &call) {
+llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Call &call) {
   os << "call:" << call.Name;
   for (const CID &Arg : call.Args)
     os << "/" << Arg;
   return os;
 }
 
-std::ostream &operator<<(std::ostream &os, const memodb_name &name) {
-  if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
-    os << "heads[" << Node(utf8_string_arg, Head->Name) << "]";
+std::ostream &memodb::operator<<(std::ostream &os, const Name &name) {
+  if (const Head *head = std::get_if<Head>(&name)) {
+    os << "heads[" << Node(utf8_string_arg, head->Name) << "]";
   } else {
     name.visit([&](auto X) { os << X; });
   }
   return os;
 }
 
-llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const memodb_name &name) {
-  if (const memodb_head *Head = std::get_if<memodb_head>(&name)) {
-    os << "heads[" << Node(utf8_string_arg, Head->Name) << "]";
+llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Name &name) {
+  if (const Head *head = std::get_if<Head>(&name)) {
+    os << "heads[" << Node(utf8_string_arg, head->Name) << "]";
   } else {
     name.visit([&](auto X) { os << X; });
   }
   return os;
 }
 
-std::vector<memodb_path> memodb_db::list_paths_to(const CID &ref) {
+std::vector<Path> Store::list_paths_to(const CID &ref) {
   using memodb::Node;
   auto listPathsWithin = [](const Node &Value,
                             const CID &Ref) -> std::vector<std::vector<Node>> {
@@ -90,7 +90,7 @@ std::vector<memodb_path> memodb_db::list_paths_to(const CID &ref) {
     return Result;
   };
 
-  std::vector<memodb_path> Result;
+  std::vector<Path> Result;
   std::vector<Node> BackwardsPath;
   std::function<void(const CID &)> recurse = [&](const CID &Ref) {
     for (const auto &Parent : list_names_using(Ref)) {

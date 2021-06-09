@@ -13,7 +13,7 @@
 using namespace memodb;
 
 namespace {
-class CARStore : public memodb_db {
+class CARStore : public Store {
   llvm::sys::fs::file_t FileHandle;
   Node Root;
   std::map<CID, std::uint64_t> BlockPositions;
@@ -28,16 +28,16 @@ public:
   ~CARStore() override;
 
   llvm::Optional<Node> getOptional(const CID &CID) override;
-  llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
-  std::vector<memodb_name> list_names_using(const CID &ref) override;
+  llvm::Optional<CID> resolveOptional(const Name &Name) override;
+  std::vector<Name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
-  void eachHead(std::function<bool(const memodb_head &)> F) override;
+  void eachHead(std::function<bool(const Head &)> F) override;
   void eachCall(llvm::StringRef Func,
-                std::function<bool(const memodb_call &)> F) override;
+                std::function<bool(const Call &)> F) override;
 
   CID put(const Node &value) override;
-  void set(const memodb_name &Name, const CID &ref) override;
-  void head_delete(const memodb_head &Head) override;
+  void set(const Name &Name, const CID &ref) override;
+  void head_delete(const Head &Head) override;
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
@@ -174,20 +174,20 @@ llvm::Optional<Node> CARStore::getOptional(const CID &CID) {
   return Node::loadFromIPLD(CID, Buffer);
 }
 
-llvm::Optional<memodb::CID> CARStore::resolveOptional(const memodb_name &Name) {
+llvm::Optional<memodb::CID> CARStore::resolveOptional(const Name &Name) {
   if (const CID *CIDValue = std::get_if<CID>(&Name)) {
     return *CIDValue;
-  } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-    const Node &Value = Root["heads"].at_or_null(Head->Name);
+  } else if (const Head *head = std::get_if<Head>(&Name)) {
+    const Node &Value = Root["heads"].at_or_null(head->Name);
     if (Value.is_null())
       return {};
     return Value.as_link();
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-    const Node &AllCalls = Root["calls"].at_or_null(Call->Name);
+  } else if (const Call *call = std::get_if<Call>(&Name)) {
+    const Node &AllCalls = Root["calls"].at_or_null(call->Name);
     if (AllCalls.is_null())
       return {};
     std::string Key;
-    for (const CID &Arg : Call->Args)
+    for (const CID &Arg : call->Args)
       Key += std::string(Arg) + "/";
     Key.pop_back();
     const Node &Value = AllCalls.at_or_null(Key);
@@ -195,23 +195,23 @@ llvm::Optional<memodb::CID> CARStore::resolveOptional(const memodb_name &Name) {
       return {};
     return Value["result"].as_link();
   } else {
-    llvm_unreachable("impossible memodb_name type");
+    llvm_unreachable("impossible Name type");
   }
 }
 
-std::vector<memodb_name> CARStore::list_names_using(const CID &ref) {
+std::vector<Name> CARStore::list_names_using(const CID &ref) {
   // No easy way to find references, so return nothing. This function isn't
   // required to find every reference anyway.
   return {};
 }
 
 void CARStore::eachCall(llvm::StringRef Func,
-                        std::function<bool(const memodb_call &)> F) {
+                        std::function<bool(const Call &)> F) {
   const Node &Calls = Root["calls"].at_or_null(Func);
   if (Calls.is_null())
     return;
   for (const auto &Item : Calls.map_range()) {
-    memodb_call Call(Func, {});
+    Call Call(Func, {});
     for (const Node &Arg : Item.value()["args"].list_range())
       Call.Args.emplace_back(Arg.as_link());
     if (F(Call))
@@ -226,9 +226,9 @@ std::vector<std::string> CARStore::list_funcs() {
   return Result;
 }
 
-void CARStore::eachHead(std::function<bool(const memodb_head &)> F) {
+void CARStore::eachHead(std::function<bool(const Head &)> F) {
   for (const auto &Item : Root["heads"].map_range())
-    if (F(memodb_head(Item.key())))
+    if (F(Head(Item.key())))
       break;
 }
 
@@ -236,11 +236,11 @@ CID CARStore::put(const Node &value) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 
-void CARStore::set(const memodb_name &Name, const CID &ref) {
+void CARStore::set(const Name &Name, const CID &ref) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 
-void CARStore::head_delete(const memodb_head &Head) {
+void CARStore::head_delete(const Head &Head) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 
@@ -248,8 +248,8 @@ void CARStore::call_invalidate(llvm::StringRef name) {
   llvm::report_fatal_error("CAR stores are read-only");
 }
 
-std::unique_ptr<memodb_db> memodb_car_open(llvm::StringRef path,
-                                           bool create_if_missing) {
+std::unique_ptr<Store> memodb_car_open(llvm::StringRef path,
+                                       bool create_if_missing) {
   auto db = std::make_unique<CARStore>();
   db->open(path, create_if_missing);
   return db;

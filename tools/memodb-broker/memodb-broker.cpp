@@ -77,8 +77,8 @@
 #include <string>
 #include <utility>
 
+#include "memodb/Node.h"
 #include "memodb/ToolSupport.h"
-#include "memodb/memodb.h"
 
 using namespace llvm;
 using namespace memodb;

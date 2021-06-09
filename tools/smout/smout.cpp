@@ -55,8 +55,8 @@
 #include "bcdb/Outlining/LinearProgram.h"
 #include "bcdb/Split.h"
 #include "memodb/Multibase.h"
+#include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
-#include "memodb/memodb.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -125,7 +125,7 @@ static StringRef GetUri() {
 
 static nng::socket BrokerSocket;
 
-static Node evaluate_refines_alive2(memodb_db &db, const Node &AliveSettings,
+static Node evaluate_refines_alive2(Store &db, const Node &AliveSettings,
                                     const Node &src, const Node &tgt) {
   // Allow the job to take 10x the time of the SMT timeout, in case there are
   // many SMT queries.
@@ -188,7 +188,7 @@ static int Alive2() {
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
   CID Root = memodb.head_get(ModuleName);
-  Node Collated = memodb.get(memodb_call("smout.collated", {Root}));
+  Node Collated = memodb.get(Call("smout.collated", {Root}));
 
   BrokerSocket = nng::req::v0::open();
   BrokerSocket.dial(BrokerURL.c_str());
@@ -228,8 +228,8 @@ static int Alive2() {
   };
 
   auto Transform = [&](const std::pair<CID, CID> &Pair) {
-    auto RefinesRef = memodb.resolveOptional(
-        memodb_call("refines", {Pair.first, Pair.second}));
+    auto RefinesRef =
+        memodb.resolveOptional(Call("refines", {Pair.first, Pair.second}));
     if (RefinesRef) {
       if (memodb.get(*RefinesRef).as_boolean())
         NumValid++;
@@ -324,7 +324,7 @@ static int Alive2() {
 
 // smout candidates
 
-static Node evaluate_candidates(memodb_db &db, const Node &func) {
+static Node evaluate_candidates(Store &db, const Node &func) {
   ExitOnError Err("smout candidates evaluator: ");
   BCDB bcdb(db);
 
@@ -519,14 +519,14 @@ ResultTy parallel_transform_reduce(ContainerTy Container, ResultTy Init,
 
 // Exclude candidates that would make the caller larger; they can never be
 // profitable.
-static Node evaluate_profitable(memodb_db &db, const Node &func) {
+static Node evaluate_profitable(Store &db, const Node &func) {
   CID FuncId = db.put(func);
-  Node candidates = db.get(memodb_call("smout.candidates", {FuncId}));
+  Node candidates = db.get(Call("smout.candidates", {FuncId}));
   Node result = Node(node_list_arg);
-  Node orig_size = db.get(memodb_call("compiled.size", {FuncId}));
+  Node orig_size = db.get(Call("compiled.size", {FuncId}));
   for (const auto &item : candidates.list_range()) {
     CID caller = item.at("caller").as_link();
-    Node caller_size = db.get(memodb_call("compiled.size", {caller}));
+    Node caller_size = db.get(Call("compiled.size", {caller}));
     if (caller_size.as<size_t>() < orig_size.as<size_t>())
       result.push_back(item);
   }
@@ -536,13 +536,13 @@ static Node evaluate_profitable(memodb_db &db, const Node &func) {
 static int Collate() {
   ExitOnError Err("smout collate: ");
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
-  memodb_db &db = bcdb->get_db();
+  Store &db = bcdb->get_db();
   auto AllFunctions = Err(bcdb->ListFunctionsInModule(ModuleName));
 
   std::atomic<size_t> TotalCandidates = 0, TotalProfitable = 0;
   auto TransformProfitable = [&](StringRef FuncId) {
-    Node candidates = db.get(
-        db.resolve(memodb_call("smout.candidates", {*CID::parse(FuncId)})));
+    Node candidates =
+        db.get(db.resolve(Call("smout.candidates", {*CID::parse(FuncId)})));
     Node profitable =
         db.call_or_lookup_value("smout.candidates.profitable",
                                 evaluate_profitable, *CID::parse(FuncId));
@@ -629,7 +629,7 @@ static int Estimate() {
   auto &memodb = db->get_db();
 
   auto compiled_size = [&](CID ref) -> size_t {
-    return memodb.get(memodb_call("compiled.size", {ref})).as<size_t>();
+    return memodb.get(Call("compiled.size", {ref})).as<size_t>();
   };
 
   // Number of cases where the outlined caller is larger than the original
@@ -720,12 +720,12 @@ static int Estimate() {
     auto FuncId = FunctionUseEntry.getKey();
     unsigned UseCount = FunctionUseEntry.second;
 
-    auto OrigSizeRef = memodb.resolveOptional(
-        memodb_call("compiled.size", {*CID::parse(FuncId)}));
+    auto OrigSizeRef =
+        memodb.resolveOptional(Call("compiled.size", {*CID::parse(FuncId)}));
     if (!OrigSizeRef)
       continue;
-    auto CandidatesRef = memodb.resolveOptional(
-        memodb_call("smout.candidates", {*CID::parse(FuncId)}));
+    auto CandidatesRef =
+        memodb.resolveOptional(Call("smout.candidates", {*CID::parse(FuncId)}));
     if (!CandidatesRef)
       continue;
     size_t OrigSize = memodb.get(*OrigSizeRef).as<size_t>();
@@ -790,8 +790,8 @@ static int Estimate() {
 
   // Find callees that are equivalent to the ones we're already considering.
   if (!IgnoreEquivalence) {
-    Node Collated = memodb.get(
-        memodb_call("smout.collated", {memodb.head_get(ModuleName)}));
+    Node Collated =
+        memodb.get(Call("smout.collated", {memodb.head_get(ModuleName)}));
     for (auto &GroupPair : Collated.map_range()) {
       auto &Group = GroupPair.value();
       for (const Node &FirstValue : Group.list_range()) {
@@ -806,8 +806,8 @@ static int Estimate() {
           if (FirstValue == SecondValue)
             continue;
           CID SecondRef = SecondValue.as_link();
-          auto RefinesRef = memodb.resolveOptional(
-              memodb_call("refines", {FirstRef, SecondRef}));
+          auto RefinesRef =
+              memodb.resolveOptional(Call("refines", {FirstRef, SecondRef}));
           if (!RefinesRef)
             continue;
           if (memodb.get(*RefinesRef) != Node{true})
@@ -945,7 +945,7 @@ static int MakeCostModel() {
     ItemMaxVars.insert(std::make_pair(Item, MaxVar));
   }
 
-  bcdb->get_db().eachCall("compiled.size", [&](const memodb_call &Call) {
+  bcdb->get_db().eachCall("compiled.size", [&](const Call &Call) {
     std::string ID = Call.Args[0].asString(Multibase::base32);
     auto M = Err(bcdb->GetFunctionById(ID));
     const auto &F = getSoleDefinition(*M);
@@ -974,7 +974,7 @@ static int MakeCostModel() {
 
 // smout measure
 
-static Node evaluate_compiled(memodb_db &db, const Node &func) {
+static Node evaluate_compiled(Store &db, const Node &func) {
   ExitOnError Err("smout compiled evaluator: ");
   LLVMContext Context;
 
@@ -1020,7 +1020,7 @@ static Node evaluate_compiled(memodb_db &db, const Node &func) {
   return Node(byte_string_arg, Buffer);
 }
 
-static Node evaluate_compiled_size(memodb_db &db, const Node &func) {
+static Node evaluate_compiled_size(Store &db, const Node &func) {
   using namespace object;
   ExitOnError Err("smout compiled size evaluator: ");
   CID FuncId = db.put(func);
@@ -1061,7 +1061,7 @@ static int Measure() {
   for (auto &FuncId : Err(db->ListFunctionsInModule(ModuleName))) {
     all_funcs.push_back(*CID::parse(FuncId));
     CID candidates =
-        memodb.resolve(memodb_call("smout.candidates", {*CID::parse(FuncId)}));
+        memodb.resolve(Call("smout.candidates", {*CID::parse(FuncId)}));
     Node candidates_value = memodb.get(candidates);
     for (const auto &item : candidates_value.list_range()) {
       all_funcs.push_back(item.at("callee").as_link());
@@ -1109,7 +1109,7 @@ static int ShowGroups() {
   std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
   auto &memodb = bcdb->get_db();
   CID Root = memodb.head_get(ModuleName);
-  Node Collated = memodb.get(memodb_call("smout.collated", {Root}));
+  Node Collated = memodb.get(Call("smout.collated", {Root}));
 
   std::vector<std::pair<size_t, Node>> GroupCounts;
   for (const auto &Item : Collated.map_range()) {

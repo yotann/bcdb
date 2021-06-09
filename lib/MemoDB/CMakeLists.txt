@@ -11,12 +11,12 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_library(MemoDB
   CAR.cpp
   CID.cpp
-  MemoDB.cpp
   Multibase.cpp
   Node.cpp
   RocksDB.cpp
   SQLite.cpp
   Scripting.cpp
+  Store.cpp
   Support.cpp
 )
 target_include_directories(MemoDB PRIVATE

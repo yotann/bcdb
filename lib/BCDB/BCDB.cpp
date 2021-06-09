@@ -17,7 +17,7 @@
 #include "Util.h"
 #include "bcdb/AlignBitcode.h"
 #include "bcdb/Split.h"
-#include "memodb/memodb.h"
+#include "memodb/Store.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -36,29 +36,29 @@ static cl::opt<bool> RenameGlobals(
     cl::cat(BCDBCategory));
 
 Error BCDB::Init(StringRef uri) {
-  Expected<std::unique_ptr<memodb_db>> db =
-      memodb_db_open(uri.str().c_str(), /*create_if_missing*/ true);
+  Expected<std::unique_ptr<Store>> db =
+      Store::open(uri.str().c_str(), /*create_if_missing*/ true);
   return db.takeError();
 }
 
 Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef uri) {
-  Expected<std::unique_ptr<memodb_db>> db = memodb_db_open(uri.str().c_str());
+  Expected<std::unique_ptr<Store>> db = Store::open(uri.str().c_str());
   if (!db)
     return db.takeError();
   return std::make_unique<BCDB>(std::move(*db));
 }
 
-BCDB::BCDB(std::unique_ptr<memodb_db> db)
+BCDB::BCDB(std::unique_ptr<Store> db)
     : Context(new LLVMContext()), unique_db(std::move(db)),
       db(unique_db.get()) {}
 
-BCDB::BCDB(memodb_db &db) : Context(new LLVMContext()), db(&db) {}
+BCDB::BCDB(Store &db) : Context(new LLVMContext()), db(&db) {}
 
 BCDB::~BCDB() {}
 
 Expected<std::vector<std::string>> BCDB::ListModules() {
   std::vector<std::string> Result;
-  for (memodb_head &Head : db->list_heads())
+  for (Head &Head : db->list_heads())
     Result.emplace_back(std::move(Head.Name));
   return Result;
 }
@@ -90,7 +90,7 @@ Expected<std::vector<std::string>> BCDB::ListAllFunctions() {
 }
 
 Error BCDB::Delete(llvm::StringRef Name) {
-  db->head_delete(memodb_head(Name));
+  db->head_delete(Head(Name));
   return Error::success();
 }
 
@@ -185,8 +185,7 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   return Error::success();
 }
 
-static std::unique_ptr<Module> LoadModuleFromValue(memodb_db *db,
-                                                   const CID &ref,
+static std::unique_ptr<Module> LoadModuleFromValue(Store *db, const CID &ref,
                                                    StringRef Name,
                                                    LLVMContext &Context) {
   Node value = db->get(ref);

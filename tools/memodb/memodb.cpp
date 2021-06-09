@@ -20,8 +20,8 @@
 #include <vector>
 
 #include "memodb/Scripting.h"
+#include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
-#include "memodb/memodb.h"
 
 using namespace llvm;
 using namespace memodb;
@@ -58,7 +58,7 @@ static StringRef GetUri() {
   return UriOrEmpty;
 }
 
-// memodb_name options
+// Name options
 
 static cl::opt<std::string> SourceURI(cl::Positional, cl::Required,
                                       cl::desc("<source URI>"),
@@ -71,13 +71,13 @@ static cl::opt<std::string>
               cl::value_desc("uri"), cl::cat(MemoDBCategory),
               cl::sub(RefsToCommand), cl::sub(SetCommand));
 
-static memodb_name GetNameFromURI(llvm::StringRef URI) {
+static Name GetNameFromURI(llvm::StringRef URI) {
   ParsedURI Parsed(URI);
   if (!Parsed.Authority.empty() || !Parsed.Query.empty() ||
       !Parsed.Fragment.empty())
     report_fatal_error("invalid name URI");
   if (Parsed.Scheme == "head")
-    return memodb_head(Parsed.Path);
+    return Head(Parsed.Path);
   else if (Parsed.Scheme == "id")
     return *CID::parse(Parsed.Path);
   else if (Parsed.Scheme == "call") {
@@ -87,19 +87,19 @@ static memodb_name GetNameFromURI(llvm::StringRef URI) {
     auto FuncName = Parsed.PathSegments.front();
     for (const auto &Arg : llvm::ArrayRef(Parsed.PathSegments).drop_front())
       Args.emplace_back(*CID::parse(Arg));
-    return memodb_call(FuncName, Args);
+    return Call(FuncName, Args);
   } else
     report_fatal_error("invalid name URI");
 }
 
-// input options (XXX: must come after memodb_name options)
+// input options (XXX: must come after Name options)
 
 static cl::opt<std::string> InputURI(cl::Positional, cl::desc("<input URI>"),
                                      cl::init("-"), cl::value_desc("uri"),
                                      cl::cat(MemoDBCategory),
                                      cl::sub(PutCommand), cl::sub(SetCommand));
 
-static CID ReadRef(memodb_db &Db, llvm::StringRef URI) {
+static CID ReadRef(Store &Db, llvm::StringRef URI) {
   ExitOnError Err("value read: ");
   std::unique_ptr<MemoryBuffer> Buffer;
   if (URI == "-")
@@ -111,7 +111,7 @@ static CID ReadRef(memodb_db &Db, llvm::StringRef URI) {
       report_fatal_error("invalid input URI");
     Buffer = Err(errorOrToExpected(MemoryBuffer::getFile(Parsed.Path)));
   } else {
-    memodb_name Name = GetNameFromURI(URI);
+    Name Name = GetNameFromURI(URI);
     return Db.resolve(Name);
   }
   Node Value = Node::load_cbor(
@@ -200,7 +200,7 @@ static int Export() {
                                Buffer.size());
       };
 
-  auto Db = memodb_db_open(GetUri());
+  auto Db = Store::open(GetUri());
 
   // We won't know what root CID to put in the header until after we've written
   // everything. Leave an empty space which will be filled with header +
@@ -234,21 +234,21 @@ static int Export() {
   Node &Calls = Root["calls"];
   Node &Heads = Root["heads"];
   Node &IDs = Root["ids"];
-  auto addName = [&](const memodb_name &Name) {
+  auto addName = [&](const Name &Name) {
     errs() << "exporting " << Name << "\n";
     if (const CID *Ref = std::get_if<CID>(&Name)) {
       exportRef(*Ref);
       IDs.emplace_back(*Ref);
-    } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
-      Heads[Head->Name] = Db->resolve(Name);
-      exportRef(Heads[Head->Name].as_link());
-    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-      Node &FuncCalls = Calls[Call->Name];
+    } else if (const Head *head = std::get_if<Head>(&Name)) {
+      Heads[head->Name] = Db->resolve(Name);
+      exportRef(Heads[head->Name].as_link());
+    } else if (const Call *call = std::get_if<Call>(&Name)) {
+      Node &FuncCalls = Calls[call->Name];
       if (FuncCalls == Node{})
         FuncCalls = Node::Map();
       Node Args = Node(node_list_arg);
       std::string Key;
-      for (const CID &Arg : Call->Args) {
+      for (const CID &Arg : call->Args) {
         exportRef(Arg);
         Args.emplace_back(Arg);
         Key += std::string(Arg) + "/";
@@ -258,20 +258,20 @@ static int Export() {
       FuncCalls[Key] = Node::Map({{"args", Args}, {"result", Result}});
       exportRef(Result);
     } else {
-      llvm_unreachable("impossible memodb_name type");
+      llvm_unreachable("impossible Name type");
     }
   };
   if (!NamesToExport.empty()) {
     for (const std::string &NameStr : NamesToExport)
       addName(GetNameFromURI(NameStr));
   } else {
-    Db->eachHead([&](const memodb_head &Head) {
-      addName(Head);
+    Db->eachHead([&](const Head &head) {
+      addName(head);
       return false;
     });
     for (StringRef Func : Db->list_funcs()) {
-      Db->eachCall(Func, [&](const memodb_call &Call) {
-        addName(Call);
+      Db->eachCall(Func, [&](const Call &call) {
+        addName(call);
         return false;
       });
     }
@@ -320,7 +320,7 @@ static int Export() {
 
 static int Get() {
   auto Name = GetNameFromURI(SourceURI);
-  auto Db = memodb_db_open(GetUri());
+  auto Db = Store::open(GetUri());
   auto CID = Db->resolveOptional(Name);
   auto Value = CID ? Db->getOptional(*CID) : None;
   if (Value)
@@ -361,10 +361,10 @@ static cl::opt<std::string> FuncName(cl::Positional, cl::Required,
                                      cl::sub(ListCallsCommand));
 
 static int ListCalls() {
-  auto Db = memodb_db_open(GetUri());
-  for (const memodb_call &Call : Db->list_calls(FuncName)) {
-    outs() << "call:" << Call.Name;
-    for (const auto &Arg : Call.Args)
+  auto Db = Store::open(GetUri());
+  for (const Call &call : Db->list_calls(FuncName)) {
+    outs() << "call:" << call.Name;
+    for (const auto &Arg : call.Args)
       outs() << "/" << Arg;
     outs() << "\n";
   }
@@ -374,7 +374,7 @@ static int ListCalls() {
 // memodb list-funcs
 
 static int ListFuncs() {
-  auto Db = memodb_db_open(GetUri());
+  auto Db = Store::open(GetUri());
   for (llvm::StringRef Func : Db->list_funcs())
     outs() << Func << "\n";
   return 0;
@@ -383,16 +383,16 @@ static int ListFuncs() {
 // memodb list-heads
 
 static int ListHeads() {
-  auto Db = memodb_db_open(GetUri());
-  for (const memodb_head &Head : Db->list_heads())
-    outs() << "head:" << Head.Name << "\n";
+  auto Db = Store::open(GetUri());
+  for (const Head &head : Db->list_heads())
+    outs() << "head:" << head.Name << "\n";
   return 0;
 }
 
 // memodb put
 
 static int Put() {
-  auto Db = memodb_db_open(GetUri());
+  auto Db = Store::open(GetUri());
   CID Ref = ReadRef(*Db, InputURI);
   outs() << "id:" << Ref << "\n";
   return 0;
@@ -401,20 +401,20 @@ static int Put() {
 // memodb refs-to
 
 static int RefsTo() {
-  auto Db = memodb_db_open(GetUri());
+  auto Db = Store::open(GetUri());
   CID Ref = ReadRef(*Db, TargetURI);
-  for (const memodb_name &Name : Db->list_names_using(Ref)) {
-    if (auto Head = std::get_if<memodb_head>(&Name))
-      outs() << "head:" << Head->Name << "\n";
+  for (const Name &Name : Db->list_names_using(Ref)) {
+    if (auto head = std::get_if<Head>(&Name))
+      outs() << "head:" << head->Name << "\n";
     else if (auto ParentRef = std::get_if<CID>(&Name))
       outs() << "id:" << *ParentRef << "\n";
-    else if (auto Call = std::get_if<memodb_call>(&Name)) {
-      outs() << "call:" << Call->Name;
-      for (const auto &Arg : Call->Args)
+    else if (auto call = std::get_if<Call>(&Name)) {
+      outs() << "call:" << call->Name;
+      for (const auto &Arg : call->Args)
         outs() << "/" << Arg;
       outs() << "\n";
     } else
-      llvm_unreachable("impossible value for memodb_name");
+      llvm_unreachable("impossible value for Name");
   }
   return 0;
 }
@@ -422,7 +422,7 @@ static int RefsTo() {
 // memodb set
 
 static int Set() {
-  auto Db = memodb_db_open(GetUri());
+  auto Db = Store::open(GetUri());
   auto Name = GetNameFromURI(TargetURI);
   auto Value = ReadRef(*Db, InputURI);
   Db->set(Name, Value);
@@ -443,8 +443,8 @@ static cl::list<std::string> NamesToTransfer(cl::Positional, cl::ZeroOrMore,
                                              cl::sub(TransferCommand));
 
 static int Transfer() {
-  auto SourceDb = memodb_db_open(GetUri());
-  auto TargetDb = memodb_db_open(TargetDatabaseURI);
+  auto SourceDb = Store::open(GetUri());
+  auto TargetDb = Store::open(TargetDatabaseURI);
 
   std::function<void(const CID &)> transferRef = [&](const CID &Ref) {
     if (!TargetDb->has(Ref)) {
@@ -454,31 +454,31 @@ static int Transfer() {
     }
   };
 
-  auto transferName = [&](const memodb_name &Name) {
+  auto transferName = [&](const Name &Name) {
     errs() << "transferring " << Name << "\n";
     if (const CID *Ref = std::get_if<CID>(&Name)) {
       transferRef(*Ref);
-    } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+    } else if (const Head *head = std::get_if<Head>(&Name)) {
       auto Result = SourceDb->resolve(Name);
       transferRef(Result);
-      TargetDb->set(*Head, Result);
-    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-      for (const CID &Arg : Call->Args)
+      TargetDb->set(*head, Result);
+    } else if (const Call *call = std::get_if<Call>(&Name)) {
+      for (const CID &Arg : call->Args)
         transferRef(Arg);
       CID Result = SourceDb->resolve(Name);
       transferRef(Result);
-      TargetDb->set(*Call, Result);
+      TargetDb->set(*call, Result);
     } else {
-      llvm_unreachable("impossible memodb_name type");
+      llvm_unreachable("impossible Name type");
     }
   };
 
   if (NamesToTransfer.empty()) {
-    for (const memodb_head &Head : SourceDb->list_heads())
-      transferName(Head);
+    for (const Head &head : SourceDb->list_heads())
+      transferName(head);
     for (StringRef Func : SourceDb->list_funcs())
-      for (const memodb_call &Call : SourceDb->list_calls(Func))
-        transferName(Call);
+      for (const Call &call : SourceDb->list_calls(Func))
+        transferName(call);
   } else {
     for (StringRef NameURI : NamesToTransfer)
       transferName(GetNameFromURI(NameURI));

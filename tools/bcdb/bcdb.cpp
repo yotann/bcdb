@@ -22,8 +22,8 @@
 #include "bcdb/BCDB.h"
 #include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
+#include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
-#include "memodb/memodb.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -393,7 +393,7 @@ static int Evaluate() {
     args.push_back(*CID::parse(arg_id));
   }
 
-  auto result = db->get_db().resolveOptional(memodb_call(FuncName, args));
+  auto result = db->get_db().resolveOptional(Call(FuncName, args));
   if (!result) {
     Err(make_error<StringError>("Can't evaluate function " + FuncName,
                                 errc::invalid_argument));

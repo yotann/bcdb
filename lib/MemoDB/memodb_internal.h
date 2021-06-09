@@ -4,15 +4,15 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 
-#include "memodb/memodb.h"
+#include "memodb/Store.h"
 
-std::unique_ptr<memodb_db> memodb_car_open(llvm::StringRef path,
-                                           bool create_if_missing);
-
-std::unique_ptr<memodb_db> memodb_rocksdb_open(llvm::StringRef path,
+std::unique_ptr<memodb::Store> memodb_car_open(llvm::StringRef path,
                                                bool create_if_missing);
 
-std::unique_ptr<memodb_db> memodb_sqlite_open(llvm::StringRef path,
-                                              bool create_if_missing);
+std::unique_ptr<memodb::Store> memodb_rocksdb_open(llvm::StringRef path,
+                                                   bool create_if_missing);
+
+std::unique_ptr<memodb::Store> memodb_sqlite_open(llvm::StringRef path,
+                                                  bool create_if_missing);
 
 #endif // MEMODB_INTERNAL_H_INCLUDED

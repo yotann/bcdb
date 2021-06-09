@@ -66,7 +66,7 @@ static rocksdb::Slice makeSlice(const llvm::ArrayRef<uint8_t> &Bytes) {
 }
 
 namespace {
-class RocksDBStore : public memodb_db {
+class RocksDBStore : public Store {
 private:
   std::unique_ptr<rocksdb::OptimisticTransactionDB> DB;
   rocksdb::ColumnFamilyHandle *DefaultFamily;
@@ -87,22 +87,22 @@ private:
   void addRefs(rocksdb::WriteBatch &Batch, char Type,
                const llvm::ArrayRef<uint8_t> &Key, const Node &Value);
 
-  std::string makeKeyForCall(const memodb_call &Call);
+  std::string makeKeyForCall(const Call &Call);
 
 public:
   void open(llvm::StringRef uri, bool create_if_missing);
   ~RocksDBStore() override;
 
   llvm::Optional<Node> getOptional(const CID &CID) override;
-  llvm::Optional<CID> resolveOptional(const memodb_name &Name) override;
+  llvm::Optional<CID> resolveOptional(const Name &Name) override;
   CID put(const Node &value) override;
-  void set(const memodb_name &Name, const CID &ref) override;
-  std::vector<memodb_name> list_names_using(const CID &ref) override;
+  void set(const Name &Name, const CID &ref) override;
+  std::vector<Name> list_names_using(const CID &ref) override;
   std::vector<std::string> list_funcs() override;
-  void eachHead(std::function<bool(const memodb_head &)> F) override;
+  void eachHead(std::function<bool(const Head &)> F) override;
   void eachCall(llvm::StringRef Func,
-                std::function<bool(const memodb_call &)> F) override;
-  void head_delete(const memodb_head &Head) override;
+                std::function<bool(const Call &)> F) override;
+  void head_delete(const Head &Head) override;
   void call_invalidate(llvm::StringRef name) override;
 };
 } // end anonymous namespace
@@ -155,7 +155,7 @@ void RocksDBStore::addRefs(rocksdb::WriteBatch &Batch, char Type,
   });
 }
 
-std::string RocksDBStore::makeKeyForCall(const memodb_call &Call) {
+std::string RocksDBStore::makeKeyForCall(const Call &Call) {
   std::vector<std::uint8_t> Buffer;
   Node(utf8_string_arg, Call.Name).save_cbor(Buffer);
   std::string Key = makeSlice(Buffer).ToString();
@@ -309,22 +309,22 @@ llvm::Optional<Node> RocksDBStore::getOptional(const CID &CID) {
   return Node::loadFromIPLD(CID, makeBytes(Fetched));
 }
 
-llvm::Optional<CID> RocksDBStore::resolveOptional(const memodb_name &Name) {
+llvm::Optional<CID> RocksDBStore::resolveOptional(const Name &Name) {
   if (const CID *Ref = std::get_if<CID>(&Name)) {
     return *Ref;
-  } else if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+  } else if (const Head *head = std::get_if<Head>(&Name)) {
     rocksdb::PinnableSlice Fetched;
-    if (!checkFound(DB->Get({}, HeadsFamily, Head->Name, &Fetched)))
+    if (!checkFound(DB->Get({}, HeadsFamily, head->Name, &Fetched)))
       return {};
     return *CID::fromBytes(makeBytes(Fetched));
-  } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-    auto Key = makeKeyForCall(*Call);
+  } else if (const Call *call = std::get_if<Call>(&Name)) {
+    auto Key = makeKeyForCall(*call);
     rocksdb::PinnableSlice Fetched;
     if (!checkFound(DB->Get({}, CallsFamily, Key, &Fetched)))
       return {};
     return *CID::fromBytes(makeBytes(Fetched));
   } else {
-    llvm_unreachable("impossible memodb_name type");
+    llvm_unreachable("impossible Name type");
   }
 }
 
@@ -347,25 +347,25 @@ CID RocksDBStore::put(const Node &value) {
   return IPLD.first;
 }
 
-void RocksDBStore::set(const memodb_name &Name, const CID &ref) {
+void RocksDBStore::set(const Name &Name, const CID &ref) {
   rocksdb::Status TxnStatus;
   auto refKey = ref.asBytes();
   do {
     std::unique_ptr<rocksdb::Transaction> Txn(DB->BeginTransaction({}, {}));
-    if (const memodb_head *Head = std::get_if<memodb_head>(&Name)) {
+    if (const Head *head = std::get_if<Head>(&Name)) {
       rocksdb::PinnableSlice Fetched;
-      if (checkFound(Txn->GetForUpdate({}, HeadsFamily, Head->Name, &Fetched)))
-        deleteRef(*Txn, TYPE_HEAD, Head->Name, Fetched);
-      Txn->Put(HeadsFamily, Head->Name, makeSlice(refKey));
-      addRef(*Txn, TYPE_HEAD, Head->Name, ref);
-    } else if (const memodb_call *Call = std::get_if<memodb_call>(&Name)) {
-      auto Key = makeKeyForCall(*Call);
+      if (checkFound(Txn->GetForUpdate({}, HeadsFamily, head->Name, &Fetched)))
+        deleteRef(*Txn, TYPE_HEAD, head->Name, Fetched);
+      Txn->Put(HeadsFamily, head->Name, makeSlice(refKey));
+      addRef(*Txn, TYPE_HEAD, head->Name, ref);
+    } else if (const Call *call = std::get_if<Call>(&Name)) {
+      auto Key = makeKeyForCall(*call);
       rocksdb::PinnableSlice Fetched;
       if (checkFound(Txn->GetForUpdate({}, CallsFamily, Key, &Fetched)))
         deleteRef(*Txn, TYPE_CALL, Key, Fetched);
       Txn->Put(CallsFamily, Key, makeSlice(refKey));
       addRef(*Txn, TYPE_CALL, Key, ref);
-      for (const CID &Arg : Call->Args)
+      for (const CID &Arg : call->Args)
         addRef(*Txn, TYPE_CALL, Key, Arg);
     } else {
       llvm::report_fatal_error("can't set a CID");
@@ -375,8 +375,8 @@ void RocksDBStore::set(const memodb_name &Name, const CID &ref) {
   checkStatus(TxnStatus);
 }
 
-std::vector<memodb_name> RocksDBStore::list_names_using(const CID &ref) {
-  std::vector<memodb_name> Result;
+std::vector<Name> RocksDBStore::list_names_using(const CID &ref) {
+  std::vector<Name> Result;
   auto Key = ref.asBytes();
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, RefsFamily));
   for (Iterator->Seek(makeSlice(Key)); Iterator->Valid(); Iterator->Next()) {
@@ -391,10 +391,10 @@ std::vector<memodb_name> RocksDBStore::list_names_using(const CID &ref) {
     if (Type == TYPE_BLOCK)
       Result.emplace_back(*CID::fromBytes(makeBytes(Ref)));
     else if (Type == TYPE_HEAD)
-      Result.emplace_back(memodb_head(Ref.ToString()));
+      Result.emplace_back(Head(Ref.ToString()));
     else if (Type == TYPE_CALL) {
       auto Bytes = makeBytes(Ref);
-      memodb_call Call("", {});
+      Call Call("", {});
       Call.Name = Node::load_cbor_from_sequence(Bytes).as_string();
       while (!Bytes.empty())
         Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
@@ -424,16 +424,16 @@ std::vector<std::string> RocksDBStore::list_funcs() {
   return Result;
 }
 
-void RocksDBStore::eachHead(std::function<bool(const memodb_head &)> F) {
+void RocksDBStore::eachHead(std::function<bool(const Head &)> F) {
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, HeadsFamily));
   for (Iterator->SeekToFirst(); Iterator->Valid(); Iterator->Next())
-    if (F(memodb_head(Iterator->key().ToString())))
+    if (F(Head(Iterator->key().ToString())))
       break;
   checkStatus(Iterator->status());
 }
 
 void RocksDBStore::eachCall(llvm::StringRef Func,
-                            std::function<bool(const memodb_call &)> F) {
+                            std::function<bool(const Call &)> F) {
   std::vector<std::uint8_t> Prefix;
   Node(utf8_string_arg, Func).save_cbor(Prefix);
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
@@ -441,7 +441,7 @@ void RocksDBStore::eachCall(llvm::StringRef Func,
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))
       break;
     auto Bytes = makeBytes(Iterator->key()).drop_front(Prefix.size());
-    memodb_call Call(Func, {});
+    Call Call(Func, {});
     while (!Bytes.empty())
       Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
     if (F(Call))
@@ -450,7 +450,7 @@ void RocksDBStore::eachCall(llvm::StringRef Func,
   checkStatus(Iterator->status());
 }
 
-void RocksDBStore::head_delete(const memodb_head &Head) {
+void RocksDBStore::head_delete(const Head &Head) {
   rocksdb::Status TxnStatus;
   do {
     std::unique_ptr<rocksdb::Transaction> Txn(DB->BeginTransaction({}, {}));
@@ -487,8 +487,8 @@ void RocksDBStore::call_invalidate(llvm::StringRef name) {
   checkStatus(Iterator->status());
 }
 
-std::unique_ptr<memodb_db> memodb_rocksdb_open(llvm::StringRef path,
-                                               bool create_if_missing) {
+std::unique_ptr<Store> memodb_rocksdb_open(llvm::StringRef path,
+                                           bool create_if_missing) {
   auto db = std::make_unique<RocksDBStore>();
   db->open(path, create_if_missing);
   return db;
