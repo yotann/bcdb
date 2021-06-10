@@ -2,8 +2,8 @@ let
   pkgs = import ../bitcode-overlay;
   inherit (pkgs) lib;
 
-  bcdb = (import ../.. {}).bcdb-llvm10;
-  llvm = pkgs.llvmPackages_10.llvm;
+  bcdb = (import ../.. {}).bcdb-llvm12;
+  llvm = pkgs.llvmPackages_12.llvm;
 
   populateBCDB = { name, packages, exclude ? [] }: pkgs.runCommand "${name}.bcdb" {
     buildInputs = [ bcdb llvm pkgs.binutils-unwrapped ];
@@ -97,7 +97,7 @@ let
   # Build the original bitcode using normal LTO.
   buildLTO = name: bcdb-file: flag: pkgs.stdenvNoCC.mkDerivation {
     name = "${name}.lto";
-    buildInputs = [ bcdb pkgs.clang_10 pkgs.lld_10 ];
+    buildInputs = [ bcdb pkgs.clang_12 pkgs.lld_12 ];
     enableParallelBuilding = true;
     phases = "unpackPhase buildPhase fixupPhase";
     unpackPhase = ''
@@ -204,7 +204,7 @@ let
   # Compile the bitcode produced by guided linking into executable files.
   gledLTO = name: gl: flag: let
     gledLTOpart = name: gl: flag: pkgs.runCommand "${name}.mux.o" {
-      nativeBuildInputs = [ pkgs.clang_10 ];
+      nativeBuildInputs = [ pkgs.clang_12 ];
     } ''
       # Nix will abort the build if we go 2 hours without printing anything.
       # But Nix will also abort the build if we print dozens of MB of log output.
@@ -215,7 +215,7 @@ let
     '';
   in pkgs.stdenvNoCC.mkDerivation {
     name = "${name}.mux";
-    nativeBuildInputs = [ bcdb pkgs.clang_10 pkgs.lld_10 ];
+    nativeBuildInputs = [ bcdb pkgs.clang_12 pkgs.lld_12 ];
     phases = "unpackPhase buildPhase fixupPhase";
     dontStrip = false;
 

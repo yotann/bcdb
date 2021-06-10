@@ -251,15 +251,15 @@
       bin/clang -fPIC -shared -O3 ${./../../third_party/sqlite/sqlite-amalgamation-3320000.c} -ldl -lpthread -o /dev/null \
         ${(import ./clang-cmdline.nix { exepath = "."; }).args}
     '';
-    packages = with pkgsBitcode.llvmPackages_10; [ bintools clang clang-unwrapped llvm ];
+    packages = with pkgsBitcode.llvmPackages_12; [ bintools clang clang-unwrapped llvm ];
     exclude = with pkgsBitcode; [
       # needs assembly files
       libffi
       # overrides libc functions (such as __tls_get_addr and __fprintf_chk)
-      llvmPackages_10.compiler-rt
+      llvmPackages_12.compiler-rt
       # might cause conflicts with -lstdc++
-      llvmPackages_10.libcxx
-      llvmPackages_10.libcxxabi
+      llvmPackages_12.libcxx
+      llvmPackages_12.libcxxabi
     ];
     configurations = {
       closed        = { noplugin = true; nooverride = true;  nouse = true;  noweak = true;  };
