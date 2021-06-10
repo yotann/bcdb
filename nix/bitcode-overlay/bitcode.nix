@@ -71,13 +71,13 @@ self: super: let
 
     tools = base.tools.extend (self: super: {
 
-      llvm = super.llvm.overrideAttrs (o: {
+      libllvm = super.libllvm.overrideAttrs (o: {
 
         # Remove tests that fail for some reason.
         # eh.ll fails in LLVM 5-6, and parallel.ll fails in LLVM 5-10.
         postPatch = o.postPatch + ''
-          rm test/ExecutionEngine/MCJIT/remote/eh.ll
-          rm test/ExecutionEngine/OrcMCJIT/remote/eh.ll
+          rm -f test/ExecutionEngine/MCJIT/remote/eh.ll
+          rm -f test/ExecutionEngine/OrcMCJIT/remote/eh.ll
           rm test/tools/gold/X86/parallel.ll
         '';
 
@@ -91,18 +91,24 @@ self: super: let
           "-DLLVM_LINK_LLVM_DYLIB=${if dylib then "ON" else "OFF"}"
         ];
 
+        # Fix error while loading shared libraries: libLLVMTableGen.so.12
+        preBuild = (o.preBuild or "") + ''
+          export LD_LIBRARY_PATH=$PWD/lib
+        '';
+
         # Move the extra libraries to the "lib" output.
         postInstall = o.postInstall + ''
           moveToOutput "lib/lib*.a" "$lib"
           moveToOutput "lib/lib*.so*" "$lib"
-          substituteInPlace "$out"/lib/cmake/llvm/LLVMExports-*.cmake \
-            --replace "\''${_IMPORT_PREFIX}/lib/lib" "$lib/lib/lib"
+          for fn in "$out"/lib/cmake/llvm/LLVMExports-*.cmake; do
+            substituteInPlace "$fn" --replace "\''${_IMPORT_PREFIX}/lib/lib" "$lib/lib/lib"
+          done
         '';
 
       });
 
       # Same changes as LLVM to handle shared-libs and dylib.
-      clang-unwrapped = super.clang-unwrapped.overrideAttrs (o: {
+      libclang = super.libclang.overrideAttrs (o: {
         cmakeFlags = o.cmakeFlags ++ [
           "-DBUILD_SHARED_LIBS=${if shared-libs then "ON" else "OFF"}"
           "-DCLANG_LINK_CLANG_DYLIB=${if dylib then "ON" else "OFF"}"
@@ -318,6 +324,9 @@ in {
     });
     in python // { pythonForBuild = python; }
   ) super.pythonInterpreters;
+
+  # Fixes multiple definitions of "program_name".
+  sharutils = addCflags "-fcommon" super.sharutils;
 
   systemd = super.systemd.overrideAttrs (o: {
     # src/boot/efi uses -mno-red-zone, which breaks -fembed-bitcode.
