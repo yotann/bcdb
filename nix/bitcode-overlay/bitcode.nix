@@ -56,7 +56,16 @@ self: super: let
     '';
   });
 
-  fixOldBoost = boost: boost.overrideAttrs (o: {
+  fixOldBoost = originalBoost: (originalBoost.override {
+    # Old Boost versions attempt to use "pth" with Clang, and the Nix
+    # expressions have an assertion to check whether the Clang version is old
+    # enough to support "pth". We fix the usage of "pth" below, so Boost works
+    # with new Clang versions, but we also need to provide a fake Clang version
+    # to bypass the assertion.
+    stdenv = lib.recursiveUpdate original.bitcodeStdenv {
+      cc.version = "6.0.0";
+    };
+  }).overrideAttrs (o: {
     postPatch = (o.postPatch or "") + ''
       sed -i -e 's/\bpth\b/pch/g' tools/build/*/tools/clang-linux.jam
     '';
@@ -180,13 +189,13 @@ in {
 
   bash-completion = noCheck super.bash-completion;
 
-  boost155 = fixOldBoost super.boost155;
-  boost159 = fixOldBoost super.boost159;
-  boost160 = fixOldBoost super.boost160;
-  boost165 = fixOldBoost super.boost165;
-  boost166 = fixOldBoost super.boost166;
-  boost167 = fixOldBoost super.boost167;
-  boost168 = fixOldBoost super.boost168;
+  boost155 = fixOldBoost original.boost155;
+  boost159 = fixOldBoost original.boost159;
+  boost160 = fixOldBoost original.boost160;
+  boost165 = fixOldBoost original.boost165;
+  boost166 = fixOldBoost original.boost166;
+  boost167 = fixOldBoost original.boost167;
+  boost168 = fixOldBoost original.boost168;
 
   cmake = super.cmake.overrideAttrs (o: {
     # Prevent using GCC to build.
