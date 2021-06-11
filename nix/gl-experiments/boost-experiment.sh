@@ -5,7 +5,7 @@ total_stripped_size() {
   (find "$1/" -type f | while read f; do llvm-strip --strip-unneeded "$f" -o -; done) | wc -c
 }
 
-nix build --no-link -f . boost{1..11}.everything
+nix build --no-link -f . boost{1..14}.everything
 
 mkdir -p results
 echo num_versions,lto_size,gl_size | tee results/boost.csv

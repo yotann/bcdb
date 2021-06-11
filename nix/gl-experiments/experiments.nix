@@ -108,6 +108,33 @@
     exclude = [ pkgsBitcode.icu64 ];
   };
 
+  boost12 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ boost155 boost159 boost160 boost165 boost166 boost167 boost168 boost169 boost170 boost171 boost172 boost173 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+    exclude = [ pkgsBitcode.icu64 ];
+  };
+
+  boost13 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ boost155 boost159 boost160 boost165 boost166 boost167 boost168 boost169 boost170 boost171 boost172 boost173 boost174 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+    exclude = [ pkgsBitcode.icu64 ];
+  };
+
+  boost14 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ boost155 boost159 boost160 boost165 boost166 boost167 boost168 boost169 boost170 boost171 boost172 boost173 boost174 boost175 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+    exclude = [ pkgsBitcode.icu64 ];
+  };
+
   protobuf1 = {
     lto-flags = "-Oz";
     packages = with pkgsBitcode; [ protobuf2_5 ];
