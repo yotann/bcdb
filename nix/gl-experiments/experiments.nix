@@ -172,6 +172,46 @@
     };
   };
 
+  protobuf9 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf10 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf11 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_14 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf12 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_14 protobuf3_15 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf13 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_14 protobuf3_15 protobuf3_16 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
   python = {
     packages = [
       # Build Python with extra modules needed for the benchmarks.
