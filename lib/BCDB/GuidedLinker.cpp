@@ -732,8 +732,53 @@ static void DiagnoseUnreachableFunctions(Module &M,
   }
 }
 
+// Check whether the call instruction has a type attribute (such as byval or
+// sret) with the wrong type.
+static bool hasBadTypeAttributes(const CallBase &CB) {
+  AttributeList attributes = CB.getAttributes();
+  for (unsigned i = 0; i < CB.arg_size(); ++i)
+    for (Attribute attr : attributes.getAttributes(i + 1))
+      if (attr.isTypeAttribute())
+        if (attr.getValueAsType() !=
+            CB.getArgOperand(i)->getType()->getPointerElementType())
+          return true;
+  return false;
+}
+
+// Fix type attributes (such as byval or sret) to use the correct type.
+static void fixBadTypeAttributes(CallBase &CB) {
+  if (!hasBadTypeAttributes(CB))
+    return;
+  AttributeList attrs = CB.getAttributes();
+  AttributeList orig_attrs = attrs;
+  for (unsigned i = 0; i < CB.arg_size(); ++i) {
+    for (Attribute attr : orig_attrs.getAttributes(i + 1)) {
+      if (attr.isTypeAttribute()) {
+        attrs =
+            attrs.removeAttribute(CB.getContext(), i + 1, attr.getKindAsEnum());
+        attrs = attrs.addAttribute(
+            CB.getContext(), i + 1,
+            Attribute::get(
+                CB.getContext(), attr.getKindAsEnum(),
+                CB.getArgOperand(i)->getType()->getPointerElementType()));
+      }
+    }
+  }
+  CB.setAttributes(attrs);
+  assert(!hasBadTypeAttributes(CB));
+}
+
 std::unique_ptr<Module> GLMerger::Finish() {
   auto M = Merger::Finish();
+
+  // Ensure that all the bad type attributes we fix (see below) are introduced
+  // by InstCombine, and none have been introduced by the merging process
+  // itself.
+  for (const auto &F : *M)
+    for (const auto &BB : F)
+      for (const auto &I : BB)
+        if (const CallBase *CB = dyn_cast<CallBase>(&I))
+          assert(!hasBadTypeAttributes(*CB));
 
   if (!DisableOpts) {
     // Run some optimizations to make use of the available_externally functions
@@ -749,6 +794,17 @@ std::unique_ptr<Module> GLMerger::Finish() {
     PM.add(createGlobalDCEPass());
     PM.run(*M);
   }
+
+  // As of LLVM 12.0.0, InstCombine has a bug where it can break type
+  // attributes (byval, sret, etc.):
+  // https://bugs.llvm.org/show_bug.cgi?id=50697
+  //
+  // As a workaround, we fix the attribute type ourselves.
+  for (auto &F : *M)
+    for (auto &BB : F)
+      for (auto &I : BB)
+        if (CallBase *CB = dyn_cast<CallBase>(&I))
+          fixBadTypeAttributes(*CB);
 
   Linker::linkModules(*M, LoadGLLibrary(M->getContext()));
   FunctionType *UndefFuncType =
