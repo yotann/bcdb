@@ -505,6 +505,22 @@ void GLMerger::MakeAvailableExternally(GlobalValue *GV) {
   }
 }
 
+// Check whether the constant can be replaced with a dynamically loaded value
+// or not. If a global object can't be replaced, we can't support RTLD_LOCAL
+// lookup of it.
+static bool mustStayConstant(Constant *C) {
+  for (Value::use_iterator UI = C->use_begin(); UI != C->use_end(); ++UI) {
+    if (isa<Function>(UI->getUser()))
+      return true; // Used as a function's personality.
+    if (isa<LandingPadInst>(UI->getUser()))
+      return true; // Used as typeinfo in catch.
+    if (Constant *User = dyn_cast<Constant>(UI->getUser()))
+      if (mustStayConstant(User))
+        return true;
+  }
+  return false;
+}
+
 static void expandConstant(Constant *C, Function *F) {
   // Based on:
   // https://chromium.googlesource.com/native_client/pnacl-llvm/+/mseaborn/merge-34-squashed/lib/Transforms/NaCl/ExpandTlsConstantExpr.cpp
@@ -539,20 +555,13 @@ void GLMerger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
   StringMap<GlobalVariable *> &ImportVars =
       PluginScopeImportVariables[GI.ModuleName];
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
-    if (ImportVars.count(GO.getName())) {
+    if (ImportVars.count(GO.getName()) && !mustStayConstant(&GO)) {
       expandConstant(&GO, &Body);
-      // It would probably work fine now to use GO.getType() here. There were
-      // problems before when I was using CloneModule to create wrapper modules;
-      // the cloned module would share the same types as the original module,
-      // and when recursive structure types were involved, IRMover could get
-      // screwed up.
-      Type *T = Type::getInt8PtrTy(Body.getContext());
       GlobalVariable *Var = new GlobalVariable(
-          *Body.getParent(), T, false, GlobalValue::ExternalLinkage, nullptr,
-          ImportVars[GO.getName()]->getName());
+          *Body.getParent(), GO.getType(), false, GlobalValue::ExternalLinkage,
+          nullptr, ImportVars[GO.getName()]->getName());
       IRBuilder<> Builder(&Body.getEntryBlock().front());
       Value *Load = Builder.CreateLoad(Var);
-      Load = Builder.CreatePointerBitCastOrAddrSpaceCast(Load, GO.getType());
       GO.replaceAllUsesWith(Load);
     }
   }
