@@ -46,5 +46,9 @@ RUN nix-env -f nix/bitcode-overlay -iA \
 RUN rm -rf *
 COPY . ./
 
+# Enable parallel builds.
+RUN echo "max-jobs = 2" >> /etc/nix/nix.conf && \
+    echo "cores = 0" >> /etc/nix/nix.conf
+
 # Build, test, and install BCDB.
 RUN nix-env -f . -iA bcdb
