@@ -36,7 +36,11 @@ RUN nix-build nix/bitcode-overlay -A pkgsBitcode.pv && \
 RUN nix-env -f nix/bitcode-overlay -iA \
     bash \
     llvmPackages_12.llvm \
-    "python3.withPackages (ps: [ ps.matplotlib ps.pandas ps.pyperf ])"
+    python3 \
+    python3Packages.matplotlib \
+    python3Packages.pandas \
+    python3Packages.pyperf && \
+    nix-store --optimize
 
 # Copy the full BCDB source code.
 RUN rm -rf *
