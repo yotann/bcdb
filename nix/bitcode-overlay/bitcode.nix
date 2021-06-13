@@ -168,7 +168,7 @@ in {
   # - Miscellaneous reasons.
   #
   # Most of the compiler flag issues are fixed by
-  # pkgs/build-support/bitcode-wrapper/wrapper.sh, but the other problems are
+  # ../bitcode-cc-wrapper/wrapper.sh, but the other problems are
   # resolved here on a package-by-package basis.
 
   # fatal error: 'strstream' file not found
@@ -271,15 +271,6 @@ in {
     });
   in server // { inherit client server; };
 
-  mesa = super.mesa.overrideAttrs (o: {
-    # -mstackrealign is incompatible with -fembed-bitcode
-    postPatch = (o.postPatch or "") + ''
-      for fn in ./meson.build scons/gallium.py src/intel/meson.build; do
-        substituteInPlace $fn --replace "-mstackrealign" ""
-      done
-    '';
-  });
-
   nss = super.nss.overrideAttrs (o: {
     # Prevent using GCC to build.
     depsBuildBuild = [];
@@ -338,8 +329,6 @@ in {
   sharutils = addCflags "-fcommon" super.sharutils;
 
   systemd = super.systemd.overrideAttrs (o: {
-    # src/boot/efi uses -mno-red-zone, which breaks -fembed-bitcode.
-    mesonFlags = o.mesonFlags ++ ["-Dgnu-efi=false"];
     # Remove stray references that are left in libsystemd.so because we disable
     # -Wl,--gc-sections.
     postFixup = (o.postFixup or "") + ''
