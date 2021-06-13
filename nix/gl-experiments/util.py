@@ -21,8 +21,8 @@ def choose_perf_events():
             perf_events.append(e + ':u')
     return perf_events
 
-def run_benchmarks(generate_args_env, exe_paths, benchmarks, output_dir, cpus_per_task = 1):
-    perf_events = choose_perf_events()
+def run_benchmarks(generate_args_env, exe_paths, benchmarks, output_dir, cpus_per_task = 1, enable_perf = False):
+    perf_events = choose_perf_events() if enable_perf else []
 
     cpus = pyperf._cpu_utils.get_isolated_cpus()
     if not cpus:
@@ -68,7 +68,8 @@ def run_benchmarks(generate_args_env, exe_paths, benchmarks, output_dir, cpus_pe
             os.makedirs(out, exist_ok=True)
 
             # XXX: perf adds /run/current-system/sw/bin to PATH
-            args = ['perf', 'stat', 'record', '-o', f'{out}/perf.data', '-e', ','.join(perf_events)] + args
+            if perf_events:
+                args = ['perf', 'stat', 'record', '-o', f'{out}/perf.data', '-e', ','.join(perf_events)] + args
 
             env['LD_DEBUG'] = 'statistics,files'
             env['LD_DEBUG_OUTPUT'] = f'{out}/ld-statistics'

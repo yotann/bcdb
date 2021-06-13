@@ -35,7 +35,6 @@ RUN nix-build nix/bitcode-overlay -A pkgsBitcode.pv && \
 # Add programs used by nix/gl-experiments scripts.
 RUN nix-env -f nix/bitcode-overlay -iA \
     bash \
-    linuxPackages.perf \
     llvmPackages_12.llvm \
     "python3.withPackages (ps: [ ps.matplotlib ps.pandas ps.pyperf ])"
 
