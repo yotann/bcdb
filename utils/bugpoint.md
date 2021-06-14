@@ -16,6 +16,13 @@ If this script is in `try-merge.sh`, you can run bugpoint like so:
 ```shell
 $ export BCDB_URI=sqlite:bugpoint.bcdb
 $ bin/bcdb init
-$ bugpoint -compile-custom -compile-command=./try-merge.sh failing-test.bc
+$ bugpoint -verbose-errors -disable-attribute-remove -compile-custom -compile-command=./try-merge.sh failing-test.bc
 $ opt -globalopt -S < bugpoint-reduced-simplified.bc
 ```
+
+The `-verbose-errors` option prints the output of every crashing run, to help
+you check whether all the crashes have the same root cause. The
+`-disable-attribute-remove` option tells Bugpoint to skip removing function
+attributes, which is very slow and not usually important. The final
+`-globalopt` pass removes unused global declarations, which usually aren't
+needed to cause the crash.
