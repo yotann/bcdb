@@ -240,6 +240,9 @@ in {
     buildInputs = o.buildInputs ++ [ original.gcc ];
   });
 
+  # Fixes multiple definitions of "CIL_KEY_USERBOUNDS" etc.
+  libsepol = addCflags "-fcommon" super.libsepol;
+
   libuv = noCheck super.libuv;
 
   lighttpd = noCheck super.lighttpd;
