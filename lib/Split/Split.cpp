@@ -247,10 +247,24 @@ void NeededTypeMap::VisitInstruction(Instruction *I) {
   if (auto *GEP = dyn_cast<GetElementPtrInst>(I))
     VisitType(GEP->getSourceElementType());
 
-  if (CallBase *CB = dyn_cast<CallBase>(I))
+  if (CallBase *CB = dyn_cast<CallBase>(I)) {
+#if LLVM_VERSION_MAJOR <= 11
     for (unsigned i = 0; i != CB->getNumArgOperands(); ++i)
       if (CB->isPassPointeeByValueArgument(i))
         VisitType(CB->getArgOperand(i)->getType()->getPointerElementType());
+#else
+    AttributeList attrs = CB->getAttributes();
+    for (unsigned i = 0; i < attrs.getNumAttrSets(); ++i) {
+      for (Attribute attr : attrs.getAttributes(i)) {
+        if (attr.isTypeAttribute()) {
+          Type *Ty = attr.getValueAsType();
+          if (Ty)
+            VisitType(Ty);
+        }
+      }
+    }
+#endif
+  }
 }
 
 void NeededTypeMap::VisitFunction(Function &F) {

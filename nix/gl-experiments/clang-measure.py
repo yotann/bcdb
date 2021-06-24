@@ -11,6 +11,7 @@ import util
 parser = argparse.ArgumentParser(description='Run Clang benchmarks.')
 parser.add_argument('-o', dest='output_dir', required=True)
 parser.add_argument('clang_path', nargs='+')
+parser.add_argument('--enable-perf', action='store_true')
 
 args = parser.parse_args()
 
@@ -32,4 +33,4 @@ def generate_args_env(exe_path, benchmark, out, affinity):
             '--append', f'{out}/pyperf.json'] + args
     return (args, {})
 
-util.run_benchmarks(generate_args_env, args.clang_path, ['sqlite'], args.output_dir)
+util.run_benchmarks(generate_args_env, args.clang_path, ['sqlite'], args.output_dir, enable_perf = args.enable_perf)

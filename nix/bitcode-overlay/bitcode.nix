@@ -7,7 +7,7 @@ self: super: let
   original = self;
 in {
   bitcodeWrapper = self.callPackage ../bitcode-cc-wrapper {
-    inherit (self.llvmPackages_10) clang llvm bintools;
+    inherit (self.llvmPackages_12) clang;
   };
 
   bitcodeStdenv = let
@@ -56,7 +56,16 @@ self: super: let
     '';
   });
 
-  fixOldBoost = boost: boost.overrideAttrs (o: {
+  fixOldBoost = originalBoost: (originalBoost.override {
+    # Old Boost versions attempt to use "pth" with Clang, and the Nix
+    # expressions have an assertion to check whether the Clang version is old
+    # enough to support "pth". We fix the usage of "pth" below, so Boost works
+    # with new Clang versions, but we also need to provide a fake Clang version
+    # to bypass the assertion.
+    stdenv = lib.recursiveUpdate original.bitcodeStdenv {
+      cc.version = "6.0.0";
+    };
+  }).overrideAttrs (o: {
     postPatch = (o.postPatch or "") + ''
       sed -i -e 's/\bpth\b/pch/g' tools/build/*/tools/clang-linux.jam
     '';
@@ -71,13 +80,13 @@ self: super: let
 
     tools = base.tools.extend (self: super: {
 
-      llvm = super.llvm.overrideAttrs (o: {
+      libllvm = super.libllvm.overrideAttrs (o: {
 
         # Remove tests that fail for some reason.
         # eh.ll fails in LLVM 5-6, and parallel.ll fails in LLVM 5-10.
         postPatch = o.postPatch + ''
-          rm test/ExecutionEngine/MCJIT/remote/eh.ll
-          rm test/ExecutionEngine/OrcMCJIT/remote/eh.ll
+          rm -f test/ExecutionEngine/MCJIT/remote/eh.ll
+          rm -f test/ExecutionEngine/OrcMCJIT/remote/eh.ll
           rm test/tools/gold/X86/parallel.ll
         '';
 
@@ -91,18 +100,24 @@ self: super: let
           "-DLLVM_LINK_LLVM_DYLIB=${if dylib then "ON" else "OFF"}"
         ];
 
+        # Fix error while loading shared libraries: libLLVMTableGen.so.12
+        preBuild = (o.preBuild or "") + ''
+          export LD_LIBRARY_PATH=$PWD/lib
+        '';
+
         # Move the extra libraries to the "lib" output.
         postInstall = o.postInstall + ''
           moveToOutput "lib/lib*.a" "$lib"
           moveToOutput "lib/lib*.so*" "$lib"
-          substituteInPlace "$out"/lib/cmake/llvm/LLVMExports-*.cmake \
-            --replace "\''${_IMPORT_PREFIX}/lib/lib" "$lib/lib/lib"
+          for fn in "$out"/lib/cmake/llvm/LLVMExports-*.cmake; do
+            substituteInPlace "$fn" --replace "\''${_IMPORT_PREFIX}/lib/lib" "$lib/lib/lib"
+          done
         '';
 
       });
 
       # Same changes as LLVM to handle shared-libs and dylib.
-      clang-unwrapped = super.clang-unwrapped.overrideAttrs (o: {
+      libclang = super.libclang.overrideAttrs (o: {
         cmakeFlags = o.cmakeFlags ++ [
           "-DBUILD_SHARED_LIBS=${if shared-libs then "ON" else "OFF"}"
           "-DCLANG_LINK_CLANG_DYLIB=${if dylib then "ON" else "OFF"}"
@@ -153,7 +168,7 @@ in {
   # - Miscellaneous reasons.
   #
   # Most of the compiler flag issues are fixed by
-  # pkgs/build-support/bitcode-wrapper/wrapper.sh, but the other problems are
+  # ../bitcode-cc-wrapper/wrapper.sh, but the other problems are
   # resolved here on a package-by-package basis.
 
   # fatal error: 'strstream' file not found
@@ -174,13 +189,13 @@ in {
 
   bash-completion = noCheck super.bash-completion;
 
-  boost155 = fixOldBoost super.boost155;
-  boost159 = fixOldBoost super.boost159;
-  boost160 = fixOldBoost super.boost160;
-  boost165 = fixOldBoost super.boost165;
-  boost166 = fixOldBoost super.boost166;
-  boost167 = fixOldBoost super.boost167;
-  boost168 = fixOldBoost super.boost168;
+  boost155 = fixOldBoost original.boost155;
+  boost159 = fixOldBoost original.boost159;
+  boost160 = fixOldBoost original.boost160;
+  boost165 = fixOldBoost original.boost165;
+  boost166 = fixOldBoost original.boost166;
+  boost167 = fixOldBoost original.boost167;
+  boost168 = fixOldBoost original.boost168;
 
   cmake = super.cmake.overrideAttrs (o: {
     # Prevent using GCC to build.
@@ -225,6 +240,9 @@ in {
     buildInputs = o.buildInputs ++ [ original.gcc ];
   });
 
+  # Fixes multiple definitions of "CIL_KEY_USERBOUNDS" etc.
+  libsepol = addCflags "-fcommon" super.libsepol;
+
   libuv = noCheck super.libuv;
 
   lighttpd = noCheck super.lighttpd;
@@ -236,8 +254,13 @@ in {
   llvmPackages_9 = fixLLVM {} super.llvmPackages_9;
   llvmPackages_10 = fixLLVM {} super.llvmPackages_10;
   llvmPackages_10_dylib = fixLLVM { shared-libs = false; dylib = true; } super.llvmPackages_10;
+  llvmPackages_11 = fixLLVM {} super.llvmPackages_11;
+  llvmPackages_12 = fixLLVM {} super.llvmPackages_12;
+  llvmPackages_12_dylib = fixLLVM { shared-libs = false; dylib = true; } super.llvmPackages_12;
   clang_10_dylib = self.llvmPackages_10_dylib.clang;
   llvm_10_dylib = self.llvmPackages_10_dylib.llvm;
+  clang_12_dylib = self.llvmPackages_12_dylib.clang;
+  llvm_12_dylib = self.llvmPackages_12_dylib.llvm;
 
   mariadb = let
     client = super.mariadb.client;
@@ -250,15 +273,6 @@ in {
       '';
     });
   in server // { inherit client server; };
-
-  mesa = super.mesa.overrideAttrs (o: {
-    # -mstackrealign is incompatible with -fembed-bitcode
-    postPatch = (o.postPatch or "") + ''
-      for fn in ./meson.build scons/gallium.py src/intel/meson.build; do
-        substituteInPlace $fn --replace "-mstackrealign" ""
-      done
-    '';
-  });
 
   nss = super.nss.overrideAttrs (o: {
     # Prevent using GCC to build.
@@ -314,12 +328,13 @@ in {
     in python // { pythonForBuild = python; }
   ) super.pythonInterpreters;
 
+  # Fixes multiple definitions of "program_name".
+  sharutils = addCflags "-fcommon" super.sharutils;
+
   systemd = super.systemd.overrideAttrs (o: {
-    # src/boot/efi uses -mno-red-zone, which breaks -fembed-bitcode.
-    mesonFlags = o.mesonFlags ++ ["-Dgnu-efi=false"];
     # Remove stray references that are left in libsystemd.so because we disable
     # -Wl,--gc-sections.
-    postFixup = o.postFixup + ''
+    postFixup = (o.postFixup or "") + ''
       nukedRef=$(echo $out | sed -e "s,$NIX_STORE/[^-]*-\(.*\),$NIX_STORE/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-\1,")
       cat $lib/lib/libsystemd.so | perl -pe "s|$out|$nukedRef|" > $lib/lib/libsystemd.so.tmp
       mv $lib/lib/libsystemd.so.tmp $(readlink -f $lib/lib/libsystemd.so)

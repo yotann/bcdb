@@ -505,6 +505,22 @@ void GLMerger::MakeAvailableExternally(GlobalValue *GV) {
   }
 }
 
+// Check whether the constant can be replaced with a dynamically loaded value
+// or not. If a global object can't be replaced, we can't support RTLD_LOCAL
+// lookup of it.
+static bool mustStayConstant(Constant *C) {
+  for (Value::use_iterator UI = C->use_begin(); UI != C->use_end(); ++UI) {
+    if (isa<Function>(UI->getUser()))
+      return true; // Used as a function's personality.
+    if (isa<LandingPadInst>(UI->getUser()))
+      return true; // Used as typeinfo in catch.
+    if (Constant *User = dyn_cast<Constant>(UI->getUser()))
+      if (mustStayConstant(User))
+        return true;
+  }
+  return false;
+}
+
 static void expandConstant(Constant *C, Function *F) {
   // Based on:
   // https://chromium.googlesource.com/native_client/pnacl-llvm/+/mseaborn/merge-34-squashed/lib/Transforms/NaCl/ExpandTlsConstantExpr.cpp
@@ -539,20 +555,13 @@ void GLMerger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
   StringMap<GlobalVariable *> &ImportVars =
       PluginScopeImportVariables[GI.ModuleName];
   for (GlobalObject &GO : Body.getParent()->global_objects()) {
-    if (ImportVars.count(GO.getName())) {
+    if (ImportVars.count(GO.getName()) && !mustStayConstant(&GO)) {
       expandConstant(&GO, &Body);
-      // It would probably work fine now to use GO.getType() here. There were
-      // problems before when I was using CloneModule to create wrapper modules;
-      // the cloned module would share the same types as the original module,
-      // and when recursive structure types were involved, IRMover could get
-      // screwed up.
-      Type *T = Type::getInt8PtrTy(Body.getContext());
       GlobalVariable *Var = new GlobalVariable(
-          *Body.getParent(), T, false, GlobalValue::ExternalLinkage, nullptr,
-          ImportVars[GO.getName()]->getName());
+          *Body.getParent(), GO.getType(), false, GlobalValue::ExternalLinkage,
+          nullptr, ImportVars[GO.getName()]->getName());
       IRBuilder<> Builder(&Body.getEntryBlock().front());
       Value *Load = Builder.CreateLoad(Var);
-      Load = Builder.CreatePointerBitCastOrAddrSpaceCast(Load, GO.getType());
       GO.replaceAllUsesWith(Load);
     }
   }
@@ -732,8 +741,53 @@ static void DiagnoseUnreachableFunctions(Module &M,
   }
 }
 
+// Check whether the call instruction has a type attribute (such as byval or
+// sret) with the wrong type.
+static bool hasBadTypeAttributes(const CallBase &CB) {
+  AttributeList attributes = CB.getAttributes();
+  for (unsigned i = 0; i < CB.arg_size(); ++i)
+    for (Attribute attr : attributes.getAttributes(i + 1))
+      if (attr.isTypeAttribute())
+        if (attr.getValueAsType() !=
+            CB.getArgOperand(i)->getType()->getPointerElementType())
+          return true;
+  return false;
+}
+
+// Fix type attributes (such as byval or sret) to use the correct type.
+static void fixBadTypeAttributes(CallBase &CB) {
+  if (!hasBadTypeAttributes(CB))
+    return;
+  AttributeList attrs = CB.getAttributes();
+  AttributeList orig_attrs = attrs;
+  for (unsigned i = 0; i < CB.arg_size(); ++i) {
+    for (Attribute attr : orig_attrs.getAttributes(i + 1)) {
+      if (attr.isTypeAttribute()) {
+        attrs =
+            attrs.removeAttribute(CB.getContext(), i + 1, attr.getKindAsEnum());
+        attrs = attrs.addAttribute(
+            CB.getContext(), i + 1,
+            Attribute::get(
+                CB.getContext(), attr.getKindAsEnum(),
+                CB.getArgOperand(i)->getType()->getPointerElementType()));
+      }
+    }
+  }
+  CB.setAttributes(attrs);
+  assert(!hasBadTypeAttributes(CB));
+}
+
 std::unique_ptr<Module> GLMerger::Finish() {
   auto M = Merger::Finish();
+
+  // Ensure that all the bad type attributes we fix (see below) are introduced
+  // by InstCombine, and none have been introduced by the merging process
+  // itself.
+  for (const auto &F : *M)
+    for (const auto &BB : F)
+      for (const auto &I : BB)
+        if (const CallBase *CB = dyn_cast<CallBase>(&I))
+          assert(!hasBadTypeAttributes(*CB));
 
   if (!DisableOpts) {
     // Run some optimizations to make use of the available_externally functions
@@ -749,6 +803,17 @@ std::unique_ptr<Module> GLMerger::Finish() {
     PM.add(createGlobalDCEPass());
     PM.run(*M);
   }
+
+  // As of LLVM 12.0.0, InstCombine has a bug where it can break type
+  // attributes (byval, sret, etc.):
+  // https://bugs.llvm.org/show_bug.cgi?id=50697
+  //
+  // As a workaround, we fix the attribute type ourselves.
+  for (auto &F : *M)
+    for (auto &BB : F)
+      for (auto &I : BB)
+        if (CallBase *CB = dyn_cast<CallBase>(&I))
+          fixBadTypeAttributes(*CB);
 
   Linker::linkModules(*M, LoadGLLibrary(M->getContext()));
   FunctionType *UndefFuncType =

@@ -15,6 +15,7 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/GraphWriter.h>
 #include <llvm/Support/ScopedPrinter.h>
+#include <llvm/Transforms/IPO.h>
 #include <map>
 #include <set>
 
@@ -44,12 +45,22 @@ void Merger::AddModule(StringRef ModuleName) {
   std::map<std::string, std::string> PartIDs;
   Remainder = Err(bcdb.LoadParts(ModuleName, PartIDs));
 
+  // Definitions marked available_externally are a little tricky to handle, and
+  // anyway we'll match the dynamic linker's behavior better if we replace them
+  // with declarations.
+  std::unique_ptr<ModulePass> elim_avail_extern(
+      createEliminateAvailableExternallyPass());
+  elim_avail_extern->runOnModule(*Remainder);
+
   // Find all references to globals.
   for (const auto &item : PartIDs) {
     GlobalValue &GV = *Remainder->getNamedValue(item.first);
-    GlobalItems[&GV].PartID = item.second;
-    for (const auto &ref : LoadPartRefs(item.second, item.first))
-      GlobalItems[&GV].Refs[std::string(ref.first())] = ResolvedReference();
+    // May have been replaced with a declaration by elim_avail_extern.
+    if (!GV.isDeclaration()) {
+      GlobalItems[&GV].PartID = item.second;
+      for (const auto &ref : LoadPartRefs(item.second, item.first))
+        GlobalItems[&GV].Refs[std::string(ref.first())] = ResolvedReference();
+    }
   }
   for (GlobalValue &GV :
        concat<GlobalValue>(Remainder->global_objects(), Remainder->aliases(),

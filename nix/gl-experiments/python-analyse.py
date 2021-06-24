@@ -35,10 +35,11 @@ for dn in sys.argv[1:]:
     row['dl_reloc'] = statistics.mean(dl_reloc)
     row['dl_load'] = statistics.mean(dl_load)
 
-    p = subprocess.run(('perf', 'stat', 'report', '-i', f'{dn}/perf.data'), capture_output = True, universal_newlines = True)
-    for v, k in re.findall(r'^([ 0-9,.]{18}) .... ([^ ]+)', p.stderr, re.M):
-        v = float(v.replace(',',''))
-        row[k] = v
+    if os.path.exists(f'{dn}/perf.data'):
+        p = subprocess.run(('perf', 'stat', 'report', '-i', f'{dn}/perf.data'), capture_output = True, universal_newlines = True)
+        for v, k in re.findall(r'^([ 0-9,.]{18}) .... ([^ ]+)', p.stderr, re.M):
+            v = float(v.replace(',',''))
+            row[k] = v
 
     with open(f'{dn}/pyperf.json') as f:
         j = json.load(f)

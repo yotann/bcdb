@@ -1,4 +1,4 @@
-{ stdenvNoCC, clang, llvm, bintools, bash }:
+{ stdenvNoCC, lib, clang, bash }:
 
 # This package provides "clang" and "clang++" wrappers that add the
 # -fembed-bitcode option, remove other options that conflict with
@@ -7,8 +7,8 @@
 let
   stdenv = stdenvNoCC;
 in stdenv.mkDerivation {
-  name = "${stdenv.lib.getName clang}-bitcode";
-  version = stdenv.lib.getVersion clang;
+  name = "${lib.getName clang}-bitcode";
+  version = lib.getVersion clang;
   shell = "${bash}/bin/bash";
   dontBuild = true;
   dontConfigure = true;

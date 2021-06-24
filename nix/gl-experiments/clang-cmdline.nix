@@ -7,8 +7,8 @@ let
     pkgs = import ../bitcode-overlay;
 in {
   args = pkgs.lib.escapeShellArgs [
-    "-B${pkgs.llvmPackages_10.clang-unwrapped.lib}"
-    "-resource-dir=${pkgs.llvmPackages_10.clang}/resource-root"
+    "-B${pkgs.llvmPackages_12.clang-unwrapped.lib}"
+    "-resource-dir=${pkgs.llvmPackages_12.clang}/resource-root"
     "--gcc-toolchain=${pkgs.gcc-unwrapped.out}"
     "-B${pkgs.glibc.out}/lib/"
     "-idirafter"

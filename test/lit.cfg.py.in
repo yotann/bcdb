@@ -3,7 +3,7 @@ import lit.formats
 
 config.name = "bcdb"
 config.test_format = lit.formats.ShTest(True)
-config.suffixes = [".ll",".test",".js"]
+config.suffixes = [".ll",".test",".js",".cpp"]
 config.test_source_root = "@CMAKE_SOURCE_DIR@/test"
 config.test_exec_root = "@CMAKE_BINARY_DIR@/test"
 config.excludes = [ "Inputs" ]

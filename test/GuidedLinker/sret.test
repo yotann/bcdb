@@ -1,0 +1,5 @@
+; REQUIRES: llvm12
+; RUN: bcdb init -uri sqlite:%t.bcdb
+; RUN: bcdb add -uri sqlite:%t.bcdb %p/Inputs/sret-0.ll -name 0
+; RUN: bcdb add -uri sqlite:%t.bcdb %p/Inputs/sret-1.ll -name 1
+; RUN: bcdb gl -uri sqlite:%t.bcdb 0 1 -o %t --merged-name=libmerged.so --noplugin

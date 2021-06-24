@@ -108,6 +108,33 @@
     exclude = [ pkgsBitcode.icu64 ];
   };
 
+  boost12 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ boost155 boost159 boost160 boost165 boost166 boost167 boost168 boost169 boost170 boost171 boost172 boost173 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+    exclude = [ pkgsBitcode.icu64 ];
+  };
+
+  boost13 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ boost155 boost159 boost160 boost165 boost166 boost167 boost168 boost169 boost170 boost171 boost172 boost173 boost174 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+    exclude = [ pkgsBitcode.icu64 ];
+  };
+
+  boost14 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ boost155 boost159 boost160 boost165 boost166 boost167 boost168 boost169 boost170 boost171 boost172 boost173 boost174 boost175 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+    exclude = [ pkgsBitcode.icu64 ];
+  };
+
   protobuf1 = {
     lto-flags = "-Oz";
     packages = with pkgsBitcode; [ protobuf2_5 ];
@@ -167,6 +194,46 @@
   protobuf8 = {
     lto-flags = "-Oz";
     packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf9 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf10 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf11 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_14 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf12 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_14 protobuf3_15 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
+    configurations = {
+      interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
+    };
+  };
+
+  protobuf13 = {
+    lto-flags = "-Oz";
+    packages = with pkgsBitcode; [ protobuf2_5 protobuf3_1 protobuf3_10 protobuf3_11 protobuf3_12 protobuf3_13 protobuf3_14 protobuf3_15 protobuf3_16 protobuf3_6 protobuf3_7 protobuf3_8 protobuf3_9 ];
     configurations = {
       interposable  = { noplugin = true; nooverride = false; nouse = false; noweak = false; };
     };
@@ -251,15 +318,15 @@
       bin/clang -fPIC -shared -O3 ${./../../third_party/sqlite/sqlite-amalgamation-3320000.c} -ldl -lpthread -o /dev/null \
         ${(import ./clang-cmdline.nix { exepath = "."; }).args}
     '';
-    packages = with pkgsBitcode.llvmPackages_10; [ bintools clang clang-unwrapped llvm ];
+    packages = with pkgsBitcode.llvmPackages_12; [ bintools clang clang-unwrapped llvm ];
     exclude = with pkgsBitcode; [
       # needs assembly files
       libffi
       # overrides libc functions (such as __tls_get_addr and __fprintf_chk)
-      llvmPackages_10.compiler-rt
+      llvmPackages_12.compiler-rt
       # might cause conflicts with -lstdc++
-      llvmPackages_10.libcxx
-      llvmPackages_10.libcxxabi
+      llvmPackages_12.libcxx
+      llvmPackages_12.libcxxabi
     ];
     configurations = {
       closed        = { noplugin = true; nooverride = true;  nouse = true;  noweak = true;  };
