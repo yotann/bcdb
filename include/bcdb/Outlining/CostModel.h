@@ -32,6 +32,7 @@ enum class CostItem {
   PHI,
   Cast,
   Select,
+  ShuffleVectorSize,
   OtherTerminator,
   OtherInstruction,
 };

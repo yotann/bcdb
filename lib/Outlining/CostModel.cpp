@@ -72,6 +72,10 @@ struct CostVisitor : public InstVisitor<CostVisitor> {
 
   void visitSelectInst(SelectInst &I) { Model->Items[CostItem::Select]++; }
 
+  void visitShuffleVectorInst(ShuffleVectorInst &I) {
+    Model->Items[CostItem::ShuffleVectorSize] += I.getType()->getElementCount().getKnownMinValue();
+  }
+
   void visitCallInst(CallInst &I) { Model->Items[CostItem::Call]++; }
 
   void visitInvokeInst(InvokeInst &I) { Model->Items[CostItem::Invoke]++; }
