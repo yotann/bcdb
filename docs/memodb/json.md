@@ -1,45 +1,52 @@
-# JSON format for MemoDB nodes
+# JSON format for MemoDB Nodes
 
 ## Overview
 
-MemoDB nodes are usually encoded using the CBOR binary encoding, but sometimes
+MemoDB Nodes are usually encoded using the CBOR binary encoding, but sometimes
 it's necessary or convenient to use a textual format instead. This document
-specifies a new format that can unambiguously represent MemoDB nodes using JSON
+specifies a new format that can unambiguously represent MemoDB Nodes using JSON
 values.
 
 #### Rationale
 
-Several other formats were considered and rejected:
+There are two main reasons to have a textual format for Nodes:
 
-- [DAG-JSON](https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-json.md)
-  was intended to be used for this purpose, but it sometimes prevents the use
-  of `"/"` as a key in maps, which could easily be a problem when representing
-  file paths in MemoDB. The exact rules about when `"/"` are allowed are
-  somewhat complicated.
-- YAML doesn't have a human-friendly way to distinguish between the boolean
-  "false" and the string "false", the number "1" and the string "1", etc.
-  That's fine when you know the schema of the data you're parsing, but MemoDB
-  tools need to work with arbitrary nodes with unknown schemas.
+1. For diagnostic purposes, to use in debugging dumps, test case inputs, etc.
+2. As the main data format for clients that don't have a good CBOR
+   implementation available.
+
+For simplicity, it's desirable to use a single format for both purposes.
+
+Several other textual formats were considered and rejected:
+
+- [DAG-JSON] was intended to be used for this purpose, but it sometimes
+  prevents the use of `"/"` as a key in maps, which could easily be a problem
+  when representing file paths in MemoDB. The exact rules about when `"/"` are
+  allowed are somewhat complicated.
+- YAML doesn't have a good way to distinguish between the boolean "false" and
+  the string "false", the number "1" and the string "1", etc. That's fine when
+  you know the schema of the data you're parsing, but MemoDB tools need to work
+  with arbitrary Nodes with unknown schemas. One could distinguish between
+  `false` for the boolean value and `"false"` for the string, but it's too
+  error-prone for humans to remember the exact strings which need to be quoted
+  this way.
 - TOML works best when the top-level structure of the document is a tree of
-  maps, which isn't necessarily true of MemoDB nodes. It also doesn't have a
+  maps, which isn't necessarily true of MemoDB Nodes. It also doesn't have a
   good way to encode CIDs or binary data.
-- CBOR's [Diagnostic
-  Notation](https://www.rfc-editor.org/rfc/rfc8949.html#name-diagnostic-notation)
-  or [Extended Diagnostic
-  Notation](https://datatracker.ietf.org/doc/html/rfc8610#appendix-G) would
-  work, but are not widely supported. They also format CIDs in an awkward way,
-  using `42(h'0001710001f6')` for the CID `bafyqaapw` for example.
+- CBOR's [Diagnostic Notation] or [Extended Diagnostic Notation] would work,
+  but are not widely supported. They also format CIDs in an awkward way, using
+  `42(h'0001710001f6')` for the CID `bafyqaapw` for example.
 
 
 ## Special JSON objects
 
-Unfortunately, not every kind of MemoDB node has a natural mapping to JSON.
+Unfortunately, not every kind of MemoDB Node has a natural mapping to JSON.
 This format uses special JSON objects to represent floats, byte strings, and
 CIDs. In order to distinguish between these special objects and normal objects
 that represent MemoDB maps, normal objects are also wrapped in a special
 object.
 
-For example, this MemoDB node (in a made-up format):
+For example, this MemoDB Node (in a made-up format):
 
 ```
 {
@@ -115,7 +122,7 @@ MemoDB floats are represented with a special single-element JSON object, with
 the name `"float"` and a value which is a JSON number.
 
 Implementations do **not** need to support floating-point infinities and NaNs,
-which are not allowed in MemoDB nodes.
+which are not allowed in MemoDB Nodes.
 
 #### Rationale
 
@@ -208,6 +215,10 @@ former will be represented as `{"map":{"float":1}}`, and the latter will be
 represented as `{"float":1}`.
 
 The format could enforce determinism, specifying element order and other
-details so a given MemoDB node would always be encoded as the same JSON string.
+details so a given MemoDB Node would always be encoded as the same JSON string.
 However, this would create too much extra work for clients. When determinism is
 important, CBOR should be used instead.
+
+[DAG-JSON]: https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-json.md
+[Diagnostic Notation]: https://www.rfc-editor.org/rfc/rfc8949.html#name-diagnostic-notation
+[Extended Diagnostic Notation]: https://datatracker.ietf.org/doc/html/rfc8610#appendix-G
