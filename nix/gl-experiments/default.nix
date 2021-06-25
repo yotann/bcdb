@@ -15,7 +15,7 @@ let
       objdump -h "$1" | grep -q ".llvmbc"
     }
 
-    export BCDB_URI=sqlite:$out
+    export MEMODB_STORE=sqlite:$out
     bcdb init
 
     while read path; do
@@ -102,7 +102,7 @@ let
     phases = "unpackPhase buildPhase fixupPhase";
     unpackPhase = ''
       src=$PWD
-      export BCDB_URI="sqlite:${bcdb-file}?immutable=1"
+      export MEMODB_STORE="sqlite:${bcdb-file}?immutable=1"
 
       # Emit Makefile rules to compile every module.
       declare -A ALREADY_HANDLED
@@ -163,7 +163,7 @@ let
   }: with lib; pkgs.runCommand "${name}.mux" {
     buildInputs = [ bcdb ];
   } ''
-    export BCDB_URI="sqlite:${bcdb-file}?immutable=1"
+    export MEMODB_STORE="sqlite:${bcdb-file}?immutable=1"
     mkdir "$out"
     declare -A ALREADY_HANDLED
     declare -a MODS

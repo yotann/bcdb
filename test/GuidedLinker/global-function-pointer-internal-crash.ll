@@ -1,8 +1,8 @@
 ; XFAIL: *
 
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name x
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name y
-; RUN: bcdb gl -uri sqlite:%t.bcdb x y -o %t --merged-name=libmerged.so
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name x
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name y
+; RUN: bcdb gl -store sqlite:%t.bcdb x y -o %t --merged-name=libmerged.so
 
 @global = global void ()* @func
 @global2 = internal global void ()* @func

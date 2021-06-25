@@ -1,7 +1,7 @@
-; RUN: bcdb init -uri sqlite:%t.bcdb
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name rogue
-; RUN: bcdb add -uri sqlite:%t.bcdb %p/Inputs/name_conflict.ll -name angband
-; RUN: bcdb gl -uri sqlite:%t.bcdb rogue angband -o %t --merged-name=libmerged.so --weak-name=libweak.so --noplugin
+; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name rogue
+; RUN: bcdb add -store sqlite:%t.bcdb %p/Inputs/name_conflict.ll -name angband
+; RUN: bcdb gl -store sqlite:%t.bcdb rogue angband -o %t --merged-name=libmerged.so --weak-name=libweak.so --noplugin
 ; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/rogue       | FileCheck --check-prefix=ROGUE %s
 ; RUN: opt -verify -S < %t/angband     | FileCheck --check-prefix=ANGBAND %s

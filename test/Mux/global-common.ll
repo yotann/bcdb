@@ -1,12 +1,12 @@
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name bin
-; RUN: llvm-as < %p/Inputs/global-common.ll | bcdb add -uri sqlite:%t - -name lib
-; RUN: bcdb mux -uri sqlite:%t bin lib | lli - bin
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name bin
+; RUN: llvm-as < %p/Inputs/global-common.ll | bcdb add -store sqlite:%t - -name lib
+; RUN: bcdb mux -store sqlite:%t bin lib | lli - bin
 
-; RUN: bcdb init -uri sqlite:%t.rg
-; RUN: llvm-as < %s | bcdb add -rename-globals -uri sqlite:%t.rg - -name bin
-; RUN: llvm-as < %p/Inputs/global-common.ll | bcdb add -rename-globals -uri sqlite:%t.rg - -name lib
-; RUN: bcdb mux -uri sqlite:%t.rg bin lib | lli - bin
+; RUN: bcdb init -store sqlite:%t.rg
+; RUN: llvm-as < %s | bcdb add -rename-globals -store sqlite:%t.rg - -name bin
+; RUN: llvm-as < %p/Inputs/global-common.ll | bcdb add -rename-globals -store sqlite:%t.rg - -name lib
+; RUN: bcdb mux -store sqlite:%t.rg bin lib | lli - bin
 
 @global = external global i32
 

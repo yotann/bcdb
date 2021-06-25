@@ -1,7 +1,7 @@
 ; XFAIL: *
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t -
-; RUN: bcdb merge -uri sqlite:%t - | opt -verify -S | FileCheck %s
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t -
+; RUN: bcdb merge -store sqlite:%t - | opt -verify -S | FileCheck %s
 
 %struct.va_list = type { i8* }
 

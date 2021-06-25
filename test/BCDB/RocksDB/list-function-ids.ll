@@ -1,10 +1,10 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -uri rocksdb:%t
-; RUN: llvm-as < %s | bcdb add -uri rocksdb:%t -name a -
-; RUN: llvm-as < %s | bcdb add -uri rocksdb:%t -name a -
-; RUN: llvm-as < %s | bcdb add -uri rocksdb:%t -name b -
-; RUN: bcdb list-modules -uri rocksdb:%t | sort | FileCheck --check-prefix=MODS %s
-; RUN: bcdb list-function-ids -uri rocksdb:%t | wc -l | FileCheck --check-prefix=IDS %s
+; RUN: bcdb init -store rocksdb:%t
+; RUN: llvm-as < %s | bcdb add -store rocksdb:%t -name a -
+; RUN: llvm-as < %s | bcdb add -store rocksdb:%t -name a -
+; RUN: llvm-as < %s | bcdb add -store rocksdb:%t -name b -
+; RUN: bcdb list-modules -store rocksdb:%t | sort | FileCheck --check-prefix=MODS %s
+; RUN: bcdb list-function-ids -store rocksdb:%t | wc -l | FileCheck --check-prefix=IDS %s
 
 ; MODS: a
 ; MODS-NEXT: b

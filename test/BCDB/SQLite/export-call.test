@@ -1,9 +1,9 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -uri sqlite:%t
+; RUN: bcdb init -store sqlite:%t
 
-; RUN: memodb set -uri sqlite:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
-; RUN: memodb set -uri sqlite:%t call:primes/bafyqaaig id:bafyqab4gaibqkbylbu
-; RUN: memodb set -uri sqlite:%t call:add/bafyqaaic/bafyqaaic id:bafyqaaie
+; RUN: memodb set -store sqlite:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
+; RUN: memodb set -store sqlite:%t call:primes/bafyqaaig id:bafyqab4gaibqkbylbu
+; RUN: memodb set -store sqlite:%t call:add/bafyqaaic/bafyqaaic id:bafyqaaie
 
-; RUN: memodb export -uri sqlite:%t > %t.car
+; RUN: memodb export -store sqlite:%t > %t.car
 ; RUN: diff %t.car %p/Outputs/export-call.car

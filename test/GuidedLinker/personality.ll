@@ -1,6 +1,6 @@
-; RUN: bcdb init -uri sqlite:%t.bcdb
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name mod
-; RUN: bcdb gl -uri sqlite:%t.bcdb mod -o %t --merged-name=libmerged.so
+; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name mod
+; RUN: bcdb gl -store sqlite:%t.bcdb mod -o %t --merged-name=libmerged.so
 ; RUN: opt -verify -S < %t/libmerged.so | FileCheck %s
 
 declare i32 @__gxx_personality_v0(...)

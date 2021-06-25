@@ -1,4 +1,4 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -uri rocksdb:%t
-; RUN: llvm-as < %s | bcdb add -uri rocksdb:%t -
-; RUN: bcdb get -uri rocksdb:%t -name - | opt -verify -S
+; RUN: bcdb init -store rocksdb:%t
+; RUN: llvm-as < %s | bcdb add -store rocksdb:%t -
+; RUN: bcdb get -store rocksdb:%t -name - | opt -verify -S

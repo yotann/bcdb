@@ -1,4 +1,4 @@
 ; RUN: rm -rf %t
 ; RUN: cp %p/Inputs/version7.bcdb %t
-; RUN: memodb export -uri sqlite:%t > %t.car
+; RUN: memodb export -store sqlite:%t > %t.car
 ; RUN: diff %t.car %p/Outputs/version7.car

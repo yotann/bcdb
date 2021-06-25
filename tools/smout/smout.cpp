@@ -107,18 +107,20 @@ static cl::opt<std::string>
                cl::sub(CollateCommand), cl::sub(EstimateCommand),
                cl::sub(MeasureCommand), cl::sub(ShowGroupsCommand));
 
-static cl::opt<std::string> UriOrEmpty(
-    "uri", cl::Optional, cl::desc("URI of the database"),
-    cl::init(std::string(StringRef::withNullAsEmpty(std::getenv("BCDB_URI")))),
-    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string>
+    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
+                    cl::init(std::string(StringRef::withNullAsEmpty(
+                        std::getenv("MEMODB_STORE")))),
+                    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
 
-static StringRef GetUri() {
-  if (UriOrEmpty.empty()) {
+static StringRef GetStoreUri() {
+  if (StoreUriOrEmpty.empty()) {
     report_fatal_error(
-        "You must provide a database URI, such as sqlite:/tmp/example.bcdb, "
-        "using the -uri option or the BCDB_URI environment variable.");
+        "You must provide a MemoDB store URI, such as "
+        "sqlite:/tmp/example.bcdb, "
+        "using the -store option or the MEMODB_STORE environment variable.");
   }
-  return UriOrEmpty;
+  return StoreUriOrEmpty;
 }
 
 // smout alive2
@@ -185,7 +187,7 @@ static Node evaluate_refines_alive2(Store &db, const Node &AliveSettings,
 
 static int Alive2() {
   ExitOnError Err("smout alive2: ");
-  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetStoreUri()));
   auto &memodb = bcdb->get_db();
   CID Root = memodb.head_get(ModuleName);
   Node Collated = memodb.get(Call("smout.collated", {Root}));
@@ -384,7 +386,7 @@ static Node evaluate_candidates(Store &db, const Node &func) {
 
 static int Candidates() {
   ExitOnError Err("smout candidates: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   auto OriginalFunctions = Err(db->ListFunctionsInModule(ModuleName));
 
   size_t TotalInputs = OriginalFunctions.size();
@@ -535,7 +537,7 @@ static Node evaluate_profitable(Store &db, const Node &func) {
 
 static int Collate() {
   ExitOnError Err("smout collate: ");
-  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetStoreUri()));
   Store &db = bcdb->get_db();
   auto AllFunctions = Err(bcdb->ListFunctionsInModule(ModuleName));
 
@@ -625,7 +627,7 @@ static int Collate() {
 static int Estimate() {
   ExitOnError Err("smout estimate: ");
 
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   auto &memodb = db->get_db();
 
   auto compiled_size = [&](CID ref) -> size_t {
@@ -930,7 +932,7 @@ static cl::opt<unsigned>
 
 static int MakeCostModel() {
   ExitOnError Err("smout make-cost-model: ");
-  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetStoreUri()));
   unsigned NumSeen = 0;
   LinearProgram Program("CostModel");
   LinearProgram::Expr Error;
@@ -1052,7 +1054,7 @@ static int Measure() {
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   auto &memodb = db->get_db();
 
   // It's okay if there are duplicates in this list; the BCDB will cache the
@@ -1106,7 +1108,7 @@ static int Measure() {
 
 static int ShowGroups() {
   ExitOnError Err("smout show-groups: ");
-  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> bcdb = Err(BCDB::Open(GetStoreUri()));
   auto &memodb = bcdb->get_db();
   CID Root = memodb.head_get(ModuleName);
   Node Collated = memodb.get(Call("smout.collated", {Root}));

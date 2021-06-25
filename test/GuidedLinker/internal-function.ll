@@ -1,6 +1,6 @@
-; RUN: bcdb init -uri sqlite:%t.bcdb
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so
+; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name prog
+; RUN: bcdb gl -store sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so
 ; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/prog        | FileCheck --check-prefix=STUB  %s
 

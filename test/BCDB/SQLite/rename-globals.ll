@@ -1,7 +1,7 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -rename-globals
-; RUN: bcdb get -uri sqlite:%t -name - | opt -verify -S | FileCheck %s
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -rename-globals
+; RUN: bcdb get -store sqlite:%t -name - | opt -verify -S | FileCheck %s
 
 ; CHECK: @__bcdb_alias_[[ID:[0-9A-Za-z]+]] = internal alias void (), void ()* @func
 

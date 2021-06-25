@@ -1,4 +1,4 @@
 ; RUN: rm -rf %t
 ; RUN: cp -r %p/Inputs/version0 %t
-; RUN: memodb export -uri rocksdb:%t > %t.car
+; RUN: memodb export -store rocksdb:%t > %t.car
 ; RUN: diff %t.car %p/Outputs/version0.car

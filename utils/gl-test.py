@@ -31,8 +31,8 @@ weak_library = False
 
 subprocess.check_call(('clang++', '--version'))
 
-bcdb_uri = 'sqlite:' + out + '.bcdb'
-subprocess.check_call(('bcdb', 'init', '-uri', bcdb_uri))
+memodb_store = 'sqlite:' + out + '.bcdb'
+subprocess.check_call(('bcdb', 'init', '-store', memodb_store))
 
 modules = set(re.findall(r'MODULE\d+', source))
 if not modules:
@@ -40,10 +40,10 @@ if not modules:
 modules = list(modules)
 modules.sort()
 for module in modules:
-    subprocess.check_call('cpp -D%s=1 -P -w < %s | bcdb add -uri %s -name %s -'%(module.upper(), filename, bcdb_uri, module.lower()), shell=True)
+    subprocess.check_call('cpp -D%s=1 -P -w < %s | bcdb add -store %s -name %s -'%(module.upper(), filename, memodb_store, module.lower()), shell=True)
 
 clang_args = []
-args = ['bcdb', 'gl', '-uri', bcdb_uri, '-o', out+'.bc']
+args = ['bcdb', 'gl', '-store', memodb_store, '-o', out+'.bc']
 args.extend(['--merged-name=merged.so'])
 for o, a in optlist:
     if o == '--weak-library':

@@ -36,8 +36,8 @@ public:
   BCDB(std::unique_ptr<memodb::Store> db); // freed when BCDB destroyed
   BCDB(memodb::Store &db);                 // not freed when BCDB destroyed
   ~BCDB();
-  static llvm::Error Init(llvm::StringRef uri);
-  static llvm::Expected<std::unique_ptr<BCDB>> Open(llvm::StringRef uri);
+  static llvm::Error Init(llvm::StringRef store_uri);
+  static llvm::Expected<std::unique_ptr<BCDB>> Open(llvm::StringRef store_uri);
 
   memodb::Store &get_db() { return *db; }
 

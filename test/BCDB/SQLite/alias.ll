@@ -1,7 +1,7 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t -
-; RUN: bcdb get -uri sqlite:%t -name - | opt -verify -S | FileCheck %s
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t -
+; RUN: bcdb get -store sqlite:%t -name - | opt -verify -S | FileCheck %s
 
 ; CHECK: @a = internal alias void (), void ()* @func
 @a = internal alias void (), void ()* @func

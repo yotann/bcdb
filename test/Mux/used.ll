@@ -1,7 +1,7 @@
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name a
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name b
-; RUN: bcdb mux -uri sqlite:%t a b | opt -verify -S | FileCheck %s
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name a
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name b
+; RUN: bcdb mux -store sqlite:%t a b | opt -verify -S | FileCheck %s
 
 @X = internal global i8 4
 

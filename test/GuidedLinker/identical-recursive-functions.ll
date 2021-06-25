@@ -1,7 +1,7 @@
-; RUN: bcdb init -uri sqlite:%t.bcdb
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name f
-; RUN: bcdb add -uri sqlite:%t.bcdb %p/Inputs/identical-recursive-functions.ll -name g
-; RUN: bcdb gl -uri sqlite:%t.bcdb f g -o %t --merged-name=libmerged.so --noplugin
+; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name f
+; RUN: bcdb add -store sqlite:%t.bcdb %p/Inputs/identical-recursive-functions.ll -name g
+; RUN: bcdb gl -store sqlite:%t.bcdb f g -o %t --merged-name=libmerged.so --noplugin
 ; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s
 ; RUN: opt -verify -S < %t/f           | FileCheck --check-prefix=F     %s
 ; RUN: opt -verify -S < %t/g           | FileCheck --check-prefix=G     %s

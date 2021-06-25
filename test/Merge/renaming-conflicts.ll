@@ -1,7 +1,7 @@
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name a
-; RUN: llvm-as < %p/Inputs/renaming-conflicts.ll | bcdb add -uri sqlite:%t - -name b
-; RUN: bcdb merge -uri sqlite:%t a b | opt -verify -S | FileCheck %s
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name a
+; RUN: llvm-as < %p/Inputs/renaming-conflicts.ll | bcdb add -store sqlite:%t - -name b
+; RUN: bcdb merge -store sqlite:%t a b | opt -verify -S | FileCheck %s
 
 ; CHECK-DAG: @g0{{.*}} = internal constant
 ; CHECK-DAG: @g1{{.*}} = internal constant

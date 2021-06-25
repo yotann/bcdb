@@ -29,18 +29,20 @@ using namespace bcdb;
 using namespace llvm;
 using namespace memodb;
 
-static cl::opt<std::string> UriOrEmpty(
-    "uri", cl::Optional, cl::desc("URI of the database"),
-    cl::init(std::string(StringRef::withNullAsEmpty(std::getenv("BCDB_URI")))),
-    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string>
+    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
+                    cl::init(std::string(
+                        StringRef::withNullAsEmpty(std::getenv("MEMODB_URI")))),
+                    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
 
-static StringRef GetUri() {
-  if (UriOrEmpty.empty()) {
+static StringRef GetStoreUri() {
+  if (StoreUriOrEmpty.empty()) {
     report_fatal_error(
-        "You must provide a database URI, such as sqlite:/tmp/example.bcdb, "
-        "using the -uri option or the BCDB_URI environment variable.");
+        "You must provide a MemoDB store URI, such as "
+        "sqlite:/tmp/example.bcdb, "
+        "using the -store option or the MEMODB_STORE environment variable.");
   }
-  return UriOrEmpty;
+  return StoreUriOrEmpty;
 }
 
 // bcdb add
@@ -57,7 +59,7 @@ static cl::opt<std::string> AddName("name", cl::desc("Name of the new head"),
 
 static int Add() {
   ExitOnError Err("bcdb add: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
 
   LLVMContext Context;
   SMDiagnostic Diag;
@@ -88,7 +90,7 @@ static cl::opt<std::string> CpDest(cl::Positional, cl::Required,
 
 static int Cp() {
   ExitOnError Err("bcdb cp: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   CID value = db->get_db().head_get(CpSource);
   db->get_db().head_set(CpDest, value);
   return 0;
@@ -104,7 +106,7 @@ static cl::opt<std::string> DeleteHeadname("name",
 
 static int Delete() {
   ExitOnError Err("bcdb delete: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   StringRef Name = DeleteHeadname;
   Err(db->Delete(Name));
   return 0;
@@ -178,14 +180,14 @@ static int WriteModule(Module &M) {
 
 static int Get() {
   ExitOnError Err("bcdb get: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::unique_ptr<Module> M = Err(db->Get(GetName));
   return WriteModule(*M);
 }
 
 static int GetFunction() {
   ExitOnError Err("bcdb get-function: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::unique_ptr<Module> M = Err(db->GetFunctionById(GetId));
   return WriteModule(*M);
 }
@@ -195,7 +197,7 @@ static int Melt() {
   // Don't do the melt if we're just going to fail when writing the module.
   if (!Err(ShouldWriteModule()))
     return 0;
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::vector<std::string> names = Err(db->ListAllFunctions());
   int i = 0;
   Melter Melter(db->GetContext());
@@ -217,7 +219,7 @@ static cl::list<std::string> HeadGetNames(cl::Positional, cl::OneOrMore,
 
 static int HeadGet() {
   ExitOnError Err("bcdb head-get: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   for (StringRef Name : HeadGetNames) {
     CID value = db->get_db().head_get(Name);
     outs() << StringRef(value) << "\n";
@@ -231,7 +233,7 @@ static cl::SubCommand InitCommand("init", "Initialize the database");
 
 static int Init() {
   ExitOnError Err("bcdb init: ");
-  Err(BCDB::Init(GetUri()));
+  Err(BCDB::Init(GetStoreUri()));
   return 0;
 }
 
@@ -248,7 +250,7 @@ static cl::opt<std::string> ListFunctionsName("name",
 
 static int ListFunctions() {
   ExitOnError Err("bcdb list-function-ids: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::vector<std::string> names;
   if (!ListFunctionsName.empty()) {
     names = Err(db->ListFunctionsInModule(ListFunctionsName));
@@ -268,7 +270,7 @@ static cl::SubCommand ListModulesCommand("list-modules",
 
 static int ListModules() {
   ExitOnError Err("bcdb list-modules: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::vector<std::string> names = Err(db->ListModules());
   for (auto &name : names) {
     outs() << name << "\n";
@@ -286,7 +288,7 @@ static int Merge() {
   ExitOnError Err("bcdb merge: ");
   if (!Err(ShouldWriteModule()))
     return 0;
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
@@ -298,7 +300,7 @@ static int Mux() {
   ExitOnError Err("bcdb mux: ");
   if (!Err(ShouldWriteModule()))
     return 0;
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
@@ -320,7 +322,7 @@ static cl::opt<std::string>
 
 static int GL() {
   ExitOnError Err("bcdb gl: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   std::vector<StringRef> Names;
   for (auto &Name : MergeNames)
     Names.push_back(Name);
@@ -373,7 +375,7 @@ static cl::list<std::string> FuncArgs(cl::Positional, cl::OneOrMore,
 
 static int Cache() {
   ExitOnError Err("bcdb cache: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
 
   std::vector<CID> args;
   for (const auto &arg_id : FuncArgs) {
@@ -386,7 +388,7 @@ static int Cache() {
 
 static int Evaluate() {
   ExitOnError Err("bcdb evaluate: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
 
   std::vector<CID> args;
   for (const auto &arg_id : FuncArgs) {
@@ -405,7 +407,7 @@ static int Evaluate() {
 
 static int Invalidate() {
   ExitOnError Err("bcdb invalidate: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
 
   db->get_db().call_invalidate(FuncName);
   return 0;
@@ -421,7 +423,7 @@ static cl::opt<std::string> RefsValue(cl::Positional, cl::Required,
 
 static int Refs() {
   ExitOnError Err("bcdb refs: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetUri()));
+  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
 
   CID ref = *CID::parse(RefsValue);
   for (const auto &path : db->get_db().list_paths_to(ref)) {

@@ -1,6 +1,6 @@
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name a
-; RUN: bcdb merge -uri sqlite:%t a | opt -verify -S | FileCheck %s
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name a
+; RUN: bcdb merge -store sqlite:%t a | opt -verify -S | FileCheck %s
 
 ; CHECK-NOT: @X.
 @X = internal global i32 12

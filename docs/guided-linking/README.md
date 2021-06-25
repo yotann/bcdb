@@ -52,7 +52,7 @@ bc-imitate annotate --binary=lz4 > lz4.bc
 ### 3. Initialize the BCDB file
 
 ```sh
-export BCDB_URI=sqlite:lz4.bcdb
+export MEMODB_STORE=sqlite:lz4.bcdb
 bcdb init
 bcdb add -name lz4 lz4.bc
 ```

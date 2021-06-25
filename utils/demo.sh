@@ -8,7 +8,7 @@ set -e
 BCDB=bin/bcdb
 
 rm -f demo.db
-$BCDB init -uri sqlite:demo.db
+$BCDB init -store sqlite:demo.db
 echo file,total_functions,unique_functions,input_bytes,db_bytes,blob_bytes > demo.csv
 
 CUMINPUTSIZE=0
@@ -17,7 +17,7 @@ do
   CUMINPUTSIZE=$(($CUMINPUTSIZE+$(stat -c%s $F)))
 
   printf "Adding %-22s" "$F..."
-  $BCDB add -uri sqlite:demo.db "$F"
+  $BCDB add -store sqlite:demo.db "$F"
 
   DBSIZE=$(stat -c%s demo.db)
   BLOBSIZE=$(sqlite3 demo.db 'SELECT SUM(LENGTH(content)) FROM blob')

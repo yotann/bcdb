@@ -80,12 +80,12 @@ make check
 ### Basic operation
 
 BCDB stores all its data in an SQLite database. Every time you run the `bcdb`
-command, you must give it the path to the database using the option `-uri
+command, you must give it the path to the database using the option `-store
 sqlite:path/to/my.bcdb`. You must initialize the database before you can use
 it:
 
 ```shell
-bcdb init -uri sqlite:example.bcdb
+bcdb init -store sqlite:example.bcdb
 ```
 
 You can add whatever LLVM bitcode modules you like to the database. Each module
@@ -94,23 +94,23 @@ add`.
 
 ```shell
 llvm-as </dev/null >empty.bc
-bcdb add -uri sqlite:example.bcdb -name empty empty.bc
-bcdb add -uri sqlite:example.bcdb /tmp/x.bc # implied -name is /tmp/x.bc
+bcdb add -store sqlite:example.bcdb -name empty empty.bc
+bcdb add -store sqlite:example.bcdb /tmp/x.bc # implied -name is /tmp/x.bc
 ```
 
 You can list all the modules stored in the database, and retrieve any module:
 
 ```shell
-bcdb list-modules -uri sqlite:example.bcdb
-bcdb get -uri sqlite:example.bcdb -name empty | llvm-dis
-bcdb get -uri sqlite:example.bcdb -name /tmp/x.bc -o /tmp/x2.bc
+bcdb list-modules -store sqlite:example.bcdb
+bcdb get -store sqlite:example.bcdb -name empty | llvm-dis
+bcdb get -store sqlite:example.bcdb -name /tmp/x.bc -o /tmp/x2.bc
 ```
 
 You can also delete modules, but garbage collection has not been implemented
 yet, so no disk space will actually be freed.
 
 ```shell
-bcdb delete -uri sqlite:example.bcdb -name empty
+bcdb delete -store sqlite:example.bcdb -name empty
 ```
 
 ### Working with functions
@@ -126,13 +126,13 @@ You can list and retrieve the individual function modules as follows:
 
 ```shell
 # List all function modules in the BCDB.
-bcdb list-function-ids -uri sqlite:example.bcdb
+bcdb list-function-ids -store sqlite:example.bcdb
 # List the function modules that were extracted from a specific input module.
-bcdb list-function-ids -uri sqlite:example.bcdb -name /tmp/x.bc
+bcdb list-function-ids -store sqlite:example.bcdb -name /tmp/x.bc
 # Retrieve a single function as an LLVM bitcode module.
-bcdb get-function -uri sqlite:example.bcdb -id 0 -o /tmp/function0.bc
+bcdb get-function -store sqlite:example.bcdb -id 0 -o /tmp/function0.bc
 # Find out where a particular function came from.
-bcdb refs -uri sqlite:example.bcdb 0
+bcdb refs -store sqlite:example.bcdb 0
 ```
 
 ### Other subcommands

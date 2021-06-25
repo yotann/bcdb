@@ -1,6 +1,6 @@
-; RUN: bcdb init -uri sqlite:%t.bcdb
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --disable-opts
+; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name prog
+; RUN: bcdb gl -store sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --disable-opts
 
 @x = extern_weak global i8, align 8
 

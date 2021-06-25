@@ -1,7 +1,7 @@
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name a
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t - -name b
-; RUN: bcdb merge -uri sqlite:%t a b | opt -verify -S > %t.ll
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name a
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name b
+; RUN: bcdb merge -store sqlite:%t a b | opt -verify -S > %t.ll
 ; RUN: FileCheck --check-prefix=FUNC %s < %t.ll
 ; RUN: FileCheck --check-prefix=CALLER %s < %t.ll
 

@@ -35,14 +35,14 @@ static cl::opt<bool> RenameGlobals(
     cl::desc("When adding a module, rename referenced globals based on IDs"),
     cl::cat(BCDBCategory));
 
-Error BCDB::Init(StringRef uri) {
+Error BCDB::Init(StringRef store_uri) {
   Expected<std::unique_ptr<Store>> db =
-      Store::open(uri.str().c_str(), /*create_if_missing*/ true);
+      Store::open(store_uri, /*create_if_missing*/ true);
   return db.takeError();
 }
 
-Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef uri) {
-  Expected<std::unique_ptr<Store>> db = Store::open(uri.str().c_str());
+Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef store_uri) {
+  Expected<std::unique_ptr<Store>> db = Store::open(store_uri);
   if (!db)
     return db.takeError();
   return std::make_unique<BCDB>(std::move(*db));

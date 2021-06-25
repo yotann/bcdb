@@ -44,18 +44,19 @@ static cl::SubCommand SetCommand("set", "Set a head or a call result");
 static cl::SubCommand TransferCommand("transfer",
                                       "Transfer data to a target database");
 
-static cl::opt<std::string> UriOrEmpty(
-    "uri", cl::Optional, cl::desc("URI of the database"),
-    cl::init(std::string(StringRef::withNullAsEmpty(std::getenv("BCDB_URI")))),
-    cl::cat(MemoDBCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string>
+    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
+                    cl::init(std::string(StringRef::withNullAsEmpty(
+                        std::getenv("MEMODB_STORE")))),
+                    cl::cat(MemoDBCategory), cl::sub(*cl::AllSubCommands));
 
-static StringRef GetUri() {
-  if (UriOrEmpty.empty()) {
-    report_fatal_error(
-        "You must provide a database URI, such as sqlite:/tmp/example.bcdb, "
-        "using the -uri option or the BCDB_URI environment variable.");
+static StringRef GetStoreUri() {
+  if (StoreUriOrEmpty.empty()) {
+    report_fatal_error("You must provide a MemoDB store URI, such as "
+                       "sqlite:/tmp/example.bcdb, using the -store option or "
+                       "the MEMODB_STORE environment variable.");
   }
-  return UriOrEmpty;
+  return StoreUriOrEmpty;
 }
 
 // format options
@@ -244,7 +245,7 @@ static int Export() {
                                Buffer.size());
       };
 
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
 
   // We won't know what root CID to put in the header until after we've written
   // everything. Leave an empty space which will be filled with header +
@@ -364,7 +365,7 @@ static int Export() {
 
 static int Get() {
   auto Name = GetNameFromURI(SourceURI);
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   auto CID = Db->resolveOptional(Name);
   auto Value = CID ? Db->getOptional(*CID) : None;
   if (Value)
@@ -405,7 +406,7 @@ static cl::opt<std::string> FuncName(cl::Positional, cl::Required,
                                      cl::sub(ListCallsCommand));
 
 static int ListCalls() {
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   for (const Call &call : Db->list_calls(FuncName)) {
     outs() << "call:" << call.Name;
     for (const auto &Arg : call.Args)
@@ -418,7 +419,7 @@ static int ListCalls() {
 // memodb list-funcs
 
 static int ListFuncs() {
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   for (llvm::StringRef Func : Db->list_funcs())
     outs() << Func << "\n";
   return 0;
@@ -427,7 +428,7 @@ static int ListFuncs() {
 // memodb list-heads
 
 static int ListHeads() {
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   for (const Head &head : Db->list_heads())
     outs() << "head:" << head.Name << "\n";
   return 0;
@@ -436,7 +437,7 @@ static int ListHeads() {
 // memodb put
 
 static int Put() {
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   CID Ref = ReadRef(*Db, InputURI);
   outs() << "id:" << Ref << "\n";
   return 0;
@@ -445,7 +446,7 @@ static int Put() {
 // memodb refs-to
 
 static int RefsTo() {
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   CID Ref = ReadRef(*Db, TargetURI);
   for (const Name &Name : Db->list_names_using(Ref)) {
     if (auto head = std::get_if<Head>(&Name))
@@ -466,7 +467,7 @@ static int RefsTo() {
 // memodb set
 
 static int Set() {
-  auto Db = Store::open(GetUri());
+  auto Db = Store::open(GetStoreUri());
   auto Name = GetNameFromURI(TargetURI);
   auto Value = ReadRef(*Db, InputURI);
   Db->set(Name, Value);
@@ -476,9 +477,9 @@ static int Set() {
 // memodb transfer
 
 static cl::opt<std::string>
-    TargetDatabaseURI("target-uri", cl::Required,
-                      cl::desc("URI of the target database"),
-                      cl::cat(MemoDBCategory), cl::sub(TransferCommand));
+    TargetStoreURI("target-store", cl::Required,
+                   cl::desc("URI of the target MemoDB store"),
+                   cl::cat(MemoDBCategory), cl::sub(TransferCommand));
 
 static cl::list<std::string> NamesToTransfer(cl::Positional, cl::ZeroOrMore,
                                              cl::desc("<names to transfer>"),
@@ -487,8 +488,8 @@ static cl::list<std::string> NamesToTransfer(cl::Positional, cl::ZeroOrMore,
                                              cl::sub(TransferCommand));
 
 static int Transfer() {
-  auto SourceDb = Store::open(GetUri());
-  auto TargetDb = Store::open(TargetDatabaseURI);
+  auto SourceDb = Store::open(GetStoreUri());
+  auto TargetDb = Store::open(TargetStoreURI);
 
   std::function<void(const CID &)> transferRef = [&](const CID &Ref) {
     if (!TargetDb->has(Ref)) {

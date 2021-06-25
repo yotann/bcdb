@@ -1,9 +1,9 @@
-; RUN: bcdb init -uri sqlite:%t.bcdb
-; RUN: bcdb add -uri sqlite:%t.bcdb %s -name prog
+; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: bcdb add -store sqlite:%t.bcdb %s -name prog
 
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t-noweak --merged-name=libmerged.so --noweak
+; RUN: bcdb gl -store sqlite:%t.bcdb prog -o %t-noweak --merged-name=libmerged.so --noweak
 
-; RUN: bcdb gl -uri sqlite:%t.bcdb prog -o %t-unconstrained --merged-name=libmerged.so
+; RUN: bcdb gl -store sqlite:%t.bcdb prog -o %t-unconstrained --merged-name=libmerged.so
 ; RUN: opt -verify -S < %t-unconstrained/prog | FileCheck --check-prefix=OPEN-PROG %s
 
 @blockaddresses = internal constant [2 x i8*] [i8* blockaddress(@g, %bb2), i8* blockaddress(@h, %1)]

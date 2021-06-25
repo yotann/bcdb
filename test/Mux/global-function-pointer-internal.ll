@@ -1,10 +1,10 @@
-; RUN: bcdb init -uri sqlite:%t
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t -
-; RUN: bcdb mux -uri sqlite:%t - | lli - -
+; RUN: bcdb init -store sqlite:%t
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t -
+; RUN: bcdb mux -store sqlite:%t - | lli - -
 
-; RUN: bcdb init -uri sqlite:%t.rg
-; RUN: llvm-as < %s | bcdb add -uri sqlite:%t.rg - -rename-globals
-; RUN: bcdb mux -uri sqlite:%t.rg - | lli - -
+; RUN: bcdb init -store sqlite:%t.rg
+; RUN: llvm-as < %s | bcdb add -store sqlite:%t.rg - -rename-globals
+; RUN: bcdb mux -store sqlite:%t.rg - | lli - -
 
 @global = internal global void()* @func
 
