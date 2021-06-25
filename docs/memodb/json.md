@@ -7,7 +7,7 @@ it's necessary or convenient to use a textual format instead. This document
 specifies a new format that can unambiguously represent MemoDB nodes using JSON
 values.
 
-##### Rationale
+#### Rationale
 
 Several other formats were considered and rejected:
 
@@ -28,7 +28,7 @@ Several other formats were considered and rejected:
   or [Extended Diagnostic
   Notation](https://datatracker.ietf.org/doc/html/rfc8610#appendix-G) would
   work, but are not widely supported. They also format CIDs in an awkward way,
-  using `42('0001710001f6')` for the CID `bafyqaapw` for example.
+  using `42(h'0001710001f6')` for the CID `bafyqaapw` for example.
 
 
 ## Special JSON objects
@@ -61,14 +61,13 @@ would become this JSON:
 }
 ```
 
-##### Rationale
+#### Rationale
 
 Instead of using special maps to represent CIDs and byte strings, special
 arrays could have been used instead. For example, a CID would become `["cid",
 "bafyqaapw"]`, and an empty list would become `["list", []]`. This would be
 pretty similar to the current solution overall, but indexing into the
-structures would be more confusing (compare `node[1][0][1][1]` to
-`node.map.first.map.second`).
+structures would be more confusing (`node.cid` is more clear than `node[1]`).
 
 ## Null
 
@@ -97,13 +96,13 @@ MemoDB booleans are represented with JSON `true` and `false`.
 MemoDB integers are represented with JSON numbers, without a fraction or an
 exponent.
 
-##### Rationale
+#### Rationale
 
 MemoDB supports the full range of 64-bit signed integers, which JSON can
-represent perfectly well. However, some JSON implementations don't support the
-full 64-bit integer range because they parse all JSON numbers as
-floating-point. It would be too awkward to work around this problem by using
-alternative representations of integers.
+represent perfectly well. Some JSON implementations don't support the full
+64-bit integer range because they parse all JSON numbers as floating-point, but
+it would be too awkward to work around this problem by using alternative
+representations of integers.
 
 ## Floats
 
@@ -116,9 +115,9 @@ MemoDB floats are represented with a special single-element JSON object, with
 the name `"float"` and a value which is a JSON number.
 
 Implementations do **not** need to support floating-point infinities and NaNs,
-which are prohibited by the data model.
+which are not allowed in MemoDB nodes.
 
-##### Rationale
+#### Rationale
 
 Floats could be distinguished from integers by the presence of a fractional
 part, so `1` would be an integer and `1.0` would be a float. However, some
@@ -154,7 +153,7 @@ extraneous characters.
 Note that the name used in this format is `"base64"`, even though Multibase
 refers to this encoding as `base64pad`.
 
-##### Rationale
+#### Rationale
 
 The format could allow encodings other than base64, but that would create
 difficulties for clients that don't have a Multibase implementation available.
@@ -174,7 +173,7 @@ name `"cid"` and a value which is a JSON string containing the string
 representation of the CID. Only the `base32` multibase may be used, so the
 string will always start with `b`.
 
-##### Rationale
+#### Rationale
 
 The format could allow multibases other than base32, but that would create
 difficulties for clients that don't have a Multibase implementation available.
@@ -201,7 +200,7 @@ name `"map"` and a value which is also a JSON object. The inner JSON object
 contains names and values corresponding to the keys and values in the MemoDB
 map. The order of elements doesn't matter.
 
-##### Rationale
+#### Rationale
 
 Maps need to be wrapped in a special JSON object in order to distinguish
 between a MemoDB map like `{float: 1}` and a MemoDB float like `1.0`. The
