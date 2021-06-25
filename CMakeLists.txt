@@ -146,8 +146,6 @@ include_directories(${LLVM_INCLUDE_DIR})
 
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/third_party/duktape)
-include_directories(${PROJECT_SOURCE_DIR}/third_party/linenoise)
 include_directories(${PROJECT_SOURCE_DIR}/third_party/magic_enum)
 
 add_subdirectory(lib)

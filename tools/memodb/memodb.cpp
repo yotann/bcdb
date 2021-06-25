@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <duktape.h>
 #include <iostream>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CommandLine.h>
@@ -19,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include "memodb/Scripting.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
 
@@ -30,7 +28,6 @@ cl::OptionCategory MemoDBCategory("MemoDB options");
 
 static cl::SubCommand ExportCommand("export", "Export values to a CAR file");
 static cl::SubCommand GetCommand("get", "Get a value");
-static cl::SubCommand JSCommand("js", "Interactive Javascript REPL");
 static cl::SubCommand ListCallsCommand("list-calls",
                                        "List all cached calls of a function");
 static cl::SubCommand ListFuncsCommand("list-funcs",
@@ -375,28 +372,6 @@ static int Get() {
   return 0;
 }
 
-// memodb js
-
-static cl::opt<std::string> JSFilename(cl::Positional, cl::Optional,
-                                       cl::desc("<script filename>"),
-                                       cl::value_desc("filename"),
-                                       cl::cat(MemoDBCategory),
-                                       cl::sub(JSCommand));
-
-static int JS() {
-  duk_context *Ctx = newScriptingContext();
-  duk_push_global_object(Ctx);
-  setUpScripting(Ctx, -1);
-  duk_pop(Ctx);
-  int rc = 0;
-  if (!JSFilename.empty())
-    rc = runScriptingFile(Ctx, JSFilename);
-  else
-    startREPL(Ctx);
-  duk_destroy_heap(Ctx);
-  return rc;
-}
-
 // memodb list-calls
 
 static cl::opt<std::string> FuncName(cl::Positional, cl::Required,
@@ -550,8 +525,6 @@ int main(int argc, char **argv) {
     return Export();
   } else if (GetCommand) {
     return Get();
-  } else if (JSCommand) {
-    return JS();
   } else if (ListCallsCommand) {
     return ListCalls();
   } else if (ListFuncsCommand) {
