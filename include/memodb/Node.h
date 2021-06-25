@@ -370,6 +370,9 @@ public:
   std::pair<CID, std::vector<std::uint8_t>>
   saveAsIPLD(bool noIdentity = false) const;
 
+  // Load a Node from the MemoDB JSON format.
+  static llvm::Expected<Node> loadFromJSON(llvm::StringRef json);
+
   // Checking the kind of Node.
 
   Kind kind() const {
@@ -618,8 +621,7 @@ public:
   }
 };
 
-// Print a Node. The format currently used is CBOR's extended diagnostic
-// notation.
+// Print a Node in MemoDB's JSON format.
 std::ostream &operator<<(std::ostream &os, const Node &value);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Node &value);
 

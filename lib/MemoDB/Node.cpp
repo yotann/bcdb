@@ -417,3 +417,60 @@ Node::saveAsIPLD(bool noIdentity) const {
   else
     return {std::move(Ref), std::move(Bytes)};
 }
+
+static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
+  switch (value.kind()) {
+  case llvm::json::Value::Null:
+    return Node(nullptr);
+  case llvm::json::Value::Boolean:
+    return Node(*value.getAsBoolean());
+  case llvm::json::Value::Number:
+    return Node(*value.getAsInteger());
+  case llvm::json::Value::String:
+    return Node(utf8_string_arg, *value.getAsString());
+  case llvm::json::Value::Array: {
+    Node result(node_list_arg);
+    for (const auto &item : *value.getAsArray()) {
+      auto nodeOrErr = loadFromJSONValue(item);
+      if (!nodeOrErr)
+        return nodeOrErr.takeError();
+      result.emplace_back(std::move(*nodeOrErr));
+    }
+    return result;
+  }
+  case llvm::json::Value::Object: {
+    const auto &outer = *value.getAsObject();
+    if (outer.size() == 1) {
+      if (auto f = outer.getNumber("float")) {
+        return Node(*f);
+      }
+      if (auto base64 = outer.getString("base64")) {
+        return Node(*Multibase::base64pad.decodeWithoutPrefix(*base64));
+      }
+      if (auto cid = outer.getString("cid")) {
+        if (!cid->startswith("b"))
+          llvm::report_fatal_error("JSON CIDs must be base32");
+        return Node(*CID::parse(*cid));
+      }
+      if (auto inner = outer.getObject("map")) {
+        Node result(node_map_arg);
+        for (const auto &item : *inner) {
+          auto valueOrErr = loadFromJSONValue(item.second);
+          if (!valueOrErr)
+            return valueOrErr.takeError();
+          result[item.first] = *valueOrErr;
+        }
+        return result;
+      }
+    }
+    llvm::report_fatal_error("invalid special JSON object");
+  }
+  }
+}
+
+llvm::Expected<Node> Node::loadFromJSON(llvm::StringRef json) {
+  auto valueOrErr = llvm::json::parse(json);
+  if (!valueOrErr)
+    return valueOrErr.takeError();
+  return loadFromJSONValue(*valueOrErr);
+}

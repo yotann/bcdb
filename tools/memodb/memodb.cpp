@@ -130,9 +130,20 @@ static CID ReadRef(Store &Db, llvm::StringRef URI) {
     Name Name = GetNameFromURI(URI);
     return Db.resolve(Name);
   }
-  Node Value = Node::load_cbor(
-      {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
-       Buffer->getBufferSize()});
+  Node Value;
+  switch (format_option) {
+  case Format_CBOR:
+    Value = Node::load_cbor(
+        {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
+         Buffer->getBufferSize()});
+    break;
+  case Format_Raw:
+    Value = Node(byte_string_arg, Buffer->getBuffer());
+    break;
+  case Format_JSON:
+    Value = Err(Node::loadFromJSON(Buffer->getBuffer()));
+    break;
+  }
   return Db.put(Value);
 }
 

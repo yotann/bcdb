@@ -2,6 +2,7 @@ add_llvm_unittest(MemoDBTests
   CborLoadTest.cpp
   CborSaveTest.cpp
   CIDTest.cpp
+  JSONLoadTest.cpp
   JSONWriteTest.cpp
   ParsedURITest.cpp
 )
