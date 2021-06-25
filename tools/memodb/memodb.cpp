@@ -58,6 +58,22 @@ static StringRef GetUri() {
   return UriOrEmpty;
 }
 
+// format options
+
+enum Format {
+  Format_CBOR,
+  Format_Raw,
+  Format_JSON,
+};
+
+static cl::opt<Format> format_option(
+    "format", cl::Optional, cl::desc("Format for input and output nodes"),
+    cl::values(clEnumValN(Format_CBOR, "cbor", "original DAG-CBOR."),
+               clEnumValN(Format_Raw, "raw",
+                          "raw binary data without CBOR wrapper."),
+               clEnumValN(Format_JSON, "json", "MemoDB JSON.")),
+    cl::sub(GetCommand), cl::sub(PutCommand), cl::sub(SetCommand));
+
 // Name options
 
 static cl::opt<std::string> SourceURI(cl::Positional, cl::Required,
@@ -131,25 +147,42 @@ static cl::opt<std::string> OutputFilename("o", cl::desc("<output file>"),
                                            cl::sub(ExportCommand),
                                            cl::sub(GetCommand));
 
-static std::unique_ptr<ToolOutputFile> GetOutputFile() {
+static std::unique_ptr<ToolOutputFile> GetOutputFile(bool binary = true) {
   ExitOnError Err("value write: ");
   std::error_code EC;
   auto OutputFile =
       std::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::F_None);
   if (EC)
     Err(errorCodeToError(EC));
-  if (Force || !CheckBitcodeOutputToConsole(OutputFile->os()))
+  if (!binary || Force || !CheckBitcodeOutputToConsole(OutputFile->os()))
     return OutputFile;
   return nullptr;
 }
 
 static void WriteValue(const Node &Value) {
-  auto OutputFile = GetOutputFile();
+  bool binary = format_option != Format_JSON;
+  auto OutputFile = GetOutputFile(binary);
   if (OutputFile) {
-    std::vector<std::uint8_t> Buffer;
-    Value.save_cbor(Buffer);
-    OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
-                           Buffer.size());
+    switch (format_option) {
+    case Format_CBOR: {
+      std::vector<std::uint8_t> Buffer;
+      Value.save_cbor(Buffer);
+      OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
+                             Buffer.size());
+      break;
+    }
+    case Format_Raw: {
+      if (!Value.is<BytesRef>())
+        report_fatal_error("This value cannot be printed in \"raw\" format.");
+      auto bytes = Value.as<BytesRef>();
+      OutputFile->os().write(reinterpret_cast<const char *>(bytes.data()),
+                             bytes.size());
+      break;
+    }
+    case Format_JSON:
+      OutputFile->os() << Value << "\n";
+      break;
+    }
     OutputFile->keep();
   }
 }

@@ -1,7 +1,11 @@
 #include "memodb/Node.h"
 
 #include <llvm/Support/ConvertUTF.h>
+#include <llvm/Support/JSON.h>
+#include <llvm/Support/raw_ostream.h>
 #include <sstream>
+
+#include "memodb/Multibase.h"
 
 using namespace memodb;
 
@@ -21,111 +25,73 @@ void Node::validateKeysUTF8() const {
   }
 }
 
-std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
-  // Print the value in CBOR extended diagnostic notation.
-  // https://tools.ietf.org/html/rfc8610#appendix-G
-
-  auto print_escaped = [&](llvm::StringRef str, char quote) {
-    for (char c : str) {
-      if (c == '\\' || c == quote)
-        os << '\\' << c;
-      else if (c == '\n')
-        os << "\\n";
-      else if (c == '\r')
-        os << "\\r";
-      else if (c == '\t')
-        os << "\\t";
-      else if ((unsigned char)c < 0x20 || c == 0x7f) {
-        char buf[5];
-        std::snprintf(buf, sizeof(buf), "%04x", (unsigned int)(unsigned char)c);
-        os << "\\u" << buf;
-      } else
-        os << c;
+static void writeJSON(llvm::json::OStream &os, const Node &value) {
+  switch (value.kind()) {
+  case Kind::Null:
+    os.value(nullptr);
+    break;
+  case Kind::Boolean:
+    os.value(value.as<bool>());
+    break;
+  case Kind::Integer:
+    os.value(value.as<int64_t>());
+    break;
+  case Kind::Float:
+    os.objectBegin();
+    os.attribute("float", value.as<double>());
+    os.objectEnd();
+    break;
+  case Kind::String:
+    os.value(value.as<llvm::StringRef>());
+    break;
+  case Kind::Bytes:
+    os.objectBegin();
+    os.attributeBegin("base64");
+    os.value(Multibase::base64pad.encodeWithoutPrefix(value.as<BytesRef>()));
+    os.attributeEnd();
+    os.objectEnd();
+    break;
+  case Kind::List:
+    os.arrayBegin();
+    for (const Node &item : value.list_range())
+      writeJSON(os, item);
+    os.arrayEnd();
+    break;
+  case Kind::Map:
+    os.objectBegin();
+    os.attributeBegin("map");
+    os.objectBegin();
+    for (const auto &item : value.map_range()) {
+      os.attributeBegin(item.key());
+      writeJSON(os, item.value());
+      os.attributeEnd();
     }
-  };
-
-  std::visit(Overloaded{
-                 [&](const std::monostate &) { os << "null"; },
-                 [&](const bool &x) { os << (x ? "true" : "false"); },
-                 [&](const std::int64_t &x) { os << x; },
-                 [&](const double &x) {
-                   if (std::isnan(x))
-                     os << "NaN";
-                   else if (std::isinf(x))
-                     os << (x < 0 ? "-Infinity" : "Infinity");
-                   else
-                     os << x;
-                 },
-                 [&](const Node::BytesStorage &x) {
-                   if (std::all_of(x.begin(), x.end(), [](std::uint8_t b) {
-                         return (b >= 32 && b <= 126) || b == '\n' ||
-                                b == '\r' || b == '\t';
-                       })) {
-                     // NOTE: implementations are inconsistent about how ' and "
-                     // should be escaped. We escape ' as \' and leave " as-is.
-                     os << "'";
-                     print_escaped(value.as<llvm::StringRef>(byte_string_arg),
-                                   '\'');
-                     os << "'";
-                   } else {
-                     os << "h'";
-                     for (std::uint8_t b : x) {
-                       char buf[3];
-                       std::snprintf(buf, sizeof(buf), "%02x", b);
-                       os << buf;
-                     }
-                     os << "'";
-                   }
-                 },
-                 [&](const Node::StringStorage &x) {
-                   os << '"';
-                   print_escaped(x, '"');
-                   os << '"';
-                 },
-                 [&](const CID &x) {
-                   os << "42(h'00"; // DAG-CBOR required multibase prefix
-                   for (std::uint8_t b : x.asBytes()) {
-                     char buf[3];
-                     std::snprintf(buf, sizeof(buf), "%02x", b);
-                     os << buf;
-                   }
-                   os << "')";
-                 },
-                 [&](const Node::List &x) {
-                   bool first = true;
-                   os << '[';
-                   for (const auto &item : x) {
-                     if (!first)
-                       os << ", ";
-                     first = false;
-                     os << item;
-                   }
-                   os << ']';
-                 },
-                 [&](const Node::Map &x) {
-                   bool first = true;
-                   os << '{';
-                   for (const auto &item : x) {
-                     if (!first)
-                       os << ", ";
-                     first = false;
-                     os << '"';
-                     print_escaped(item.key(), '"');
-                     os << "\": " << item.value();
-                   }
-                   os << '}';
-                 },
-             },
-             value.variant_);
-  return os;
+    os.objectEnd();
+    os.attributeEnd();
+    os.objectEnd();
+    break;
+  case Kind::Link:
+    os.objectBegin();
+    os.attributeBegin("cid");
+    os.value(llvm::json::Value(value.as<CID>().asString(Multibase::base32)));
+    os.attributeEnd();
+    os.objectEnd();
+    break;
+  }
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os,
                                       const Node &value) {
-  std::stringstream sstr;
-  sstr << value;
-  os << sstr.str();
+  llvm::json::OStream json_os(os);
+  writeJSON(json_os, value);
   return os;
+}
+
+std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
+  std::string str;
+  llvm::raw_string_ostream sstr(str);
+  sstr << value;
+  return os << sstr.str();
 }
 
 static double decode_float(std::uint64_t value, int total_size,

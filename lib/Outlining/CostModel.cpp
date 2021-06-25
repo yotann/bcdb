@@ -74,9 +74,11 @@ struct CostVisitor : public InstVisitor<CostVisitor> {
 
   void visitShuffleVectorInst(ShuffleVectorInst &I) {
 #if LLVM_VERSION_MAJOR >= 12
-    Model->Items[CostItem::ShuffleVectorSize] += I.getType()->getElementCount().getKnownMinValue();
+    Model->Items[CostItem::ShuffleVectorSize] +=
+        I.getType()->getElementCount().getKnownMinValue();
 #else
-    Model->Items[CostItem::ShuffleVectorSize] += I.getType()->getElementCount().Min;
+    Model->Items[CostItem::ShuffleVectorSize] +=
+        I.getType()->getElementCount().Min;
 #endif
   }
 
