@@ -44,9 +44,9 @@ avoided when there are good alternatives available.
 Nodes are usually represented in [DAG-CBOR], which is a binary format. They can
 also be represented in [MemoDB JSON], which is a textual format.
 
-MemoDB does not enforce any particular schema for Nodes, as long as they use
-the kinds of data above. Clients may wish to enforce schemas themselves,
-perhaps using [CDDL] or [IPLD Schemas].
+MemoDB does not enforce any particular schema for Nodes; they can use arbitrary
+combinations of different kinds of data. Clients may wish to enforce schemas
+themselves, perhaps using [CDDL] or [IPLD Schemas].
 
 #### Rationale
 
@@ -58,8 +58,8 @@ they can't support binary data efficiently. BSON and MessagePack were rejected
 because they limit byte strings to 4 GB, which may be insufficient for
 extremely large bitcode modules and other data, and are somewhat irregular and
 difficult to extend in compatible ways. [CBOR] was chosen because it
-efficiently supports all kinds of data including binary data, uses a regular
-encoding, and is extensible through the [CBOR Tag Registry].
+efficiently supports all kinds of data including large binary data, uses a
+regular encoding, and is extensible through the [CBOR Tag Registry].
 
 ##### DAG-CBOR and limitations on CBOR values
 
@@ -89,7 +89,7 @@ restrictions on it:
 Note that arbitrary CBOR values, ignoring the above restrictions, can be
 encoded as byte strings and then stored in a MemoDB Node. However, such values
 may not use links or CIDs to refer to other Nodes, because MemoDB will not
-recognize such links or CIDs.
+recognize such links or CIDs, and might delete the other Nodes linked to.
 
 ## CID
 
@@ -111,9 +111,11 @@ In binary formats, the CID should be stored using its binary encoding.
 Depending on the format, the `0x00` multibase prefix may or may not be present;
 the [DAG-CBOR] format requires it.
 
-In text formats, the CID is normally printed using the `base32` multibase,
-which has a prefix of `b`; note that this multibase uses base32 with lowercase
-letters and omits padding. Other multibases may also be supported.
+In plaintext, such as the output of command-line tools, the CID is normally
+printed using the `base32` multibase, which has a prefix of `b`; note that this
+multibase uses base32 with lowercase letters and omits padding. In [MemoDB
+JSON], CIDs are written using the `base64pad` multibase, which has a prefix of
+`M`. Other multibases may also be supported.
 
 #### Rationale
 
@@ -144,8 +146,8 @@ MemoDB supports two content types:
 - `raw` (code 0x55), for Nodes consisting of a single byte string.
 - `dag-cbor` (code 0x71), for all other Nodes.
 
-MemoDB uses `raw` whenever possible, and `dag-cbor` only for Nodes that are not
-byte strings.
+MemoDB uses `raw` for all Nodes consisting of a single byte string, and
+`dag-cbor` only for Nodes that are not byte strings.
 
 #### Rationale
 
@@ -159,25 +161,25 @@ MemoDB supports only two multihashes:
 
 - `identity` (code 0x00), which includes the Node data directly in the CID and
   does not require separate storage.
-- `blake2b-256` (code 0xb220), which includes the Blake2b 256-bit hash of the
-  Node data in the CID. The actual Node data must be stored separately by the
-  MemoDB store.
+- `blake2b-256` (code 0xb220), which includes only the Blake2b 256-bit hash of
+  the Node data in the CID. The actual Node data must be stored separately by
+  the MemoDB store.
 
-MemoDB uses an `identity` CID whenever it would be the same length or shorter
-than an `blake2b-256` CID.
+MemoDB uses the `identity` CID for a Node whenever it would be the same length
+or shorter than the `blake2b-256` CID.
 
 #### Rationale
 
 Although `ipfs` uses SHA2-256 as its default, Blake2b-256 is believed to be
 more secure, and it is also significantly faster when special hardware support
-for SHA2 is not available. It is also supported by `ipfs`, and is the default
-hash implemented by [libsodium].
+for SHA2 is not available. It is supported by `ipfs`, and is the default hash
+implemented by [libsodium].
 
-The `identity` multihash is much more efficient for small values because it avoids a
-level of indirection. For example, the result of the `refines` Call may be a
-simple boolean value, which will be represented with an `identity` multihash,
-allowing the result to be decoded without actually loading another Node from
-the MemoDB Store.
+The `identity` multihash is much more efficient for small values because it
+avoids a level of indirection. For example, the result of the `refines` Call
+may be a simple boolean value. This value will be represented with an
+`identity` CID, allowing the result to be decoded without actually loading
+another Node from the MemoDB Store.
 
 ## Head
 
@@ -195,7 +197,7 @@ recalculating it.
 For best results, the function should be a pure, deterministic function of its
 arguments. For example, if a function applies an LLVM pass, all command-line
 options that affect that pass should be included in one of the arguments to the
-Call. However, this is not enforced.
+Call. However, determinism and purity are not enforced.
 
 If the cached Calls for a given function are no longer valid (for example,
 because the function has been modified), the MemoDB store makes it possible to

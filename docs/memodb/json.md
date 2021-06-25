@@ -61,7 +61,7 @@ would become this JSON:
 ```json
 {
   "map": {
-    "foo": {"cid": "bafyqaapw"},
+    "foo": {"cid": "MAXEAAfY="},
     "bar": {"float": 1},
     "baz": {"base64": "Vao="}
   }
@@ -98,10 +98,12 @@ MemoDB booleans are represented with JSON `true` and `false`.
 ```json
 1234
 -1000000
+-9223372036854775808
+9223372036854775807
 ```
 
 MemoDB integers are represented with JSON numbers, without a fraction or an
-exponent.
+exponent. The full 64-bit signed integer range must be supported.
 
 #### Rationale
 
@@ -162,27 +164,34 @@ refers to this encoding as `base64pad`.
 
 #### Rationale
 
-The format could allow encodings other than base64, but that would create
-difficulties for clients that don't have a Multibase implementation available.
+Base64 is probably the most widely supported binary-to-text encoding, and the
+base variant (not base64url) is the most widely support variant.
 
 Padding could be made optional. However, padding is required by some useful
 implementations like Python's `base64` module and the Busybox/Coreutils
 `base64` command.
 
+The format could allow encodings other than base64, but that would create
+difficulties for clients that don't have a Multibase implementation available.
+
 ## CIDs
 
 ```json
-{"cid": "bafyqaapw"}
+{"cid": "MAXEAAfY="}
 ```
 
 MemoDB CIDs are represented with a special single-element JSON object, with the
 name `"cid"` and a value which is a JSON string containing the string
-representation of the CID. Only the `base32` multibase may be used, so the
-string will always start with `b`.
+representation of the CID. Only the `base64pad` multibase may be used, so the
+string will always start with `M`.
 
 #### Rationale
 
-The format could allow multibases other than base32, but that would create
+Padded base64 is already used for byte strings, so it makes sense to reuse it
+for CIDs, so clients only need to support one binary-to-text encoding. Base64
+is also somewhat more efficient than base32.
+
+The format could allow other multibases to be used, but that would create
 difficulties for clients that don't have a Multibase implementation available.
 
 ## Lists

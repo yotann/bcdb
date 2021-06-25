@@ -78,12 +78,10 @@ TEST(JSONLoadTest, Map) {
   test_load("{\"map\":{\"x\":1,\"y\":2}}", Node::Map({{"x", 1}, {"y", 2}}));
 }
 
-TEST(JSONLoadTest, Ref) {
-  test_load("{\"cid\":\"bafyqaapw\"}",
+TEST(JSONLoadTest, Link) {
+  test_load("{\"cid\":\"MAXEAAfY=\"}",
             Node(*CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})));
-  test_load(
-      "{\"cid\":"
-      "\"bafy2bzaceabrocroowl3pn7d3bgakoi5congfmkx46dynwgaqlzj3t2mcejri\"}",
+  test_load("{\"cid\":\"MAXGg5AIgAxcKLnWXt7fj2EwFOR0TmmKxV+eHhtjAgvKdz0wRExQ=\"}",
       Node(*CID::fromBytes({0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20, 0x03, 0x17,
                             0x0a, 0x2e, 0x75, 0x97, 0xb7, 0xb7, 0xe3, 0xd8,
                             0x4c, 0x05, 0x39, 0x1d, 0x13, 0x9a, 0x62, 0xb1,
