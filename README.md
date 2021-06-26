@@ -1,55 +1,69 @@
-# BCDB
+# The Bitcode Database _(bcdb)_
 
 [![Github Workflows](https://github.com/yotann/bcdb/workflows/Test/badge.svg)](https://github.com/yotann/bcdb/actions?query=workflow%3ATest)
-[![ALLVM ALL THE THINGS!](https://img.shields.io/badge/ALLVM-ALL%20THE%20THINGS-brightgreen.svg)](https://github.com/allvm/allvm-tools)
 [![Cachix cache](https://img.shields.io/badge/cachix-bcdb-blue.svg)](https://bcdb.cachix.org)
+[![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
 
-The Bitcode Database (BCDB) is a research tool developed as part of the ALLVM
-Project at UIUC. Features:
+A database and infrastructure for distributed processing of LLVM bitcode.
 
-- Stores huge amounts of LLVM bitcode in an SQLite database.
+The Bitcode Database (BCDB) is a research tool being developed as part of the
+[ALLVM Project](https://publish.illinois.edu/allvm-project/) at UIUC. Features:
+
+- Stores huge amounts of LLVM bitcode in an SQLite or RocksDB database.
 - Automatically deduplicates bitcode at the function level.
-- Stores results of analyzing and processing bitcode (WIP).
-- Performs Guided Linking, which optimizes dynamically linked code. See
-  [`docs/guided-linking`](docs/guided-linking/) for details and instructions.
+- Performs Guided Linking, which can optimize dynamically linked code as though
+  it were statically linked. See [`docs/guided-linking`](docs/guided-linking/)
+  for details and instructions.
+- Caches the results of analyses and optimizations.
+- Supports distributed computing for a code outlining optimization.
 
-## Building
+## Table of Contents
 
-### Build automatically with Nix
+- [Background](#background)
+- [Install](#install)
+  - [Dependencies](#dependencies)
+  - [Building dependencies automatically with Nix](#building-dependencies-automatically-with-nix)
+- [Usage](#usage)
+  - [CLI](#cli)
+    - [Basic operation](#basic-operation)
+    - [Working with functions](#working-with-functions)
+    - [Other subcommands](#other-subcommands)
+    - [Other tools](#other-tools)
+  - [Nixpkgs bitcode overlay](#nixpkgs-bitcode-overlay)
+  - [Guided linking experiments](#guided-linking-experiments)
+- [Design](#design)
+  - [MemoDB](#memodb)
+  - [BCDB core](#bcdb-core)
+  - [Guided linking](#guided-linking)
+  - [Semantic outlining](#semantic-outlining)
+- [Maintainer](#maintainer)
+- [License](#license)
 
-If you have [Nix](https://nixos.org/guides/install-nix.html) installed, it can
-automatically build BCDB along with its dependencies. See `default.nix` for the
-list of attributes you can build. For example:
+## Background
+
+The BCDB has been developed primarily by [Sean Bartell](https://github.com/yotann),
+to support his PhD research on code size optimization.
+
+This project initially grew out of the [ALLVM
+Project](https://publish.illinois.edu/allvm-project/), started by [Will
+Dietz](https://wdtz.org/), which aims to explore the new possibilities that
+would be enabled if all software on a computer system were shipped in the form
+of LLVM IR.
+The BCDB was originally designed as a way to store massive amounts of LLVM IR
+more efficiently by using deduplication.
+
+## Install
 
 ```shell
 git submodule update --init --depth=1
-nix-build -A bcdb
-result/bin/bcdb -help
-```
-
-If you want to modify the BCDB code, you can also have Nix build just the
-dependencies and enter a shell with them installed:
-
-```shell
-git submodule update --init --depth=1
-nix-shell -A bcdb
 mkdir build
 cd build
 cmake ..
 make
+make check
 ```
 
-You need to make sure you're in the `nix-shell` shell every time you want to
-build BCDB this way. The [direnv](https://direnv.net/) tool can help set this
-up automatically.
-
-In any case, you can speed up Nix by using our [Cachix](https://cachix.org)
-cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
-`cachix use bcdb`.
-
-### Build manually with CMake
-
-You will need the following dependencies:
+### Dependencies
 
 - C++ compiler with C++17 support.
 - [LLVM](https://llvm.org/) version 9 through 12 (development versions up to 13
@@ -69,23 +83,46 @@ You will need the following dependencies:
     Zstandard support (`ROCKSDB_LITE` is not supported).
   - [nng](https://github.com/nanomsg/nng), tested with 1.4, for outlining.
 
-You should then be able to build normally with CMake, like this:
+### Building dependencies automatically with Nix
+
+If you have [Nix](https://nixos.org/guides/install-nix.html) installed, it can
+automatically build BCDB along with known-working versions of its dependencies.
+See `default.nix` for the list of attributes you can build. For example:
 
 ```shell
 git submodule update --init --depth=1
+nix-build -A bcdb
+result/bin/bcdb -help
+```
+
+If you want to modify the BCDB code, you can instead build just the
+dependencies with Nix, and enter a shell that has them installed:
+
+```shell
+git submodule update --init --depth=1
+nix-shell -A bcdb
 mkdir build
 cd build
 cmake ..
 make
-make check
 ```
 
-## Using the BCDB
+If you install and enable [direnv](https://direnv.net/), it will effectively
+set up the Nix shell every time you enter the bcdb directory.
 
-### Basic operation
+In any case, you can speed up Nix by using our [Cachix](https://cachix.org)
+cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
+`cachix use bcdb`.
 
-BCDB stores all its data in an SQLite database. Every time you run the `bcdb`
-command, you must give it the path to the database using the option `-store
+## Usage
+
+### CLI
+
+#### Basic operation
+
+BCDB stores all its data in an SQLite or RocksDB database. SQLite is
+recommended when starting out. Every time you run the `bcdb` command, you must
+give it the path to the database using the option `-store
 sqlite:path/to/my.bcdb`. You must initialize the database before you can use
 it:
 
@@ -94,8 +131,7 @@ bcdb init -store sqlite:example.bcdb
 ```
 
 You can add whatever LLVM bitcode modules you like to the database. Each module
-is given a unique name; by default, the name is the filename you give to `bcdb
-add`.
+is given a name; by default, the name is the filename you give to `bcdb add`.
 
 ```shell
 llvm-as </dev/null >empty.bc
@@ -118,7 +154,7 @@ yet, so no disk space will actually be freed.
 bcdb delete -store sqlite:example.bcdb -name empty
 ```
 
-### Working with functions
+#### Working with functions
 
 When you add a module to the BCDB, it's actually split into a number of smaller
 modules, one for each function definition, along with a “remainder” module that
@@ -140,13 +176,13 @@ bcdb get-function -store sqlite:example.bcdb -id 0 -o /tmp/function0.bc
 bcdb refs -store sqlite:example.bcdb 0
 ```
 
-### Other subcommands
+#### Other subcommands
 
 Run `bcdb -help` for a list of the other subcommands.
 
-## Other tools
+#### Other tools
 
-### bc-align
+##### bc-align
 
 `bc-align` rewrites a piece of LLVM bitcode so that all of the fields are
 aligned to byte boundaries. The output is semantically identical to the input,
@@ -155,7 +191,7 @@ and is fully compatible with LLVM, but it compresses better with tools such as
 
 Usage: `bc-align <input.bc >aligned.bc` or `bc-align -o aligned.bc input.bc`.
 
-### bc-split and bc-join
+##### bc-split and bc-join
 
 `bc-split` splits a single bitcode module into a separate module for each
 function, just like BCDB, but instead of using a database it just stores the
@@ -172,7 +208,7 @@ a single module. Note that it only works correctly on directories produced by
 
 Usage: `bc-split -o output.bc input_directory`.
 
-### bc-imitate
+##### bc-imitate
 
 `bc-imitate` copies certain linking information from an ELF binary into an LLVM
 module, so that the LLVM module can be properly linked into a new ELF binary.
@@ -186,8 +222,73 @@ Usage:
 1. `bc-imitate annotate input.bc -binary input.elf -o annotated.bc`
 2. `bc-imitate clang -O2 annotated.bc -o output.elf`
 
-## Contact
+### Nixpkgs bitcode overlay
 
-**Mailing List**: https://lists.cs.illinois.edu/lists/info/allvm-dev
+This allows many Linux packages to be automatically built in LLVM bitcode form.
+See [nix/bitcode-overlay](nix/bitcode-overlay/).
 
-Everyone is welcome to join!
+### Guided linking experiments
+
+See [nix/gl-experiments](nix/gl-experiments/).
+
+## Design
+
+The BCDB project is comprised of several parts:
+
+- MemoDB, which is a general-purpose content-addressable store.
+- The BCDB core, which splits LLVM bitcode modules into pieces and uses MemoDB
+  to deduplicate and store them.
+- Optimizations and tools built on the BCDB core: specifically, guided linking
+  and semantic outlining.
+
+### MemoDB
+
+This is a content-addressable store than can be backed by either SQLite or
+RocksDB. Data is automatically deduplicated as it is added to the store. Data
+that can be stored includes raw binary data, structured data, and cached call
+results; see [MemoDB data model](docs/memodb/data-model.md) for more
+information.
+
+### BCDB core
+
+The BCDB core is responsible for taking LLVM modules and splitting out each
+function definition into its own module. It then stores each of these modules
+in MemoDB, along with other information needed to recreate the original module.
+MemoDB will automatically deduplicate the function definitions whenever two
+of them are identical, no matter whether they came from the same LLVM module or
+from different modules. The BCDB core can also reverse the process, retrieving
+the parts of a module from MemoDB and reconstituting the original module.
+
+The BCDB core makes a few changes to the LLVM IR in order to improve
+deduplication:
+
+- Names are assigned to all anonymous global variables and functions.
+- Global string constants are renamed based on a hash of their contents.
+- Pointers to structures are replaced by opaque pointers (i.e., void pointers)
+  when the details of the structure don't matter.
+
+Aside from these changes, the reconstituted LLVM module is expected to be
+semantically identical to the original module.
+
+### Guided linking
+
+See [`docs/guided-linking`](docs/guided-linking/).
+
+### Semantic outlining
+
+This is a work in progress and is not documented yet.
+
+## Maintainer
+
+[Sean Bartell](https://github.com/yotann).
+
+## Contributing
+
+There's no formal process for contributing. You're welcome to submit a PR or
+contact
+[smbarte2@illinois.edu](mailto:smbarte2@illinois.edu?subject=Bitcode%20Database).
+
+## License
+
+Apache License 2.0 with LLVM Exceptions, copyright 2018–2021 Sean Bartell and
+other contributors. See license in [LICENSE.TXT](LICENSE.TXT).
