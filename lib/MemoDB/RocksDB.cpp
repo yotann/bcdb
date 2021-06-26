@@ -1,8 +1,11 @@
 #include "memodb_internal.h"
 
+#if BCDB_WITH_ROCKSDB
+
 #include <functional>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Error.h>
 #include <map>
 #include <memory>
 #include <rocksdb/db.h>
@@ -494,3 +497,18 @@ std::unique_ptr<Store> memodb_rocksdb_open(llvm::StringRef path,
   db->open(path, create_if_missing);
   return db;
 }
+
+#else // BCDB_WITH_ROCKSDB
+
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Error.h>
+#include <memory>
+
+using namespace memodb;
+
+std::unique_ptr<Store> memodb_rocksdb_open(llvm::StringRef path,
+                                           bool create_if_missing) {
+  llvm::report_fatal_error("MemoDB was compiled without RocksDB support");
+}
+
+#endif // BCDB_WITH_ROCKSDB

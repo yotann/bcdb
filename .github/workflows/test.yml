@@ -13,6 +13,7 @@ jobs:
         - bcdb-llvm12
         - bcdb-llvmAlive
         - bcdb-clang-sanitize
+        - bcdb-sqlite-only
         - bcdb-without-nng
     runs-on: ubuntu-latest
     steps:

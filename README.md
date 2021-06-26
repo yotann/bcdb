@@ -50,18 +50,18 @@ cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
 You will need the following dependencies:
 
 - C++ compiler with C++17 support.
-- [CMake](https://cmake.org/), a recent version.
-- [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
-- [Libsodium](https://libsodium.org/)
-- [SQLite](https://sqlite.org/)
-- [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
-  Zstandard support (`ROCKSDB_LITE` is not supported)
-- [Python](https://www.python.org/), at least 2.7.
 - [LLVM](https://llvm.org/) version 9 through 12 (development versions up to 13
   may work, but this is not guaranteed). When working on the BCDB code, you
   should make sure LLVM is built with assertions enabled.
 - [Clang](https://clang.llvm.org/), same version as LLVM.
+- [CMake](https://cmake.org/), a recent version.
+- [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
+- [Libsodium](https://libsodium.org/)
+- [SQLite](https://sqlite.org/)
+- [Python](https://www.python.org/), at least 2.7.
 - Optional dependencies:
+  - [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
+    Zstandard support (`ROCKSDB_LITE` is not supported).
   - [nng](https://github.com/nanomsg/nng), tested with 1.4, for outlining.
   - [nngpp](https://github.com/cwzx/nngpp), tested with 1.3, for outlining.
 

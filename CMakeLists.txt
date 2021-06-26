@@ -101,8 +101,8 @@ link_directories(${SQLITE3_LIBRARY_DIRS})
 find_program(CLANG clang)
 
 find_package(Threads) # needed by nng
-find_package(nng)
-find_package(nngpp)
+find_package(nng QUIET)
+find_package(nngpp QUIET)
 if(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
   set(WITH_NNG ON)
   set(ENABLE_SMOUT ON)
@@ -112,7 +112,13 @@ else(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
   set(ENABLE_SMOUT OFF)
 endif(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
 
-find_package(RocksDB REQUIRED)
+find_package(RocksDB QUIET)
+if(RocksDB_FOUND)
+  set(WITH_ROCKSDB ON)
+else(RocksDB_FOUND)
+  message(WARNING "Could not find RocksDB library; disabling RocksDB support.")
+  set(WITH_ROCKSDB OFF)
+endif(RocksDB_FOUND)
 
 
 

@@ -18,5 +18,8 @@ target_include_directories(MemoDB PRIVATE
 target_link_libraries(MemoDB PRIVATE
   ${LIBSODIUM_LIBRARIES}
   ${SQLITE3_LIBRARIES}
-  RocksDB::rocksdb
 )
+if(WITH_ROCKSDB)
+  target_link_libraries(MemoDB PRIVATE RocksDB::rocksdb)
+  add_compile_definitions(BCDB_WITH_ROCKSDB=1)
+endif(WITH_ROCKSDB)
