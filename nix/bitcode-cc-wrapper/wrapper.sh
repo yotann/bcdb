@@ -5,9 +5,9 @@ shopt -s nullglob
 log() {
   # See setup-hook.sh
   if [ -n "${BITCODE_WRAPPER_TTY:-}" ]; then
-    echo $@ >> $BITCODE_WRAPPER_TTY
+    echo "$@" >> "$BITCODE_WRAPPER_TTY"
   else
-    echo $@ >&2
+    echo "$@" >&2
   fi
 }
 
