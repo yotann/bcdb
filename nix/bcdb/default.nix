@@ -1,4 +1,4 @@
-{ stdenv, lib, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite,
+{ stdenv, lib, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python3, sqlite,
 rocksdb ? null, nng ? null,
 sanitize ? false }:
 
@@ -25,7 +25,7 @@ in stdenv.mkDerivation {
     ''] ../..;
   };
 
-  nativeBuildInputs = [ clang cmake pkgconfig python2 ];
+  nativeBuildInputs = [ clang cmake pkgconfig python3 ];
   buildInputs = [ libsodium llvm nng rocksdb sqlite ];
 
   preConfigure = ''
