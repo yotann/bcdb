@@ -34,7 +34,6 @@ def get_clang_cmdline(exe_path):
         text=True,
     )
     p.check_returncode()
-    cmdline = p.stdout
     return shlex.split(p.stdout)
 
 

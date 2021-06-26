@@ -2,11 +2,12 @@ import concurrent.futures
 import glob
 import os
 import os.path
-import pyperf
 import queue
 import re
 import shlex
 import subprocess
+
+import pyperf
 
 
 def choose_perf_events():
@@ -106,7 +107,7 @@ def run_benchmarks(
                 f.write(shlex.join(args) + "\n")
 
             with open(f"{out}/stderr.txt", "ab") as stderr:
-                r = subprocess.run(args, env=env, stderr=stderr)
+                subprocess.run(args, env=env, stderr=stderr)
 
         except Exception as e:
             print(e)

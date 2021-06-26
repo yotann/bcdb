@@ -76,25 +76,7 @@ static uint64_t readAbbreviatedField(BitstreamCursor &Cursor,
 
 static void skipAbbreviatedField(BitstreamCursor &Cursor,
                                  const BitCodeAbbrevOp &Op) {
-  assert(!Op.isLiteral() && "Not to be used with literals!");
-
-  // Decode the value as we are commanded.
-  switch (Op.getEncoding()) {
-  case BitCodeAbbrevOp::Array:
-  case BitCodeAbbrevOp::Blob:
-    llvm_unreachable("Should not reach here");
-  case BitCodeAbbrevOp::Fixed:
-    assert((unsigned)Op.getEncodingData() <= Cursor.MaxChunkSize);
-    Cursor.Read((unsigned)Op.getEncodingData());
-    break;
-  case BitCodeAbbrevOp::VBR:
-    assert((unsigned)Op.getEncodingData() <= Cursor.MaxChunkSize);
-    Cursor.ReadVBR64((unsigned)Op.getEncodingData());
-    break;
-  case BitCodeAbbrevOp::Char6:
-    Cursor.Read(6);
-    break;
-  }
+  readAbbreviatedField(Cursor, Op);
 }
 
 /// skipRecord - Read the current record and discard it.
@@ -180,6 +162,8 @@ unsigned BitstreamCursor::skipRecord(unsigned AbbrevID) {
   }
   return Code;
 }
+
+// jscpd:ignore-start
 
 unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
                                      SmallVectorImpl<uint64_t> &Vals,
@@ -286,6 +270,8 @@ unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
 
   return Code;
 }
+
+// jscpd:ignore-end
 
 unsigned BitstreamCursor::ReadAbbrevRecord() {
   auto Abbv = std::make_shared<BitCodeAbbrev>();

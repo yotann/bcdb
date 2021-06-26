@@ -21,8 +21,8 @@ COPY nix/import-flake-lock.nix nix/
 COPY nix/nng nix/nng
 COPY nix/symphony nix/symphony
 COPY .gitignore flake.lock *.nix ./
-RUN set -o pipefail && \
-    nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \
+# hadolint ignore=DL4006,SC2046
+RUN nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \
     nix-store --optimize
 
 # Build a small program using the bitcode overlay, just to make sure the

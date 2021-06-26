@@ -1,8 +1,12 @@
 #!/usr/bin/env nix-shell
 #!nix-shell -i python3 -p "python3.withPackages (ps: [ ps.matplotlib ps.pandas ])"
+import sys
+
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import pandas as pd
 from scipy.stats.mstats import gmean
-import sys
 
 df = pd.concat([pd.read_csv(arg) for arg in sys.argv[1:]])
 
@@ -19,15 +23,10 @@ print(len(pt))
 avg = gmean(pt["speedup"])
 print("Geometric mean speedup:", avg)
 
-import matplotlib
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
 pt = pt.sort_values("speedup", ascending=False)
-l = len(pt)
 fig, ax = plt.subplots(nrows=1, figsize=(6, 7))
 # ax.yaxis.grid(True, color='#aaaaaa', linestyle=':')
 ax.axvline(avg, color="#228822", linestyle="--")
@@ -65,4 +64,4 @@ if False:
 else:
     ax.stem(pt.index, pt["speedup"], use_line_collection=True, bottom=1, basefmt="C7-")
 fig.tight_layout()
-fig.savefig(f"results/python-speedup.pdf")
+fig.savefig("results/python-speedup.pdf")

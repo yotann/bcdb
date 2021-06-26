@@ -1,5 +1,7 @@
 # The MemoDB data model
 
+<!-- markdownlint-disable MD001 MD024 -->
+
 ## Overview
 
 MemoDB's content-addressable stores can maintain three types of data:

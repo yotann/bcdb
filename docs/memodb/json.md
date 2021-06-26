@@ -1,5 +1,7 @@
 # JSON format for MemoDB Nodes
 
+<!-- markdownlint-disable MD001 MD024 -->
+
 ## Overview
 
 MemoDB Nodes are usually encoded using the CBOR binary encoding, but sometimes

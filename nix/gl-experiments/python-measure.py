@@ -2,11 +2,8 @@
 #! nix-shell -i python3 -p linuxPackages.perf "python3.withPackages (ps: [ ps.pyperf ])"
 
 import argparse
-import functools
 import os
 import os.path
-import shlex
-import subprocess
 
 import util
 

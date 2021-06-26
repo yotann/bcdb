@@ -14,10 +14,10 @@ bin/bcdb merge test > /dev/null
 If this script is in `try-merge.sh`, you can run bugpoint like so:
 
 ```shell
-$ export MEMODB_STORE=sqlite:bugpoint.bcdb
-$ bin/memodb init
-$ bugpoint -verbose-errors -disable-attribute-remove -compile-custom -compile-command=./try-merge.sh failing-test.bc
-$ opt -globalopt -S < bugpoint-reduced-simplified.bc
+export MEMODB_STORE=sqlite:bugpoint.bcdb
+bin/memodb init
+bugpoint -verbose-errors -disable-attribute-remove -compile-custom -compile-command=./try-merge.sh failing-test.bc
+opt -globalopt -S < bugpoint-reduced-simplified.bc
 ```
 
 The `-verbose-errors` option prints the output of every crashing run, to help
