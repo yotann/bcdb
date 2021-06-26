@@ -26,7 +26,6 @@ RUN apt-get update && \
         libsqlite3-dev \
         llvm-11-tools \
         make \
-        pkg-config \
         python3 \
         zlib1g-dev \
         && \

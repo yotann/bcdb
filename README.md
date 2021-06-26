@@ -61,7 +61,6 @@ You will need the following dependencies:
     programs or split them off into a separate package.
 - [Clang](https://clang.llvm.org/), same version as LLVM.
 - [CMake](https://cmake.org/), at least version 3.13.
-- [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
 - [Python](https://www.python.org/), at least 3.6.

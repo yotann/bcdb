@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_MODULE_PATH
+  ${CMAKE_MODULE_PATH}
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
+  )
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_definitions(-Wall
     -Wno-covered-switch-default)
@@ -92,11 +97,8 @@ if( ${PYTHON_VERSION_STRING} VERSION_LESS 3.6 )
   message(FATAL_ERROR "Python 3.6 or newer is required")
 endif()
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSODIUM REQUIRED libsodium)
-link_directories(${LIBSODIUM_LIBRARY_DIRS})
-pkg_check_modules(SQLITE3 REQUIRED sqlite3)
-link_directories(${SQLITE3_LIBRARY_DIRS})
+find_package(LibSodium REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 find_program(CLANG clang)
 find_program(CLANGXX clang++)
