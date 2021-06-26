@@ -102,15 +102,14 @@ find_program(CLANG clang)
 
 find_package(Threads) # needed by nng
 find_package(nng QUIET)
-find_package(nngpp QUIET)
-if(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
+if(Threads_FOUND AND nng_FOUND)
   set(WITH_NNG ON)
   set(ENABLE_SMOUT ON)
-else(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
-  message(WARNING "Could not find nng and nngpp libraries; disabling smout.")
+else(Threads_FOUND AND nng_FOUND)
+  message(WARNING "Could not find nng library; disabling smout.")
   set(WITH_NNG OFF)
   set(ENABLE_SMOUT OFF)
-endif(Threads_FOUND AND nng_FOUND AND nngpp_FOUND)
+endif(Threads_FOUND AND nng_FOUND)
 
 find_package(RocksDB QUIET)
 if(RocksDB_FOUND)
@@ -129,8 +128,6 @@ option(LLVM_ENABLE_WARNINGS "Enable warnings" ON)
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 include(HandleLLVMOptions)
-set(LLVM_REQUIRES_EH ON) # exceptions needed by nngpp
-set(LLVM_REQUIRES_RTTI ON) # RTTI needed by exceptions
 
 # Put libs and bins in expected place.
 # XXX: We don't setup CMAKE_CFG_INTDIR to distinguish Release/Debug/etc.

@@ -63,7 +63,6 @@ You will need the following dependencies:
   - [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
     Zstandard support (`ROCKSDB_LITE` is not supported).
   - [nng](https://github.com/nanomsg/nng), tested with 1.4, for outlining.
-  - [nngpp](https://github.com/cwzx/nngpp), tested with 1.3, for outlining.
 
 You should then be able to build normally with CMake, like this:
 

@@ -10,6 +10,5 @@ if(ENABLE_SMOUT)
     BCDB
     BCDBOutlining
     nng::nng
-    nng::nngpp
   )
 endif(ENABLE_SMOUT)

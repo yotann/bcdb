@@ -19,7 +19,6 @@ COPY nix/cgl nix/cgl
 COPY nix/coinutils nix/coinutils
 COPY nix/import-flake-lock.nix nix/
 COPY nix/nng nix/nng
-COPY nix/nngpp nix/nngpp
 COPY nix/symphony nix/symphony
 COPY .gitignore flake.lock *.nix ./
 RUN nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \

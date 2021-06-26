@@ -70,15 +70,13 @@
 #include <llvm/Support/Signals.h>
 #include <map>
 #include <mutex>
-#include <nngpp/nngpp.h>
-#include <nngpp/platform/platform.h>
-#include <nngpp/protocol/rep0.h>
 #include <queue>
 #include <string>
 #include <utility>
 
 #include "memodb/Node.h"
 #include "memodb/ToolSupport.h"
+#include "memodb/nngmm.h"
 
 using namespace llvm;
 using namespace memodb;
@@ -574,8 +572,7 @@ void Context::handleWorkerReady(const Node &ServiceNames) {
 }
 
 void Context::invalidMessage() {
-  auto RemoteAddr = Aio.get_msg().get_pipe().get_opt_addr(
-      nng::to_name(nng::option::remote_address));
+  auto RemoteAddr = Aio.get_msg().get_pipe().get_opt_addr(NNG_OPT_REMADDR);
   std::cerr << "invalid message received from ";
   if (RemoteAddr.s_family == NNG_AF_IPC) {
     std::cerr << "ipc://" << RemoteAddr.s_ipc.sa_path;

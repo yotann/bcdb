@@ -18,34 +18,33 @@ let
   });
 
   nng = pkgs.callPackage ./nix/nng {};
-  nngpp = pkgs.callPackage ./nix/nngpp { inherit nng; };
 
   coinutils = pkgs.callPackage ./nix/coinutils {};
   cgl = pkgs.callPackage ./nix/cgl { inherit coinutils; };
 
 in rec {
   bcdb-llvm9 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp rocksdb;
+    inherit nng rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_9.libllvm;
     clang = pkgs.clang_9;
   };
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp rocksdb;
+    inherit nng rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_10.libllvm;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp rocksdb;
+    inherit nng rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_11.libllvm;
     clang = pkgs.clang_11;
   };
   bcdb-llvm12 = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp rocksdb;
+    inherit nng rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_12.libllvm;
     clang = pkgs.clang_12;
   };
   bcdb-llvmAlive = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp rocksdb;
+    inherit nng rocksdb;
     llvm = debugLLVM llvmAlive;
     clang = pkgs.clang_12;
   };
@@ -53,7 +52,7 @@ in rec {
   # Build with Clang instead of GCC (may produce different warnings/errors).
   # Also use ASAN and UBSAN to catch leaks and undefined behavior.
   bcdb-clang-sanitize = pkgs.callPackage ./nix/bcdb {
-    inherit nng nngpp rocksdb;
+    inherit nng rocksdb;
     inherit (pkgs.llvmPackages_12) stdenv llvm clang;
     sanitize = true;
   };
@@ -61,7 +60,7 @@ in rec {
   bcdb = bcdb-llvm12;
 
   bcdb-sqlite-only = bcdb.override { rocksdb = null; };
-  bcdb-without-nng = bcdb.override { nng = null; nngpp = null; };
+  bcdb-without-nng = bcdb.override { nng = null; };
 
   rocksdb = pkgs.rocksdb.overrideAttrs (o: {
     version = "6.20.3";

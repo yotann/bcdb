@@ -1,5 +1,5 @@
 { stdenv, lib, nix-gitignore, clang, cmake, libsodium, llvm, pkgconfig, python2, sqlite,
-rocksdb ? null, nng ? null, nngpp ? null,
+rocksdb ? null, nng ? null,
 sanitize ? false }:
 
 let
@@ -26,7 +26,7 @@ in stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [ clang cmake pkgconfig python2 ];
-  buildInputs = [ libsodium llvm nng nngpp rocksdb sqlite ];
+  buildInputs = [ libsodium llvm nng rocksdb sqlite ];
 
   preConfigure = ''
     patchShebangs third_party/lit/lit.py

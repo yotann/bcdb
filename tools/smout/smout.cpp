@@ -41,8 +41,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <nngpp/nngpp.h>
-#include <nngpp/protocol/req0.h>
 #include <set>
 #include <string>
 
@@ -57,6 +55,7 @@
 #include "memodb/Multibase.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
+#include "memodb/nngmm.h"
 
 using namespace bcdb;
 using namespace llvm;

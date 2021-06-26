@@ -8,6 +8,5 @@ if(WITH_NNG)
   target_link_libraries(memodb-broker PRIVATE
     MemoDB
     nng::nng
-    nng::nngpp
   )
 endif(WITH_NNG)
