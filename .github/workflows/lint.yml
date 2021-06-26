@@ -21,3 +21,4 @@ jobs:
           DEFAULT_BRANCH: master
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FILTER_REGEX_EXCLUDE: .*third_party/.*
+          VALIDATE_CPP: false  # TODO: reenable after disabling most of the warnings

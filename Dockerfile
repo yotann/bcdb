@@ -7,7 +7,7 @@ RUN nix-env -iA cachix -f https://cachix.org/api/v1/install && \
     nix-collect-garbage --delete-old && \
     nix-store --optimize
 
-WORKDIR bcdb
+WORKDIR /bcdb
 
 # Download all dependencies. This is a separate step so Docker can cache the
 # dependencies even across changes of the BCDB source code. We copy only the
@@ -21,7 +21,8 @@ COPY nix/import-flake-lock.nix nix/
 COPY nix/nng nix/nng
 COPY nix/symphony nix/symphony
 COPY .gitignore flake.lock *.nix ./
-RUN nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \
+RUN set -o pipefail && \
+    nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \
     nix-store --optimize
 
 # Build a small program using the bitcode overlay, just to make sure the
@@ -42,7 +43,7 @@ RUN nix-env -f nix/bitcode-overlay -iA \
     nix-store --optimize
 
 # Copy the full BCDB source code.
-RUN rm -rf *
+RUN rm -rf ./*
 COPY . ./
 
 # Enable parallel builds.
