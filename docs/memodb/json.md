@@ -50,6 +50,7 @@ object.
 
 For example, this MemoDB Node (in a made-up format):
 
+<!-- markdownlint-disable-next-line MD040 -->
 ```
 {
   foo: CID(bafyqaapw),

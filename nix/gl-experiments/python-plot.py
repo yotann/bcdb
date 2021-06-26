@@ -4,8 +4,8 @@ import sys
 
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
 import pandas as pd
+from matplotlib.ticker import FuncFormatter
 from scipy.stats.mstats import gmean
 
 df = pd.concat([pd.read_csv(arg) for arg in sys.argv[1:]])
