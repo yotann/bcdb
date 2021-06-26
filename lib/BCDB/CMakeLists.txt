@@ -1,5 +1,5 @@
 add_custom_command(OUTPUT mux_main.bc
-  COMMAND clang -emit-llvm -Os -c ${CMAKE_CURRENT_SOURCE_DIR}/data/mux_main.c -o mux_main.bc
+  COMMAND ${CLANG} -emit-llvm -Os -c ${CMAKE_CURRENT_SOURCE_DIR}/data/mux_main.c -o mux_main.bc
   DEPENDS data/mux_main.c
 )
 add_custom_command(OUTPUT mux_main.inc
@@ -9,7 +9,7 @@ add_custom_command(OUTPUT mux_main.inc
 add_custom_target(mux_main DEPENDS mux_main.inc)
 
 add_custom_command(OUTPUT gl_library.bc
-  COMMAND clang -emit-llvm -Os -c ${CMAKE_CURRENT_SOURCE_DIR}/data/gl_library.c -o gl_library.bc
+  COMMAND ${CLANG} -emit-llvm -Os -c ${CMAKE_CURRENT_SOURCE_DIR}/data/gl_library.c -o gl_library.bc
   DEPENDS data/gl_library.c
 )
 add_custom_command(OUTPUT gl_library.inc
