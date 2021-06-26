@@ -1,9 +1,3 @@
-set(LLVM_LINK_COMPONENTS
-  LTO
-  Support
-  TransformUtils
-)
-
 add_llvm_library(BCDBOutliningPlugin MODULE
   Candidates.cpp
   CostModel.cpp

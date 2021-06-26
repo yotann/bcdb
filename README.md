@@ -51,14 +51,18 @@ You will need the following dependencies:
 
 - C++ compiler with C++17 support.
 - [LLVM](https://llvm.org/) version 9 through 12 (development versions up to 13
-  may work, but this is not guaranteed). When working on the BCDB code, you
-  should make sure LLVM is built with assertions enabled.
+  may work, but this is not guaranteed)
+  - When working on the BCDB code, you should make sure LLVM is built with
+    assertions enabled.
+  - LLVM's `FileCheck` and `not` programs must be installed as well. Some
+    packages (including some of LLVM's official packages) exclude these
+    programs or split them off into a separate package.
 - [Clang](https://clang.llvm.org/), same version as LLVM.
 - [CMake](https://cmake.org/), a recent version.
 - [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
-- [Python](https://www.python.org/), at least 2.7.
+- [Python](https://www.python.org/), at least 3.6.
 - Optional dependencies:
   - [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
     Zstandard support (`ROCKSDB_LITE` is not supported).

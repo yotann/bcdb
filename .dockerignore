@@ -1,0 +1,14 @@
+# Python byte code files
+**/__pycache__
+**/*.pyc
+
+# Vi swap files
+**/*.swp
+
+tags
+
+build*
+install
+nix/gl-experiments/result*
+result
+result-*

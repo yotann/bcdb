@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # A simple alternative to the xxd(1) program.
 import sys
 with open(sys.argv[1], 'rb') as fp:
