@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+      with:
+        submodules: true
     - uses: cachix/install-nix-action@v13
     - uses: cachix/cachix-action@v10
       with:

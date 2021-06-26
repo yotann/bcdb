@@ -22,6 +22,7 @@ automatically build BCDB along with its dependencies. See `default.nix` for the
 list of attributes you can build. For example:
 
 ```shell
+git submodule update --init --depth=1
 nix-build -A bcdb
 result/bin/bcdb -help
 ```
@@ -30,6 +31,7 @@ If you want to modify the BCDB code, you can also have Nix build just the
 dependencies and enter a shell with them installed:
 
 ```shell
+git submodule update --init --depth=1
 nix-shell -A bcdb
 mkdir build
 cd build
@@ -58,7 +60,7 @@ You will need the following dependencies:
     packages (including some of LLVM's official packages) exclude these
     programs or split them off into a separate package.
 - [Clang](https://clang.llvm.org/), same version as LLVM.
-- [CMake](https://cmake.org/), a recent version.
+- [CMake](https://cmake.org/), at least version 3.13.
 - [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
@@ -71,6 +73,7 @@ You will need the following dependencies:
 You should then be able to build normally with CMake, like this:
 
 ```shell
+git submodule update --init --depth=1
 mkdir build
 cd build
 cmake ..

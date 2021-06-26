@@ -1,2 +1,3 @@
-set(GOOGLETEST_VERSION 1.10.0)
+option(BUILD_GMOCK "" OFF)
+option(INSTALL_GTEST "" OFF)
 add_subdirectory(googletest)
