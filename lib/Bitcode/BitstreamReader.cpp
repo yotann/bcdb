@@ -163,8 +163,6 @@ unsigned BitstreamCursor::skipRecord(unsigned AbbrevID) {
   return Code;
 }
 
-// jscpd:ignore-start
-
 unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
                                      SmallVectorImpl<uint64_t> &Vals,
                                      StringRef *Blob) {
@@ -270,8 +268,6 @@ unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
 
   return Code;
 }
-
-// jscpd:ignore-end
 
 unsigned BitstreamCursor::ReadAbbrevRecord() {
   auto Abbv = std::make_shared<BitCodeAbbrev>();

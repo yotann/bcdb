@@ -26,8 +26,6 @@ static Error error(const Twine &Message) {
   return make_error<StringError>(Message, errc::invalid_argument);
 }
 
-// jscpd:ignore-start
-
 static bool AbbrevWorthKeeping(const BitCodeAbbrev *Abbrev) {
   for (unsigned i = 0; i < Abbrev->getNumOperandInfos(); i++) {
     BitCodeAbbrevOp Op = Abbrev->getOperandInfo(i);
@@ -84,8 +82,6 @@ static std::shared_ptr<BitCodeAbbrev> AlignAbbrev(const BitCodeAbbrev *Abbrev) {
   }
   return Result;
 }
-
-// jscpd:ignore-end
 
 static std::shared_ptr<BitCodeAbbrev> MakeGeneralAbbrev() {
   auto Result = std::make_shared<BitCodeAbbrev>();

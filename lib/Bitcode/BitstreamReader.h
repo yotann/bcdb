@@ -223,8 +223,6 @@ public:
     return R;
   }
 
-  // jscpd:ignore-start
-
   uint32_t ReadVBR(unsigned NumBits) {
     uint32_t Piece = Read(NumBits);
     if ((Piece & (1U << (NumBits - 1))) == 0)
@@ -262,8 +260,6 @@ public:
       Piece = Read(NumBits);
     }
   }
-
-  // jscpd:ignore-end
 
   void SkipToFourByteBoundary() {
     // If word_t is 64-bits and if we've read less than 32 bits, just dump

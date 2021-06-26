@@ -21,7 +21,14 @@ jobs:
           DEFAULT_BRANCH: master
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FILTER_REGEX_EXCLUDE: .*third_party/.*
-          JSCPD_CONFIG_FILE: .jscpd.json
+
+          # Bash code doesn't have to be executable to be useful!
           VALIDATE_BASH_EXEC: false
-          VALIDATE_CPP: false  # TODO: reenable after disabling most of the warnings
+
+          # Too many false positives.
+          # Can't figure out how to override config.
+          # Time-consuming.
+          VALIDATE_JSCPD: false
+
+          # Not worthwhile for ad hoc scripts.
           VALIDATE_PYTHON_MYPY: false
