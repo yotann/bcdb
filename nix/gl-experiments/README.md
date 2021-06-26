@@ -16,7 +16,7 @@ If you run `python-experiment.sh`, this is how all the parts interact:
     that is automatically built with embedded bitcode.
     - It uses `../bitcode-cc-wrapper`, a wrapper for Clang that automatically
       adds the `-fembed-bitcode` option.
-  - The `bc-imitate`, `bcdb init`, and `bcdb add` commands are used to fill a
+  - The `bc-imitate`, `memodb init`, and `bcdb add` commands are used to fill a
     BCDB instance with bitcode extracted from the packages.
   - The `bcdb gl` command is used to actually perform Guided Linking.
   - Clang is used to optimize, compile, and link the merged library and other

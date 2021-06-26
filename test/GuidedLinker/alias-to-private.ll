@@ -1,6 +1,6 @@
 ; XFAIL: *
 
-; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: memodb init -store sqlite:%t.bcdb
 ; RUN: bcdb add -store sqlite:%t.bcdb %s -name prog
 ; RUN: bcdb gl -store sqlite:%t.bcdb prog -o %t --merged-name=libmerged.so --weak-name=libweak.so
 ; RUN: opt -verify -S < %t/libmerged.so | FileCheck --check-prefix=MERGED %s

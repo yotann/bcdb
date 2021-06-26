@@ -28,11 +28,17 @@ cl::OptionCategory MemoDBCategory("MemoDB options");
 
 static cl::SubCommand ExportCommand("export", "Export values to a CAR file");
 static cl::SubCommand GetCommand("get", "Get a value");
+static cl::SubCommand InitCommand("init", "Initialize a store");
+static cl::SubCommand InvalidateCommand("invalidate",
+                                        "Delete all results of a function");
 static cl::SubCommand ListCallsCommand("list-calls",
                                        "List all cached calls of a function");
 static cl::SubCommand ListFuncsCommand("list-funcs",
                                        "List all cached functions");
 static cl::SubCommand ListHeadsCommand("list-heads", "List all heads");
+static cl::SubCommand
+    PathsToCommand("paths-to",
+                   "Find paths from a head or call that reach a value");
 static cl::SubCommand
     PutCommand("put", "Put a value, or find ID of an existing value");
 static cl::SubCommand RefsToCommand("refs-to",
@@ -83,7 +89,13 @@ static cl::opt<std::string> SourceURI(cl::Positional, cl::Required,
 static cl::opt<std::string>
     TargetURI(cl::Positional, cl::Required, cl::desc("<target URI>"),
               cl::value_desc("uri"), cl::cat(MemoDBCategory),
-              cl::sub(RefsToCommand), cl::sub(SetCommand));
+              cl::sub(PathsToCommand), cl::sub(RefsToCommand),
+              cl::sub(SetCommand));
+
+static cl::opt<std::string>
+    FuncName(cl::Positional, cl::Required, cl::desc("<function name>"),
+             cl::value_desc("func"), cl::cat(MemoDBCategory),
+             cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
 
 static Name GetNameFromURI(llvm::StringRef URI) {
   ParsedURI Parsed(URI);
@@ -113,7 +125,7 @@ static cl::opt<std::string> InputURI(cl::Positional, cl::desc("<input URI>"),
                                      cl::cat(MemoDBCategory),
                                      cl::sub(PutCommand), cl::sub(SetCommand));
 
-static CID ReadRef(Store &Db, llvm::StringRef URI) {
+static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   ExitOnError Err("value read: ");
   std::unique_ptr<MemoryBuffer> Buffer;
   if (URI == "-")
@@ -126,7 +138,7 @@ static CID ReadRef(Store &Db, llvm::StringRef URI) {
     Buffer = Err(errorOrToExpected(MemoryBuffer::getFile(Parsed.Path)));
   } else {
     Name Name = GetNameFromURI(URI);
-    return Db.resolve(Name);
+    return Db.resolveOptional(Name);
   }
   Node Value;
   switch (format_option) {
@@ -372,13 +384,22 @@ static int Get() {
   return 0;
 }
 
-// memodb list-calls
+// memodb init
 
-static cl::opt<std::string> FuncName(cl::Positional, cl::Required,
-                                     cl::desc("<function name>"),
-                                     cl::value_desc("func"),
-                                     cl::cat(MemoDBCategory),
-                                     cl::sub(ListCallsCommand));
+static int Init() {
+  Store::open(GetStoreUri(), /*create_if_missing*/ true);
+  return 0;
+}
+
+// memodb invalidate
+
+static int Invalidate() {
+  auto db = Store::open(GetStoreUri());
+  db->call_invalidate(FuncName);
+  return 0;
+}
+
+// memodb list-calls
 
 static int ListCalls() {
   auto Db = Store::open(GetStoreUri());
@@ -409,12 +430,34 @@ static int ListHeads() {
   return 0;
 }
 
+// memodb paths-to
+
+static int PathsTo() {
+  auto db = Store::open(GetStoreUri());
+  auto ref = ReadRef(*db, TargetURI);
+  if (!ref) {
+    errs() << "not found\n";
+    return 1;
+  }
+  for (const auto &path : db->list_paths_to(*ref)) {
+    outs() << path.first;
+    for (const auto &item : path.second)
+      outs() << '[' << item << ']';
+    outs() << '\n';
+  }
+  return 0;
+}
+
 // memodb put
 
 static int Put() {
   auto Db = Store::open(GetStoreUri());
-  CID Ref = ReadRef(*Db, InputURI);
-  outs() << "id:" << Ref << "\n";
+  auto Ref = ReadRef(*Db, InputURI);
+  if (!Ref) {
+    errs() << "not found\n";
+    return 1;
+  }
+  outs() << "id:" << *Ref << "\n";
   return 0;
 }
 
@@ -422,8 +465,12 @@ static int Put() {
 
 static int RefsTo() {
   auto Db = Store::open(GetStoreUri());
-  CID Ref = ReadRef(*Db, TargetURI);
-  for (const Name &Name : Db->list_names_using(Ref)) {
+  auto Ref = ReadRef(*Db, TargetURI);
+  if (!Ref) {
+    errs() << "not found\n";
+    return 1;
+  }
+  for (const Name &Name : Db->list_names_using(*Ref)) {
     if (auto head = std::get_if<Head>(&Name))
       outs() << "head:" << head->Name << "\n";
     else if (auto ParentRef = std::get_if<CID>(&Name))
@@ -445,7 +492,11 @@ static int Set() {
   auto Db = Store::open(GetStoreUri());
   auto Name = GetNameFromURI(TargetURI);
   auto Value = ReadRef(*Db, InputURI);
-  Db->set(Name, Value);
+  if (!Value) {
+    errs() << "not found\n";
+    return 1;
+  }
+  Db->set(Name, *Value);
   return 0;
 }
 
@@ -525,12 +576,18 @@ int main(int argc, char **argv) {
     return Export();
   } else if (GetCommand) {
     return Get();
+  } else if (InitCommand) {
+    return Init();
+  } else if (InvalidateCommand) {
+    return Invalidate();
   } else if (ListCallsCommand) {
     return ListCalls();
   } else if (ListFuncsCommand) {
     return ListFuncs();
   } else if (ListHeadsCommand) {
     return ListHeads();
+  } else if (PathsToCommand) {
+    return PathsTo();
   } else if (PutCommand) {
     return Put();
   } else if (RefsToCommand) {

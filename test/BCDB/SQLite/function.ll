@@ -1,5 +1,5 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t -
 ; RUN: bcdb get -store sqlite:%t -name - | opt -verify -S | FileCheck %s
 ; RUN: bcdb get-function -store sqlite:%t -id $(bcdb list-function-ids -store sqlite:%t) | opt -verify -S | FileCheck --check-prefix=FUNC %s

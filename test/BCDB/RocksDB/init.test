@@ -1,2 +1,2 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -store rocksdb:%t
+; RUN: memodb init -store rocksdb:%t

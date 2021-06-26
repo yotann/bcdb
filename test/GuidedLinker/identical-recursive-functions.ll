@@ -1,4 +1,4 @@
-; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: memodb init -store sqlite:%t.bcdb
 ; RUN: bcdb add -store sqlite:%t.bcdb %s -name f
 ; RUN: bcdb add -store sqlite:%t.bcdb %p/Inputs/identical-recursive-functions.ll -name g
 ; RUN: bcdb gl -store sqlite:%t.bcdb f g -o %t --merged-name=libmerged.so --noplugin

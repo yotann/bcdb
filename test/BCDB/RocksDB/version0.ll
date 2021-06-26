@@ -2,7 +2,7 @@
 ; RUN: cp -r %p/Inputs/version0 %t
 ; RUN: bcdb get -store rocksdb:%t -name - | opt -verify -S | FileCheck %s
 ; RUN: bcdb get-function -store rocksdb:%t -id $(bcdb list-function-ids -store rocksdb:%t) | opt -verify -S | FileCheck --check-prefix=FUNC %s
-; RUN: bcdb refs -store rocksdb:%t $(bcdb list-function-ids -store rocksdb:%t) | FileCheck --check-prefix=REFS %s
+; RUN: memodb paths-to -store rocksdb:%t id:$(bcdb list-function-ids -store rocksdb:%t) | FileCheck --check-prefix=REFS %s
 
 ; FUNC: define i32 @0(i32 %x, i32 %y)
 ; CHECK: define i32 @func(i32 %x, i32 %y)

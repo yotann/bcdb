@@ -1,14 +1,14 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 
-; RUN: not bcdb evaluate -store sqlite:%t primes bafyqaaif
+; RUN: not memodb put -store sqlite:%t call:primes/bafyqaaif
 
-; RUN: bcdb cache -store sqlite:%t -result bafyqabufaibqkbyl primes bafyqaaif
-; RUN: bcdb evaluate -store sqlite:%t primes bafyqaaif | FileCheck %s
+; RUN: memodb set -store sqlite:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
+; RUN: memodb put -store sqlite:%t call:primes/bafyqaaif | FileCheck %s
 ; CHECK: bafyqabufaibqkbyl
 
 ; RUN: memodb list-calls -store sqlite:%t primes | FileCheck --check-prefix=CALLS %s
 ; CALLS: call:primes/bafyqaaif
 
-; RUN: bcdb invalidate -store sqlite:%t primes
-; RUN: not bcdb evaluate -store sqlite:%t primes bafyqaaif
+; RUN: memodb invalidate -store sqlite:%t primes
+; RUN: not memodb put -store sqlite:%t call:primes/bafyqaaif

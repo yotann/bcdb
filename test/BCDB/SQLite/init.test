@@ -1,2 +1,2 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t

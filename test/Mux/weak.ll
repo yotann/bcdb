@@ -1,11 +1,11 @@
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name bin
 ; RUN: llvm-as < %p/Inputs/lib.ll | bcdb add -store sqlite:%t - -name lib
 ; RUN: llvm-as < %p/Inputs/weak.ll | bcdb add -store sqlite:%t - -name weak
 ; RUN: llvm-as < %p/Inputs/weak.ll | bcdb add -store sqlite:%t - -name weak2
 ; RUN: bcdb mux -store sqlite:%t bin lib weak weak2 | lli - bin
 
-; RUN: bcdb init -store sqlite:%t.rg
+; RUN: memodb init -store sqlite:%t.rg
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t.rg - -name bin -rename-globals
 ; RUN: llvm-as < %p/Inputs/lib.ll | bcdb add -store sqlite:%t.rg - -name lib -rename-globals
 ; RUN: llvm-as < %p/Inputs/weak.ll | bcdb add -store sqlite:%t.rg - -name weak -rename-globals

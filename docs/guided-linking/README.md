@@ -53,7 +53,7 @@ bc-imitate annotate --binary=lz4 > lz4.bc
 
 ```sh
 export MEMODB_STORE=sqlite:lz4.bcdb
-bcdb init
+memodb init
 bcdb add -name lz4 lz4.bc
 ```
 
@@ -65,7 +65,7 @@ functions, and syntactically identical functions are deduplicated.
 ```sh
 bcdb list-modules
 bcdb list-function-ids
-bcdb refs 99
+memodb paths-to id:99
 bcdb get-function --id=99 | llvm-dis
 ```
 

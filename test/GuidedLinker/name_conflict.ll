@@ -1,4 +1,4 @@
-; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: memodb init -store sqlite:%t.bcdb
 ; RUN: bcdb add -store sqlite:%t.bcdb %s -name rogue
 ; RUN: bcdb add -store sqlite:%t.bcdb %p/Inputs/name_conflict.ll -name angband
 ; RUN: bcdb gl -store sqlite:%t.bcdb rogue angband -o %t --merged-name=libmerged.so --weak-name=libweak.so --noplugin

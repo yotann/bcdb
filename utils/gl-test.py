@@ -32,7 +32,7 @@ weak_library = False
 subprocess.check_call(('clang++', '--version'))
 
 memodb_store = 'sqlite:' + out + '.bcdb'
-subprocess.check_call(('bcdb', 'init', '-store', memodb_store))
+subprocess.check_call(('memodb', 'init', '-store', memodb_store))
 
 modules = set(re.findall(r'MODULE\d+', source))
 if not modules:

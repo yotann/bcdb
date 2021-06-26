@@ -1,5 +1,5 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -store rocksdb:%t
+; RUN: memodb init -store rocksdb:%t
 
 ; RUN: memodb set -store rocksdb:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
 ; RUN: memodb set -store rocksdb:%t call:primes/bafyqaaig id:bafyqab4gaibqkbylbu

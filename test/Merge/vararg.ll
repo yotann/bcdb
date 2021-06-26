@@ -1,5 +1,5 @@
 ; XFAIL: *
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t -
 ; RUN: bcdb merge -store sqlite:%t - | opt -verify -S | FileCheck %s
 

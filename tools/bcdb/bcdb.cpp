@@ -31,8 +31,8 @@ using namespace memodb;
 
 static cl::opt<std::string>
     StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
-                    cl::init(std::string(
-                        StringRef::withNullAsEmpty(std::getenv("MEMODB_URI")))),
+                    cl::init(std::string(StringRef::withNullAsEmpty(
+                        std::getenv("MEMODB_STORE")))),
                     cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
 
 static StringRef GetStoreUri() {
@@ -74,41 +74,6 @@ static int Add() {
     Name = AddFilename;
 
   Err(db->Add(Name, std::move(M)));
-  return 0;
-}
-
-// bcdb cp
-
-static cl::SubCommand CpCommand("cp", "Copy a head");
-
-static cl::opt<std::string> CpSource(cl::Positional, cl::Required,
-                                     cl::value_desc("source"),
-                                     cl::sub(CpCommand));
-
-static cl::opt<std::string> CpDest(cl::Positional, cl::Required,
-                                   cl::value_desc("dest"), cl::sub(CpCommand));
-
-static int Cp() {
-  ExitOnError Err("bcdb cp: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-  CID value = db->get_db().head_get(CpSource);
-  db->get_db().head_set(CpDest, value);
-  return 0;
-}
-
-// bcdb delete
-
-static cl::SubCommand DeleteCommand("delete", "Remove a module");
-
-static cl::opt<std::string> DeleteHeadname("name",
-                                           cl::desc("name of head to delete"),
-                                           cl::sub(DeleteCommand));
-
-static int Delete() {
-  ExitOnError Err("bcdb delete: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-  StringRef Name = DeleteHeadname;
-  Err(db->Delete(Name));
   return 0;
 }
 
@@ -207,34 +172,6 @@ static int Melt() {
     errs() << i++ << "," << names.size() << "," << name << "\n";
   }
   return WriteModule(Melter.GetModule());
-}
-
-// bcdb head-get
-
-static cl::SubCommand HeadGetCommand("head-get", "Look up value ID of a head");
-
-static cl::list<std::string> HeadGetNames(cl::Positional, cl::OneOrMore,
-                                          cl::desc("<head names>"),
-                                          cl::sub(HeadGetCommand));
-
-static int HeadGet() {
-  ExitOnError Err("bcdb head-get: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-  for (StringRef Name : HeadGetNames) {
-    CID value = db->get_db().head_get(Name);
-    outs() << StringRef(value) << "\n";
-  }
-  return 0;
-}
-
-// bcdb init
-
-static cl::SubCommand InitCommand("init", "Initialize the database");
-
-static int Init() {
-  ExitOnError Err("bcdb init: ");
-  Err(BCDB::Init(GetStoreUri()));
-  return 0;
 }
 
 // bcdb list-function-ids
@@ -354,88 +291,6 @@ static int GL() {
   return 0;
 }
 
-// Calls: bcdb cache, evaluate, invalidate
-
-static cl::SubCommand CacheCommand("cache", "Cache function call");
-static cl::SubCommand EvaluateCommand("evaluate", "Evaluate function call");
-static cl::SubCommand InvalidateCommand("invalidate",
-                                        "Invalidate cached function calls");
-
-static cl::opt<std::string> FuncResult("result", cl::Required,
-                                       cl::desc("function result ID"),
-                                       cl::sub(CacheCommand));
-static cl::opt<std::string>
-    FuncName(cl::Positional, cl::Required, cl::desc("<function name>"),
-             cl::value_desc("func"), cl::sub(CacheCommand),
-             cl::sub(EvaluateCommand), cl::sub(InvalidateCommand));
-static cl::list<std::string> FuncArgs(cl::Positional, cl::OneOrMore,
-                                      cl::desc("<arguments>"),
-                                      cl::sub(CacheCommand),
-                                      cl::sub(EvaluateCommand));
-
-static int Cache() {
-  ExitOnError Err("bcdb cache: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-
-  std::vector<CID> args;
-  for (const auto &arg_id : FuncArgs) {
-    args.push_back(*CID::parse(arg_id));
-  }
-
-  db->get_db().call_set(FuncName, args, *CID::parse(FuncResult));
-  return 0;
-}
-
-static int Evaluate() {
-  ExitOnError Err("bcdb evaluate: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-
-  std::vector<CID> args;
-  for (const auto &arg_id : FuncArgs) {
-    args.push_back(*CID::parse(arg_id));
-  }
-
-  auto result = db->get_db().resolveOptional(Call(FuncName, args));
-  if (!result) {
-    Err(make_error<StringError>("Can't evaluate function " + FuncName,
-                                errc::invalid_argument));
-  }
-
-  outs() << llvm::StringRef(*result) << "\n";
-  return 0;
-}
-
-static int Invalidate() {
-  ExitOnError Err("bcdb invalidate: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-
-  db->get_db().call_invalidate(FuncName);
-  return 0;
-}
-
-// bcdb refs
-
-static cl::SubCommand RefsCommand("refs", "List references to a value");
-
-static cl::opt<std::string> RefsValue(cl::Positional, cl::Required,
-                                      cl::desc("<value ID>"),
-                                      cl::sub(RefsCommand));
-
-static int Refs() {
-  ExitOnError Err("bcdb refs: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-
-  CID ref = *CID::parse(RefsValue);
-  for (const auto &path : db->get_db().list_paths_to(ref)) {
-    outs() << path.first;
-    for (const auto &item : path.second) {
-      outs() << "[" << item << "]";
-    }
-    outs() << "\n";
-  }
-  return 0;
-}
-
 // main
 
 int main(int argc, char **argv) {
@@ -460,26 +315,12 @@ int main(int argc, char **argv) {
 
   if (AddCommand) {
     return Add();
-  } else if (CacheCommand) {
-    return Cache();
-  } else if (CpCommand) {
-    return Cp();
-  } else if (DeleteCommand) {
-    return Delete();
-  } else if (EvaluateCommand) {
-    return Evaluate();
   } else if (GetCommand) {
     return Get();
   } else if (GetFunctionCommand) {
     return GetFunction();
   } else if (GLCommand) {
     return GL();
-  } else if (HeadGetCommand) {
-    return HeadGet();
-  } else if (InitCommand) {
-    return Init();
-  } else if (InvalidateCommand) {
-    return Invalidate();
   } else if (ListFunctionsCommand) {
     return ListFunctions();
   } else if (ListModulesCommand) {
@@ -490,8 +331,6 @@ int main(int argc, char **argv) {
     return Merge();
   } else if (MuxCommand) {
     return Mux();
-  } else if (RefsCommand) {
-    return Refs();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

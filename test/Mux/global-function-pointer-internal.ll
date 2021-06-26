@@ -1,8 +1,8 @@
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t -
 ; RUN: bcdb mux -store sqlite:%t - | lli - -
 
-; RUN: bcdb init -store sqlite:%t.rg
+; RUN: memodb init -store sqlite:%t.rg
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t.rg - -rename-globals
 ; RUN: bcdb mux -store sqlite:%t.rg - | lli - -
 

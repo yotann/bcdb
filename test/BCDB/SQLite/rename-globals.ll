@@ -1,5 +1,5 @@
 ; RUN: rm -rf %t
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -rename-globals
 ; RUN: bcdb get -store sqlite:%t -name - | opt -verify -S | FileCheck %s
 

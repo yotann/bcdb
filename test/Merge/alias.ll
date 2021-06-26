@@ -1,4 +1,4 @@
-; RUN: bcdb init -store sqlite:%t
+; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name a
 ; RUN: bcdb merge -store sqlite:%t a | opt -verify -S | FileCheck %s
 

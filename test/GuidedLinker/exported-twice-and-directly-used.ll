@@ -1,4 +1,4 @@
-; RUN: bcdb init -store sqlite:%t.bcdb
+; RUN: memodb init -store sqlite:%t.bcdb
 ; RUN: bcdb add -store sqlite:%t.bcdb %s -name prog
 ; RUN: bcdb add -store sqlite:%t.bcdb %p/Inputs/exported-twice-and-directly-used.ll -name weak
 ; RUN: bcdb gl -store sqlite:%t.bcdb prog weak -o %t --merged-name=libmerged.so --weak-name=libweak.so --noplugin
