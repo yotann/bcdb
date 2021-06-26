@@ -1,12 +1,15 @@
+#include "memodb/CAR.h"
 #include "memodb_internal.h"
 
 #include <cstdint>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/raw_ostream.h>
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <system_error>
 #include <unistd.h>
 
@@ -253,4 +256,149 @@ std::unique_ptr<Store> memodb_car_open(llvm::StringRef path,
   auto db = std::make_unique<CARStore>();
   db->open(path, create_if_missing);
   return db;
+}
+
+CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
+                            llvm::ArrayRef<Name> names_to_export) {
+  // Create a CAR file:
+  // https://github.com/ipld/specs/blob/master/block-layer/content-addressable-archives.md
+
+  if (!os.supportsSeeking()) {
+    llvm::report_fatal_error("output file doesn't support seeking");
+  }
+
+  auto getVarIntSize = [&](size_t Value) {
+    size_t Total = 1;
+    for (; Value >= 0x80; Value >>= 7)
+      Total++;
+    return Total;
+  };
+  auto writeVarInt = [&](size_t Value) {
+    for (; Value >= 0x80; Value >>= 7)
+      os.write((Value & 0x7f) | 0x80);
+    os.write(Value);
+  };
+  auto getBlockSize =
+      [&](const std::pair<CID, std::vector<std::uint8_t>> &Block) {
+        size_t Result = Block.second.size() + Block.first.asBytes().size();
+        Result += getVarIntSize(Result);
+        return Result;
+      };
+  auto writeBlock =
+      [&](const std::pair<CID, std::vector<std::uint8_t>> &Block) {
+        std::vector<std::uint8_t> Buffer(Block.first.asBytes());
+        Buffer.insert(Buffer.end(), Block.second.begin(), Block.second.end());
+        writeVarInt(Buffer.size());
+        os.write(reinterpret_cast<const char *>(Buffer.data()), Buffer.size());
+      };
+
+  // We won't know what root CID to put in the header until after we've written
+  // everything. Leave an empty space which will be filled with header +
+  // padding later. The header is normally 0x3d bytes, so this gives us plenty
+  // of room.
+  os.write_zeros(0x200);
+  auto DataStartPos = os.tell();
+
+  std::set<CID> AlreadyWritten;
+  std::function<void(const CID &)> exportRef;
+  std::function<CID(const Node &)> exportValue;
+
+  exportRef = [&](const CID &Ref) {
+    if (AlreadyWritten.insert(Ref).second)
+      exportValue(store.get(Ref));
+  };
+
+  exportValue = [&](const Node &Value) {
+    auto Block = Value.saveAsIPLD();
+    if (!Block.first.isIdentity())
+      writeBlock(Block);
+    Value.eachLink(exportRef);
+    return Block.first;
+  };
+
+  Node Root = Node(node_map_arg, {{"format", "MemoDB CAR"},
+                                  {"version", 0},
+                                  {"calls", Node(node_map_arg)},
+                                  {"heads", Node(node_map_arg)},
+                                  {"ids", Node(node_list_arg)}});
+  Node &Calls = Root["calls"];
+  Node &Heads = Root["heads"];
+  Node &IDs = Root["ids"];
+  auto addName = [&](const Name &Name) {
+    llvm::errs() << "exporting " << Name << "\n";
+    if (const CID *Ref = std::get_if<CID>(&Name)) {
+      exportRef(*Ref);
+      IDs.emplace_back(*Ref);
+    } else if (const Head *head = std::get_if<Head>(&Name)) {
+      Heads[head->Name] = store.resolve(Name);
+      exportRef(Heads[head->Name].as<CID>());
+    } else if (const Call *call = std::get_if<Call>(&Name)) {
+      Node &FuncCalls = Calls[call->Name];
+      if (FuncCalls == Node{})
+        FuncCalls = Node::Map();
+      Node Args = Node(node_list_arg);
+      std::string Key;
+      for (const CID &Arg : call->Args) {
+        exportRef(Arg);
+        Args.emplace_back(Arg);
+        Key += std::string(Arg) + "/";
+      }
+      Key.pop_back();
+      auto Result = store.resolve(Name);
+      FuncCalls[Key] = Node::Map({{"args", Args}, {"result", Result}});
+      exportRef(Result);
+    } else {
+      llvm_unreachable("impossible Name type");
+    }
+  };
+  if (!names_to_export.empty()) {
+    for (const Name &name : names_to_export)
+      addName(name);
+  } else {
+    store.eachHead([&](const Head &head) {
+      addName(head);
+      return false;
+    });
+    for (llvm::StringRef Func : store.list_funcs()) {
+      store.eachCall(Func, [&](const Call &call) {
+        addName(call);
+        return false;
+      });
+    }
+  }
+
+  CID RootRef = exportValue(Root);
+
+  Node Header =
+      Node::Map({{"roots", Node(node_list_arg, {RootRef})}, {"version", 1}});
+  std::vector<std::uint8_t> Buffer;
+  Header.save_cbor(Buffer);
+  os.seek(0);
+  writeVarInt(Buffer.size());
+  os.write(reinterpret_cast<const char *>(Buffer.data()), Buffer.size());
+
+  // Add padding between the header and the real data. This code can only
+  // generate padding of size 40...128 or 130... bytes, because of the way
+  // VarInts work. Note that the padding block may be a duplicate of another
+  // block later in the file; the CAR format does not specify whether this is
+  // allowed.
+  if (os.tell() < DataStartPos) {
+    size_t PaddingNeeded = DataStartPos - os.tell();
+    std::vector<std::uint8_t> Padding(PaddingNeeded);
+    for (size_t i = 0; i < PaddingNeeded; i++)
+      Padding[i] = "MemoDB CAR"[i % 11];
+
+    for (ssize_t Size = PaddingNeeded; Size >= 0; Size--) {
+      auto Block =
+          Node(llvm::ArrayRef(Padding).take_front(Size)).saveAsIPLD(true);
+      if (getBlockSize(Block) == PaddingNeeded) {
+        writeBlock(Block);
+        break;
+      }
+    }
+  }
+  if (os.tell() != DataStartPos)
+    llvm::report_fatal_error("CAR header too large to fit");
+
+  return RootRef;
 }
