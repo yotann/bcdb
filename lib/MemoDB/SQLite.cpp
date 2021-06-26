@@ -213,23 +213,30 @@ class ExclusiveTransaction {
   bool committed = false;
 
 public:
+  static thread_local bool in_transaction;
+
   ExclusiveTransaction(sqlite_db &db) : db(db) {
     db.checkStatus(sqlite3_exec(db.get_db(), "BEGIN EXCLUSIVE", nullptr,
                                 nullptr, nullptr));
+    in_transaction = true;
   }
   void commit() {
     assert(!committed);
     committed = true;
     db.checkStatus(
         sqlite3_exec(db.get_db(), "COMMIT", nullptr, nullptr, nullptr));
+    in_transaction = false;
   }
   ~ExclusiveTransaction() {
     if (!committed)
       sqlite3_exec(db.get_db(), "ROLLBACK", nullptr, nullptr, nullptr);
+    in_transaction = false;
     // ignore return code
   }
 };
 } // end anonymous namespace
+
+thread_local bool ExclusiveTransaction::in_transaction = false;
 
 static int busy_callback(void *, int count) {
   int ms = 1;
@@ -433,7 +440,7 @@ sqlite3_int64 sqlite_db::putInternal(const CID &CID,
   // aren't already in one) and check again (an entry may have been added since
   // the previous check).
   std::optional<ExclusiveTransaction> transaction;
-  if (sqlite3_txn_state(db, nullptr) == SQLITE_TXN_NONE)
+  if (!ExclusiveTransaction::in_transaction)
     transaction.emplace(*this);
 
   {
