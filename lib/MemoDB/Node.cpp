@@ -465,6 +465,8 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
     }
     llvm::report_fatal_error("invalid special JSON object");
   }
+  default:
+    llvm_unreachable("impossible JSON type");
   }
 }
 
