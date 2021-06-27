@@ -13,20 +13,23 @@ jobs:
         with:
           # Full git history is needed to get a proper list of changed files within `super-linter`
           fetch-depth: 0
+          # Submodules shouldn't be linted.
+          submodules: false
 
       - name: Lint
         uses: github/super-linter@v4
         env:
-          VALIDATE_ALL_CODEBASE: true
           DEFAULT_BRANCH: master
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FILTER_REGEX_EXCLUDE: .*third_party/.*
 
+          # Only lint files that have been changed.
+          VALIDATE_ALL_CODEBASE: false
+
           # Bash code doesn't have to be executable to be useful!
           VALIDATE_BASH_EXEC: false
 
-          # Too many false positives.
-          # Time-consuming.
+          # Too many false positives. Too time-consuming.
           VALIDATE_JSCPD: false
 
           # Not worthwhile for ad hoc scripts.
