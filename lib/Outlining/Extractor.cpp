@@ -25,9 +25,9 @@ OutliningExtractor::OutliningExtractor(Function &F,
 
   OutlinedBlocks = BitVector(Nodes.size());
   for (size_t i : BV.set_bits()) {
-    if (isa<BasicBlock>(Nodes[i]))
+    if (isa<BasicBlock>(Nodes[i])) {
       OutlinedBlocks.set(i);
-    else if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
+    } else if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
       OutlinedBlocks.set(NodeIndices[I->getParent()]);
       if (isa<ReturnInst>(I) && !F.getReturnType()->isVoidTy())
         OutliningReturn = true;
@@ -217,9 +217,10 @@ Function *OutliningExtractor::createNewCallee() {
     if (!NumBranchesToExit)
       continue;
 
-    if (RetValuePhi && RetValuePhi->getBasicBlockIndex(NewBB) < 0)
+    if (RetValuePhi && RetValuePhi->getBasicBlockIndex(NewBB) < 0) {
       for (int j = 0; j < NumBranchesToExit; j++)
         RetValuePhi->addIncoming(UndefValue::get(F.getReturnType()), NewBB);
+    }
     for (size_t i : ExternalOutputs.set_bits()) {
       Value *V = UndefValue::get(Nodes[i]->getType());
       if (OutDep.DT.dominates(cast<Instruction>(Nodes[i]), BB->getTerminator()))

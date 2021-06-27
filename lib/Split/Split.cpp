@@ -60,7 +60,7 @@ public:
   }
 
   FunctionType *get(FunctionType *Ty) {
-    return cast<FunctionType>(get((Type *)Ty));
+    return cast<FunctionType>(get(static_cast<Type *>(Ty)));
   }
 
   /// Get the mapping for a type that may not have been visited directly.

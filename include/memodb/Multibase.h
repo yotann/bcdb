@@ -5,6 +5,7 @@
 #include <functional>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
+#include <string>
 #include <vector>
 
 namespace memodb {

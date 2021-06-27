@@ -93,9 +93,9 @@ unsigned BitstreamCursor::skipRecord(unsigned AbbrevID) {
   const BitCodeAbbrev *Abbv = getAbbrev(AbbrevID);
   const BitCodeAbbrevOp &CodeOp = Abbv->getOperandInfo(0);
   unsigned Code;
-  if (CodeOp.isLiteral())
+  if (CodeOp.isLiteral()) {
     Code = CodeOp.getLiteralValue();
-  else {
+  } else {
     if (CodeOp.getEncoding() == BitCodeAbbrevOp::Array ||
         CodeOp.getEncoding() == BitCodeAbbrevOp::Blob)
       report_fatal_error("Abbreviation starts with an Array or a Blob");
@@ -180,9 +180,9 @@ unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
   assert(Abbv->getNumOperandInfos() != 0 && "no record code in abbreviation?");
   const BitCodeAbbrevOp &CodeOp = Abbv->getOperandInfo(0);
   unsigned Code;
-  if (CodeOp.isLiteral())
+  if (CodeOp.isLiteral()) {
     Code = CodeOp.getLiteralValue();
-  else {
+  } else {
     if (CodeOp.getEncoding() == BitCodeAbbrevOp::Array ||
         CodeOp.getEncoding() == BitCodeAbbrevOp::Blob)
       report_fatal_error("Abbreviation starts with an Array or a Blob");
@@ -298,8 +298,9 @@ unsigned BitstreamCursor::ReadAbbrevRecord() {
             "Fixed or VBR abbrev record with size > MaxChunkData");
 
       Abbv->Add(BitCodeAbbrevOp(E, Data));
-    } else
+    } else {
       Abbv->Add(BitCodeAbbrevOp(E));
+    }
   }
 
   if (Abbv->getNumOperandInfos() == 0)
@@ -363,7 +364,7 @@ BitstreamCursor::ReadBlockInfoBlock(bool ReadBlockInfoNames) {
         break; // Ignore name.
       std::string Name;
       for (unsigned i = 0, e = Record.size(); i != e; ++i)
-        Name += (char)Record[i];
+        Name += static_cast<char>(Record[i]);
       CurBlockInfo->Name = Name;
       break;
     }
@@ -374,7 +375,7 @@ BitstreamCursor::ReadBlockInfoBlock(bool ReadBlockInfoNames) {
         break; // Ignore name.
       std::string Name;
       for (unsigned i = 1, e = Record.size(); i != e; ++i)
-        Name += (char)Record[i];
+        Name += static_cast<char>(Record[i]);
       CurBlockInfo->RecordNames.push_back(
           std::make_pair((unsigned)Record[0], Name));
       break;

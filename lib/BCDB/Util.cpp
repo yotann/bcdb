@@ -10,6 +10,8 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Use.h>
+#include <memory>
+#include <utility>
 
 using namespace bcdb;
 using namespace llvm;
@@ -105,8 +107,9 @@ std::unique_ptr<Module> bcdb::CloneModuleCorrectly(
        I != E; ++I) {
     GlobalVariable *GV = new GlobalVariable(
         *New, I->getValueType(), I->isConstant(), I->getLinkage(),
-        (Constant *)nullptr, I->getName(), (GlobalVariable *)nullptr,
-        I->getThreadLocalMode(), I->getType()->getAddressSpace());
+        static_cast<Constant *>(nullptr), I->getName(),
+        static_cast<GlobalVariable *>(nullptr), I->getThreadLocalMode(),
+        I->getType()->getAddressSpace());
     GV->copyAttributesFrom(&*I);
     VMap[&*I] = GV;
   }
@@ -237,9 +240,10 @@ std::unique_ptr<Module> bcdb::CloneModuleCorrectly(
         if (Visited.insert(MappedOperand).second)
           NewNMD->addOperand(MappedOperand);
       }
-    } else
+    } else {
       for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
         NewNMD->addOperand(MapMetadata(NMD.getOperand(i), VMap));
+    }
   }
 
   return New;

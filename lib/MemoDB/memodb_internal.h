@@ -3,6 +3,7 @@
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
+#include <memory>
 
 #include "memodb/Store.h"
 

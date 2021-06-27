@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 namespace memodb {
 

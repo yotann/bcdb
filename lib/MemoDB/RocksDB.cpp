@@ -391,19 +391,20 @@ std::vector<Name> RocksDBStore::list_names_using(const CID &ref) {
       llvm::report_fatal_error("missing type in refs family");
     char Type = Ref[0];
     Ref.remove_prefix(1);
-    if (Type == TYPE_BLOCK)
+    if (Type == TYPE_BLOCK) {
       Result.emplace_back(*CID::fromBytes(makeBytes(Ref)));
-    else if (Type == TYPE_HEAD)
+    } else if (Type == TYPE_HEAD) {
       Result.emplace_back(Head(Ref.ToString()));
-    else if (Type == TYPE_CALL) {
+    } else if (Type == TYPE_CALL) {
       auto Bytes = makeBytes(Ref);
       Call Call("", {});
       Call.Name = Node::load_cbor_from_sequence(Bytes).as<std::string>();
       while (!Bytes.empty())
         Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
       Result.emplace_back(std::move(Call));
-    } else
+    } else {
       llvm::report_fatal_error("invalid type in refs family");
+    }
   }
   checkStatus(Iterator->status());
   return Result;

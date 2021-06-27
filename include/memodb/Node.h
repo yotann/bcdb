@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
@@ -11,6 +12,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -691,16 +693,17 @@ template <> struct NodeTypeTraits<double> {
   }
 
   static double as(const Node &node) {
-    return std::visit(
-        Overloaded{
-            [](const double &value) { return value; },
-            [](const std::int64_t &value) { return double(value); },
-            [](const auto &) {
-              llvm::report_fatal_error("Not a number");
-              return 0.0;
-            },
-        },
-        node.variant_);
+    return std::visit(Overloaded{
+                          [](const double &value) { return value; },
+                          [](const std::int64_t &value) {
+                            return static_cast<double>(value);
+                          },
+                          [](const auto &) {
+                            llvm::report_fatal_error("Not a number");
+                            return 0.0;
+                          },
+                      },
+                      node.variant_);
   }
 };
 

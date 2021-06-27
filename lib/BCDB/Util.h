@@ -6,6 +6,8 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <memory>
+#include <utility>
 
 namespace llvm {
 class GlobalValue;

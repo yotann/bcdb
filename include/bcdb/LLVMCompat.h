@@ -53,6 +53,10 @@ static inline void eraseModuleFlag(llvm::Module &M, llvm::StringRef Key) {
 #if LLVM_VERSION_MAJOR >= 10
 #include <llvm/Support/VirtualFileSystem.h>
 #endif
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace bcdb {
 static inline std::unique_ptr<llvm::SpecialCaseList>
 createSpecialCaseList(const std::vector<std::string> &Paths) {

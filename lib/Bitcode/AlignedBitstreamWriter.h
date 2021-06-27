@@ -22,6 +22,8 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Bitstream/BitCodes.h"
 #include "llvm/Support/Endian.h"
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace bcdb {
@@ -310,7 +312,7 @@ private:
         EmitVBR64(V, (unsigned)Op.getEncodingData());
       break;
     case BitCodeAbbrevOp::Char6:
-      Emit(BitCodeAbbrevOp::EncodeChar6((char)V), 6);
+      Emit(BitCodeAbbrevOp::EncodeChar6(static_cast<char>(V)), 6);
       break;
     }
   }
@@ -338,9 +340,9 @@ private:
       assert(e && "Expected non-empty abbreviation");
       const BitCodeAbbrevOp &Op = Abbv->getOperandInfo(i++);
 
-      if (Op.isLiteral())
+      if (Op.isLiteral()) {
         EmitAbbreviatedLiteral(Op, Code.getValue());
-      else {
+      } else {
         assert(Op.getEncoding() != BitCodeAbbrevOp::Array &&
                Op.getEncoding() != BitCodeAbbrevOp::Blob &&
                "Expected literal or scalar");

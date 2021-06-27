@@ -131,7 +131,8 @@ static bool encode_float(std::uint64_t &result, double value, int total_size,
   } else {
     value = std::frexp(std::abs(value), &exponent);
     exponent += exponent_bias - 1;
-    if (exponent >= (int)exponent_mask) { // too large, use infinity
+    if (exponent >=
+        static_cast<int>(exponent_mask)) { // too large, use infinity
       exponent = exponent_mask;
       mantissa = 0;
       exact = false;
@@ -144,7 +145,7 @@ static bool encode_float(std::uint64_t &result, double value, int total_size,
       }
       value = std::ldexp(value, mantissa_size);
       mantissa = (std::uint64_t)value;
-      exact = (double)mantissa == value;
+      exact = static_cast<double>(mantissa) == value;
     }
   }
   result = (sign ? (1ull << (total_size - 1)) : 0) |

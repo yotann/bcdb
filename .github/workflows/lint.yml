@@ -26,7 +26,6 @@ jobs:
           VALIDATE_BASH_EXEC: false
 
           # Too many false positives.
-          # Can't figure out how to override config.
           # Time-consuming.
           VALIDATE_JSCPD: false
 

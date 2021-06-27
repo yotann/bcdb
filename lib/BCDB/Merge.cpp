@@ -1,5 +1,6 @@
 #include "Merge.h"
 
+#include <algorithm>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/STLExtras.h>
@@ -18,6 +19,7 @@
 #include <llvm/Transforms/IPO.h>
 #include <map>
 #include <set>
+#include <vector>
 
 #include "Util.h"
 #include "bcdb/BCDB.h"

@@ -103,11 +103,11 @@ static Name GetNameFromURI(llvm::StringRef URI) {
   if (!Parsed.Authority.empty() || !Parsed.Query.empty() ||
       !Parsed.Fragment.empty())
     report_fatal_error("invalid name URI");
-  if (Parsed.Scheme == "head")
+  if (Parsed.Scheme == "head") {
     return Head(Parsed.Path);
-  else if (Parsed.Scheme == "id")
+  } else if (Parsed.Scheme == "id") {
     return *CID::parse(Parsed.Path);
-  else if (Parsed.Scheme == "call") {
+  } else if (Parsed.Scheme == "call") {
     std::vector<CID> Args;
     if (Parsed.PathSegments.empty())
       report_fatal_error("invalid name URI");
@@ -115,8 +115,9 @@ static Name GetNameFromURI(llvm::StringRef URI) {
     for (const auto &Arg : llvm::ArrayRef(Parsed.PathSegments).drop_front())
       Args.emplace_back(*CID::parse(Arg));
     return Call(FuncName, Args);
-  } else
+  } else {
     report_fatal_error("invalid name URI");
+  }
 }
 
 // input options (XXX: must come after Name options)
@@ -332,17 +333,18 @@ static int RefsTo() {
     return 1;
   }
   for (const Name &Name : Db->list_names_using(*Ref)) {
-    if (auto head = std::get_if<Head>(&Name))
+    if (auto head = std::get_if<Head>(&Name)) {
       outs() << "head:" << head->Name << "\n";
-    else if (auto ParentRef = std::get_if<CID>(&Name))
+    } else if (auto ParentRef = std::get_if<CID>(&Name)) {
       outs() << "id:" << *ParentRef << "\n";
-    else if (auto call = std::get_if<Call>(&Name)) {
+    } else if (auto call = std::get_if<Call>(&Name)) {
       outs() << "call:" << call->Name;
       for (const auto &Arg : call->Args)
         outs() << "/" << Arg;
       outs() << "\n";
-    } else
+    } else {
       llvm_unreachable("impossible value for Name");
+    }
   }
   return 0;
 }

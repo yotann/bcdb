@@ -436,7 +436,7 @@ static int Candidates() {
 // smout collate: organize candidates by type and globals
 
 static Node GroupForType(Type *T) {
-  Node result = Node(node_list_arg, {(int)T->getTypeID()});
+  Node result = Node(node_list_arg, {static_cast<int>(T->getTypeID())});
   if (T->isIntegerTy()) {
     result.push_back(T->getIntegerBitWidth());
   } else if (T->isArrayTy()) {
@@ -885,8 +885,8 @@ static int Estimate() {
   for (unsigned i = 0; i < CallerVarNames.size(); i++) {
     if (!CallerUseful[i])
       continue;
-    outs() << " X" << CallerVarNames[i] << " SIZE " << -(int)CallerSavings[i]
-           << "\n";
+    outs() << " X" << CallerVarNames[i] << " SIZE "
+           << -static_cast<int>(CallerSavings[i]) << "\n";
     outs() << " X" << CallerVarNames[i] << " Z_NEEDED_BY_X" << CallerVarNames[i]
            << " -1\n";
     for (unsigned conflict_a : CallerNodeConflicts[i])

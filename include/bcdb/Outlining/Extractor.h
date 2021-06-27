@@ -4,6 +4,7 @@
 #include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/Pass.h>
+#include <string>
 #include <utility>
 #include <vector>
 

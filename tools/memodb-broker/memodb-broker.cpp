@@ -534,8 +534,9 @@ void Context::handleMessage() {
     if (Disconnecting) {
       send(Node(node_list_arg, {"memo01", 0x05, Id}));
       return Worker->changeState(Worker::DISCONNECTED);
-    } else
+    } else {
       return Worker->handleRequest(this);
+    }
 
   } else if (Operation == 0x04) { // worker HEARTBEAT
     if (Header.size() != 3 || Id.empty() || !Data.empty())
