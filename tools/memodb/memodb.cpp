@@ -130,9 +130,9 @@ static cl::opt<std::string> InputURI(cl::Positional, cl::desc("<input URI>"),
 static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   ExitOnError Err("value read: ");
   std::unique_ptr<MemoryBuffer> Buffer;
-  if (URI == "-")
+  if (URI == "-") {
     Buffer = Err(errorOrToExpected(MemoryBuffer::getSTDIN()));
-  else if (llvm::StringRef(URI).startswith("file:")) {
+  } else if (llvm::StringRef(URI).startswith("file:")) {
     ParsedURI Parsed(URI);
     if (!Parsed.Authority.empty() || !Parsed.Query.empty() ||
         !Parsed.Fragment.empty())
