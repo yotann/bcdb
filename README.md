@@ -1,6 +1,7 @@
 # The Bitcode Database _(bcdb)_
 
 [![Tests](https://github.com/yotann/bcdb-private/actions/workflows/tests.yml/badge.svg)](https://github.com/yotann/bcdb-private/actions/workflows/tests.yml)
+[![Lint](https://github.com/yotann/bcdb-private/actions/workflows/lint.yml/badge.svg)](https://github.com/yotann/bcdb-private/actions/workflows/lint.yml)
 [![Cachix cache](https://img.shields.io/badge/cachix-bcdb-blue.svg)](https://bcdb.cachix.org)
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
 
