@@ -65,7 +65,7 @@ public:
     url.reset(result);
     return *this;
   }
-  explicit operator bool() const { return bool(url); }
+  explicit operator bool() const { return static_cast<bool>(url); }
 
   static llvm::Expected<URL> parse(llvm::StringRef str) {
     nng_url *result;
