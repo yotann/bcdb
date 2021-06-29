@@ -10,3 +10,5 @@ add_llvm_unittest(MemoDBTests
 target_link_libraries(MemoDBTests PRIVATE
   MemoDB
 )
+
+add_subdirectory(NNG)
