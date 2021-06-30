@@ -33,10 +33,4 @@ TEST(URL, Parse) {
   EXPECT_EQ(url->getReqURI(), "/path?query#fragment");
 }
 
-TEST(URL, ParseFail) {
-  auto url = nng::URL::parse("scheme://hostname/%FF");
-  EXPECT_THAT_EXPECTED(
-      url, llvm::FailedWithMessage("nng_url_parse: Invalid argument"));
-}
-
 } // namespace
