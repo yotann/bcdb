@@ -6,7 +6,9 @@
 // exceptions disabled, as some of the official builds do.
 
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/Twine.h>
 #include <llvm/Support/Error.h>
 #include <memory>
 #include <nng/nng.h>
@@ -49,6 +51,10 @@ namespace detail {
 
 struct HTTPHandlerDeleter {
   void operator()(nng_http_handler *handler) { nng_http_handler_free(handler); }
+};
+
+struct HTTPResponseDeleter {
+  void operator()(nng_http_res *res) { nng_http_res_free(res); }
 };
 
 struct HTTPServerDeleter {
@@ -123,6 +129,27 @@ public:
   llvm::StringRef getReqURI() const { return url->u_requri; }
 };
 
+class AIOView {
+private:
+  nng_aio *aio = nullptr;
+
+public:
+  AIOView() = default;
+  explicit AIOView(nng_aio *aio) : aio(aio) {}
+  explicit operator bool() const { return aio; }
+  nng_aio *get() noexcept { return aio; }
+
+  void *getInput(unsigned int index) const {
+    return nng_aio_get_input(aio, index);
+  }
+
+  void setOutput(unsigned int index, void *result) {
+    nng_aio_set_output(aio, index, result);
+  }
+
+  void finish(int err) { nng_aio_finish(aio, err); }
+};
+
 class HTTPHandler {
 private:
   std::unique_ptr<nng_http_handler, detail::HTTPHandlerDeleter> handler;
@@ -136,6 +163,15 @@ public:
   HTTPHandler &operator=(const HTTPHandler &rhs) = delete;
   explicit operator bool() const { return static_cast<bool>(handler); }
   nng_http_handler *release() { return handler.release(); }
+
+  static llvm::Expected<HTTPHandler> alloc(llvm::StringRef path,
+                                           void (*func)(nng_aio *)) {
+    nng_http_handler *result;
+    int err = nng_http_handler_alloc(&result, path.str().c_str(), func);
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_handler_alloc");
+    return HTTPHandler(result);
+  }
 
   static llvm::Expected<HTTPHandler> allocRedirect(llvm::StringRef path,
                                                    uint16_t status,
@@ -159,6 +195,21 @@ public:
     if (err != 0)
       return llvm::make_error<ErrorInfo>(err, "nng_http_handler_alloc_static");
     return HTTPHandler(result);
+  }
+
+  llvm::Error setMethod(std::optional<llvm::StringRef> method) {
+    int err = nng_http_handler_set_method(
+        handler.get(), method ? method->str().c_str() : nullptr);
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_handler_set_method");
+    return llvm::Error::success();
+  }
+
+  llvm::Error setTree() {
+    int err = nng_http_handler_set_tree(handler.get());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_handler_set_tree");
+    return llvm::Error::success();
   }
 };
 
@@ -203,7 +254,83 @@ public:
   }
 };
 
+class HTTPRequestView {
+private:
+  nng_http_req *req = nullptr;
+
+public:
+  HTTPRequestView() = default;
+  HTTPRequestView(nng_http_req *req) : req(req) {}
+  explicit operator bool() const { return req; }
+
+  llvm::StringRef getData() const {
+    void *body;
+    size_t size;
+    nng_http_req_get_data(req, &body, &size);
+    return llvm::StringRef(reinterpret_cast<const char *>(body), size);
+  }
+
+  std::optional<llvm::StringRef> getHeader(llvm::StringRef key) const {
+    auto result = nng_http_req_get_header(req, key.str().c_str());
+    if (!result)
+      return std::nullopt;
+    return result;
+  }
+
+  llvm::StringRef getMethod() const { return nng_http_req_get_method(req); }
+
+  llvm::StringRef getURI() const { return nng_http_req_get_uri(req); }
+};
+
+class HTTPResponse {
+private:
+  std::unique_ptr<nng_http_res, detail::HTTPResponseDeleter> res;
+
+public:
+  HTTPResponse() = default;
+  HTTPResponse(HTTPResponse &&rhs) noexcept = default;
+  HTTPResponse &operator=(HTTPResponse &&rhs) = default;
+  explicit HTTPResponse(nng_http_res *res) noexcept : res(res) {}
+  HTTPResponse(const HTTPResponse &rhs) = delete;
+  HTTPResponse &operator=(const HTTPResponse &rhs) = delete;
+  explicit operator bool() const { return static_cast<bool>(res); }
+  nng_http_res *release() { return res.release(); }
+
+  static llvm::Expected<HTTPResponse> alloc() {
+    nng_http_res *result;
+    int err = nng_http_res_alloc(&result);
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_res_alloc");
+    return HTTPResponse(result);
+  }
+
+  llvm::Error copyData(const llvm::Twine &body) {
+    llvm::SmallVector<char, 0> buffer;
+    auto body_str = body.toStringRef(buffer);
+    int err =
+        nng_http_res_copy_data(res.get(), body_str.data(), body_str.size());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_res_copy_data");
+    return llvm::Error::success();
+  }
+
+  llvm::Error setHeader(llvm::StringRef key, llvm::StringRef val) {
+    int err = nng_http_res_set_header(res.get(), key.str().c_str(),
+                                      val.str().c_str());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_res_set_header");
+    return llvm::Error::success();
+  }
+
+  llvm::Error setStatus(uint16_t status) {
+    int err = nng_http_res_set_status(res.get(), status);
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_res_set_status");
+    return llvm::Error::success();
+  }
+};
+
 }; // end namespace nng
 }; // end namespace memodb
 
-#endif // MEMODB_NNGMM_H
+#endif // MEMODB_NNG_H
