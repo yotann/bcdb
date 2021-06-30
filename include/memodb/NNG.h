@@ -10,6 +10,8 @@
 #include <llvm/Support/Error.h>
 #include <memory>
 #include <nng/nng.h>
+#include <nng/supplemental/http/http.h>
+#include <nng/supplemental/util/platform.h>
 #include <optional>
 
 namespace memodb {
@@ -41,10 +43,22 @@ private:
   const char *function_name;
 };
 
+inline void msleep(nng_duration msec) { nng_msleep(msec); }
+
 namespace detail {
+
+struct HTTPHandlerDeleter {
+  void operator()(nng_http_handler *handler) { nng_http_handler_free(handler); }
+};
+
+struct HTTPServerDeleter {
+  void operator()(nng_http_server *server) { nng_http_server_release(server); }
+};
+
 struct URLDeleter {
   void operator()(nng_url *url) { nng_url_free(url); }
 };
+
 }; // end namespace detail
 
 class URL {
@@ -66,6 +80,7 @@ public:
     return *this;
   }
   explicit operator bool() const { return static_cast<bool>(url); }
+  nng_url *get() const { return url.get(); }
 
   static llvm::Expected<URL> parse(llvm::StringRef str) {
     nng_url *result;
@@ -106,6 +121,86 @@ public:
   }
 
   llvm::StringRef getReqURI() const { return url->u_requri; }
+};
+
+class HTTPHandler {
+private:
+  std::unique_ptr<nng_http_handler, detail::HTTPHandlerDeleter> handler;
+
+public:
+  HTTPHandler() = default;
+  HTTPHandler(HTTPHandler &&rhs) noexcept = default;
+  HTTPHandler &operator=(HTTPHandler &&rhs) = default;
+  explicit HTTPHandler(nng_http_handler *handler) noexcept : handler(handler) {}
+  HTTPHandler(const HTTPHandler &rhs) = delete;
+  HTTPHandler &operator=(const HTTPHandler &rhs) = delete;
+  explicit operator bool() const { return static_cast<bool>(handler); }
+  nng_http_handler *release() { return handler.release(); }
+
+  static llvm::Expected<HTTPHandler> allocRedirect(llvm::StringRef path,
+                                                   uint16_t status,
+                                                   llvm::StringRef location) {
+    nng_http_handler *result;
+    int err = nng_http_handler_alloc_redirect(&result, path.str().c_str(),
+                                              status, location.str().c_str());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err,
+                                         "nng_http_handler_alloc_redirect");
+    return HTTPHandler(result);
+  }
+
+  static llvm::Expected<HTTPHandler> allocStatic(llvm::StringRef path,
+                                                 llvm::StringRef data,
+                                                 llvm::StringRef content_type) {
+    nng_http_handler *result;
+    int err =
+        nng_http_handler_alloc_static(&result, path.str().c_str(), data.data(),
+                                      data.size(), content_type.str().c_str());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_handler_alloc_static");
+    return HTTPHandler(result);
+  }
+};
+
+class HTTPServer {
+private:
+  std::unique_ptr<nng_http_server, detail::HTTPServerDeleter> server;
+
+public:
+  HTTPServer() = default;
+  HTTPServer(HTTPServer &&rhs) noexcept = default;
+  HTTPServer &operator=(HTTPServer &&rhs) = default;
+  explicit HTTPServer(nng_http_server *server) noexcept : server(server) {}
+  HTTPServer(const HTTPServer &rhs) = delete;
+  HTTPServer &operator=(const HTTPServer &rhs) = delete;
+  explicit operator bool() const { return static_cast<bool>(server); }
+
+  static llvm::Expected<HTTPServer> hold(const URL &url) {
+    nng_http_server *result;
+    int err = nng_http_server_hold(&result, url.get());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_server_hold");
+    return HTTPServer(result);
+  }
+
+  llvm::Error addHandler(HTTPHandler &&handler) {
+    int err = nng_http_server_add_handler(server.get(), handler.release());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_server_add_handler");
+    return llvm::Error::success();
+  }
+
+  llvm::Error start() {
+    int err = nng_http_server_start(server.get());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_server_start");
+    return llvm::Error::success();
+  }
+
+  void stop() {
+    // No return code.
+    nng_http_server_stop(server.get());
+  }
 };
 
 }; // end namespace nng
