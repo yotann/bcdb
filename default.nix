@@ -9,14 +9,6 @@ let
     # TODO: also prevent building test files
   });
 
-  # Alive2 needs a special build of LLVM main.
-  llvmAlive = pkgs.llvmPackages_12.libllvm.overrideAttrs (o: {
-    cmakeFlags = o.cmakeFlags ++ [
-      "-DLLVM_ENABLE_RTTI=ON"
-      "-DLLVM_ENABLE_EH=ON"
-    ];
-  });
-
   nng = pkgs.callPackage ./nix/nng {};
 
   coinutils = pkgs.callPackage ./nix/coinutils {};
@@ -41,11 +33,6 @@ in rec {
   bcdb-llvm12 = pkgs.callPackage ./nix/bcdb {
     inherit nng rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_12.libllvm;
-    clang = pkgs.clang_12;
-  };
-  bcdb-llvmAlive = pkgs.callPackage ./nix/bcdb {
-    inherit nng rocksdb;
-    llvm = debugLLVM llvmAlive;
     clang = pkgs.clang_12;
   };
 

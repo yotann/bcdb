@@ -15,7 +15,6 @@ jobs:
         - bcdb-llvm10
         - bcdb-llvm11
         - bcdb-llvm12
-        - bcdb-llvmAlive
         - bcdb-clang-sanitize
         - bcdb-sqlite-only
         - bcdb-without-nng
