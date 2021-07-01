@@ -428,12 +428,6 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::localescape:
     case Intrinsic::localrecover:
     case Intrinsic::ptr_annotation:
-#if LLVM_VERSION_MAJOR < 10
-    case Intrinsic::longjmp:
-    case Intrinsic::setjmp:
-    case Intrinsic::siglongjmp:
-    case Intrinsic::sigsetjmp:
-#endif
     case Intrinsic::sponentry:
     case Intrinsic::stackguard:
     case Intrinsic::stackprotector:

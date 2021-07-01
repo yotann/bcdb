@@ -52,22 +52,11 @@ bool CARStore::readBytes(llvm::MutableArrayRef<std::uint8_t> Buf,
   // We need to use pread() or equivalent because there may be multiple threads
   // accessing the CARStore at once.
   while (!Buf.empty()) {
-#if LLVM_VERSION_MAJOR >= 10
     llvm::ExitOnError Err("readNativeFileSlice: ");
     size_t RC = Err(llvm::sys::fs::readNativeFileSlice(
         FileHandle,
         llvm::MutableArrayRef(reinterpret_cast<char *>(Buf.data()), Buf.size()),
         *Pos));
-#elif defined(LLVM_ON_UNIX)
-    ssize_t RC = pread(FileHandle, Buf.data(), Buf.size(), *Pos);
-    if (RC == -1) {
-      if (errno == EAGAIN)
-        continue;
-      llvm::report_fatal_error("Error reading file");
-    }
-#else
-#error Function unimplemented for this version of LLVM
-#endif
     if (RC == 0)
       return false;
     Buf = Buf.drop_front(RC);

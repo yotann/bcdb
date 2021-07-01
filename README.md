@@ -67,8 +67,8 @@ make check
 ### Dependencies
 
 - C++ compiler with C++17 support.
-- [LLVM](https://llvm.org/) version 9 through 12 (development versions up to 13
-  may work, but this is not guaranteed)
+- [LLVM](https://llvm.org/) version 10 through 12 (development versions up to
+  13 may work, but this is not guaranteed)
   - When working on the BCDB code, you should make sure LLVM is built with
     assertions enabled.
   - LLVM's `FileCheck` and `not` programs must be installed as well. Some

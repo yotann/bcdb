@@ -15,11 +15,6 @@ let
   cgl = pkgs.callPackage ./nix/cgl { inherit coinutils; };
 
 in rec {
-  bcdb-llvm9 = pkgs.callPackage ./nix/bcdb {
-    inherit nng rocksdb;
-    llvm = debugLLVM pkgs.llvmPackages_9.libllvm;
-    clang = pkgs.clang_9;
-  };
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
     inherit nng rocksdb;
     llvm = debugLLVM pkgs.llvmPackages_10.libllvm;

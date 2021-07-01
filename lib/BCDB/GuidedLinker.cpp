@@ -14,6 +14,7 @@
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/SpecialCaseList.h>
+#include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/FunctionImport.h>
@@ -153,7 +154,8 @@ private:
 };
 
 GLMerger::GLMerger(BCDB &bcdb, bool enable_weak_module)
-    : Merger(bcdb), SymbolList(createSpecialCaseList(SpecialCaseFilename)) {
+    : Merger(bcdb), SymbolList(SpecialCaseList::createOrDie(
+                        SpecialCaseFilename, *llvm::vfs::getRealFileSystem())) {
   std::string Error;
   DefaultSymbolList =
       SpecialCaseList::create(LoadDefaultSymbolList().get(), Error);

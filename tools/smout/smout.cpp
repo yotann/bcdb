@@ -945,16 +945,10 @@ static Node evaluate_compiled(Store &db, const Node &func) {
   TargetLibraryInfoImpl TLII(Triple(M->getTargetTriple()));
   PM.add(new TargetLibraryInfoWrapperPass(TLII));
   LLVMTargetMachine &LLVMTM = static_cast<LLVMTargetMachine &>(*Target);
-#if LLVM_VERSION_MAJOR >= 10
   MachineModuleInfoWrapperPass *MMIWP =
       new MachineModuleInfoWrapperPass(&LLVMTM);
   bool error = Target->addPassesToEmitFile(PM, OS, nullptr, CGFT_ObjectFile,
                                            true, MMIWP);
-#else
-  MachineModuleInfo *MMI = new MachineModuleInfo(&LLVMTM);
-  bool error = Target->addPassesToEmitFile(
-      PM, OS, nullptr, TargetMachine::CGFT_ObjectFile, true, MMI);
-#endif
   if (error) {
     errs() << "can't compile to an object file\n";
     return 1;

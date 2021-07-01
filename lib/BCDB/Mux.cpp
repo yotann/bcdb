@@ -137,7 +137,7 @@ Constant *MuxMerger::HandleInitFini(Module &M, GlobalItem *GI) {
     ConstantInt *CI = cast<ConstantInt>(CS->getOperand(0));
     assert(CI->getZExtValue() == 65535);
     Constant *F =
-        cast<Constant>(stripPointerCastsAndAliases(CS->getOperand(1)));
+        cast<Constant>(CS->getOperand(1)->stripPointerCastsAndAliases());
     assert(isa<Function>(F));
     if (F->getType() != InitType)
       F = ConstantExpr::getPointerCast(F, InitType);

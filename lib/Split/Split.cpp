@@ -305,12 +305,6 @@ AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
       if (attr.isTypeAttribute()) {
         Type *Ty = attr.getValueAsType();
         if (Ty) {
-#if LLVM_VERSION_MAJOR <= 9
-          // LLVM bug: byval doesn't work properly with unnamed types.
-          if (StructType *ST = dyn_cast<StructType>(TypeMap.get(Ty)))
-            if (!ST->isLiteral())
-              ST->setName("s");
-#endif
           Attrs =
               Attrs.removeAttribute(DM.getContext(), i, attr.getKindAsEnum());
           Attrs = Attrs.addAttribute(DM.getContext(), i,
