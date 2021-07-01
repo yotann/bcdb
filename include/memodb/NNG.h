@@ -270,8 +270,10 @@ public:
     return llvm::StringRef(reinterpret_cast<const char *>(body), size);
   }
 
-  std::optional<llvm::StringRef> getHeader(llvm::StringRef key) const {
-    auto result = nng_http_req_get_header(req, key.str().c_str());
+  std::optional<llvm::StringRef> getHeader(llvm::Twine key) const {
+    llvm::SmallVector<char, 0> buffer;
+    auto key_str = key.toNullTerminatedStringRef(buffer);
+    auto result = nng_http_req_get_header(req, key_str.data());
     if (!result)
       return std::nullopt;
     return result;
@@ -304,6 +306,17 @@ public:
     return HTTPResponse(result);
   }
 
+  llvm::Error addHeader(llvm::Twine key, llvm::Twine val) {
+    llvm::SmallVector<char, 64> key_buffer, val_buffer;
+    auto key_str = key.toNullTerminatedStringRef(key_buffer);
+    auto val_str = val.toNullTerminatedStringRef(val_buffer);
+    int err =
+        nng_http_res_add_header(res.get(), key_str.data(), val_str.data());
+    if (err != 0)
+      return llvm::make_error<ErrorInfo>(err, "nng_http_res_add_header");
+    return llvm::Error::success();
+  }
+
   llvm::Error copyData(const llvm::Twine &body) {
     llvm::SmallVector<char, 0> buffer;
     auto body_str = body.toStringRef(buffer);
@@ -311,14 +324,6 @@ public:
         nng_http_res_copy_data(res.get(), body_str.data(), body_str.size());
     if (err != 0)
       return llvm::make_error<ErrorInfo>(err, "nng_http_res_copy_data");
-    return llvm::Error::success();
-  }
-
-  llvm::Error setHeader(llvm::StringRef key, llvm::StringRef val) {
-    int err = nng_http_res_set_header(res.get(), key.str().c_str(),
-                                      val.str().c_str());
-    if (err != 0)
-      return llvm::make_error<ErrorInfo>(err, "nng_http_res_set_header");
     return llvm::Error::success();
   }
 

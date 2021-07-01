@@ -8,6 +8,7 @@ add_llvm_library(MemoDB
   NNG.cpp
   Node.cpp
   RocksDB.cpp
+  Server.cpp
   SQLite.cpp
   Store.cpp
   Support.cpp
