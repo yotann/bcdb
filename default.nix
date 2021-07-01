@@ -46,8 +46,7 @@ in rec {
 
   bcdb = bcdb-llvm12;
 
-  bcdb-sqlite-only = bcdb.override { rocksdb = null; };
-  bcdb-without-nng = bcdb.override { nng = null; };
+  bcdb-without-optional-deps = bcdb.override { nng = null; rocksdb = null; };
 
   rocksdb = pkgs.rocksdb.overrideAttrs (o: {
     version = "6.20.3";
