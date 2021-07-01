@@ -68,10 +68,11 @@ static void respondWithNode(const Request &request, Response &response,
         reinterpret_cast<const char *>(buffer.data()), buffer.size()));
   } else {
     std::string buffer;
-    llvm::raw_string_ostream(buffer) << node << "\n";
+    llvm::raw_string_ostream stream(buffer);
+    stream << node << "\n";
     response.sendStatus(200);
     response.sendHeader("Content-Type", "application/json");
-    response.sendBody(buffer);
+    response.sendBody(stream.str());
   }
 }
 
