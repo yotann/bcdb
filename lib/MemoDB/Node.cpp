@@ -73,7 +73,7 @@ static void writeJSON(llvm::json::OStream &os, const Node &value) {
   case Kind::Link:
     os.objectBegin();
     os.attributeBegin("cid");
-    os.value(llvm::json::Value(value.as<CID>().asString(Multibase::base64pad)));
+    os.value(llvm::json::Value(value.as<CID>().asString(Multibase::base64url)));
     os.attributeEnd();
     os.objectEnd();
     break;
@@ -449,8 +449,8 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
         return Node(*Multibase::base64pad.decodeWithoutPrefix(*base64));
       }
       if (auto cid = outer.getString("cid")) {
-        if (!cid->startswith("M"))
-          llvm::report_fatal_error("JSON CIDs must be base64pad");
+        if (!cid->startswith("u"))
+          llvm::report_fatal_error("JSON CIDs must be base64url");
         return Node(*CID::parse(*cid));
       }
       if (auto inner = outer.getObject("map")) {

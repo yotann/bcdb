@@ -2,7 +2,7 @@
 ; HEADS: head:-
 
 ; RUN: memodb put -store car:%p/Inputs/bitcode.car head:- | FileCheck --check-prefix=HEAD %s
-; HEAD: id:bafy2bzacedbzrazeaxz4rz2uviwqnyi6nvtcpjkrc4aqrvtc5rz3xkkuembtg
+; HEAD: id:uAXGg5AIgw5iDJAXzyOdUqi0G4R5tZielURcBCNZi7HO7qVQjAzM
 
 ; RUN: memodb export -store car:%p/Inputs/bitcode.car > %t.car
 ; RUN: diff %t.car %p/Outputs/bitcode.car

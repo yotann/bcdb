@@ -12,7 +12,7 @@ namespace {
 llvm::cl::opt<std::string>
     MultibaseOption("cid-base", llvm::cl::Optional,
                     llvm::cl::desc("Multibase encoding used for CIDs"),
-                    llvm::cl::init("base32"));
+                    llvm::cl::init("base64url"));
 } // end anonymous namespace
 
 static void writeVarInt(llvm::SmallVectorImpl<std::uint8_t> &Bytes,
@@ -146,7 +146,7 @@ std::string CID::asString() const {
   auto Base = Multibase::findByName(MultibaseOption);
   if (Base)
     return asString(*Base);
-  return asString(Multibase::base32);
+  return asString(Multibase::base64url);
 }
 
 CID::operator std::string() const { return asString(); }

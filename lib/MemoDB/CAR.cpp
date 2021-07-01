@@ -13,6 +13,8 @@
 #include <system_error>
 #include <unistd.h>
 
+#include "memodb/Multibase.h"
+
 using namespace memodb;
 
 namespace {
@@ -189,14 +191,19 @@ llvm::Optional<memodb::CID> CARStore::resolveOptional(const Name &Name) {
     const Node &AllCalls = Root["calls"].at_or_null(call->Name);
     if (AllCalls.is_null())
       return {};
-    std::string Key;
-    for (const CID &Arg : call->Args)
-      Key += std::string(Arg) + "/";
-    Key.pop_back();
-    const Node &Value = AllCalls.at_or_null(Key);
-    if (Value.is_null())
+    const Node *Value = nullptr;
+    Multibase::eachBase([&](const Multibase &multibase) {
+      std::string Key;
+      for (const CID &Arg : call->Args)
+        Key += Arg.asString(multibase) + "/";
+      Key.pop_back();
+      const Node &v = AllCalls.at_or_null(Key);
+      if (!v.is_null())
+        Value = &v;
+    });
+    if (!Value)
       return {};
-    return Value["result"].as<CID>();
+    return (*Value)["result"].as<CID>();
   } else {
     llvm_unreachable("impossible Name type");
   }

@@ -45,24 +45,14 @@ public:
   // Call a function for each available multibase.
   static void eachBase(std::function<void(const Multibase &)> func);
 
-  static const Multibase &base2;
-  static const Multibase &base8;
   static const Multibase &base16;
   static const Multibase &base16upper;
-  static const Multibase &base32hex;
-  static const Multibase &base32hexupper;
-  static const Multibase &base32hexpad;
-  static const Multibase &base32hexpadupper;
   static const Multibase &base32;
   static const Multibase &base32upper;
-  static const Multibase &base32pad;
-  static const Multibase &base32padupper;
-  static const Multibase &base32z;
   static const Multibase &base64;
   static const Multibase &base64pad;
   static const Multibase &base64url;
   static const Multibase &base64urlpad;
-  static const Multibase &proquint;
 };
 
 } // namespace memodb

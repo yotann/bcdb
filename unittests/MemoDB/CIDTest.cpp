@@ -132,14 +132,6 @@ TEST(CIDTest, FromInvalidString) {
   EXPECT_EQ(CID::parse("@"), std::nullopt);
 }
 
-TEST(CIDTest, to_base2) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base2);
-  };
-  EXPECT_EQ("000000001010101010000000000000000", to({}));
-  EXPECT_EQ("00000000101010101000000000000000111111111", to({0xff}));
-}
-
 TEST(CIDTest, from_base16) {
   EXPECT_EQ(CID::parse("f01550000"), identityCID({}));
   EXPECT_EQ(CID::parse("f0155000100"), identityCID({0x00}));
@@ -188,70 +180,6 @@ TEST(CIDTest, to_base16upper) {
   EXPECT_EQ("F015500020000", to({0x00, 0x00}));
   EXPECT_EQ("F015500080123456789ABCDEF",
             to({0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}));
-}
-
-TEST(CIDTest, to_base32hex) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base32hex);
-  };
-  EXPECT_EQ("v05ag000", to({}));
-  EXPECT_EQ("v05ag0080", to({0x00}));
-  EXPECT_EQ("v05ag00g000", to({0x00, 0x00}));
-  EXPECT_EQ("v05ag00o00000", to({0x00, 0x00, 0x00}));
-  EXPECT_EQ("v05ag010000000", to({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ("v05ag01800000000", to({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(
-      "v05ag05fv0123456789abcdefghijklmnopqrstuv",
-      to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
-          0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-}
-
-TEST(CIDTest, to_base32hexupper) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base32hexupper);
-  };
-  EXPECT_EQ("V05AG000", to({}));
-  EXPECT_EQ("V05AG0080", to({0x00}));
-  EXPECT_EQ("V05AG00G000", to({0x00, 0x00}));
-  EXPECT_EQ("V05AG00O00000", to({0x00, 0x00, 0x00}));
-  EXPECT_EQ("V05AG010000000", to({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ("V05AG01800000000", to({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(
-      "V05AG05FV0123456789ABCDEFGHIJKLMNOPQRSTUV",
-      to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
-          0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-}
-
-TEST(CIDTest, to_base32hexpad) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base32hexpad);
-  };
-  EXPECT_EQ("t05ag000=", to({}));
-  EXPECT_EQ("t05ag0080", to({0x00}));
-  EXPECT_EQ("t05ag00g000======", to({0x00, 0x00}));
-  EXPECT_EQ("t05ag00o00000====", to({0x00, 0x00, 0x00}));
-  EXPECT_EQ("t05ag010000000===", to({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ("t05ag01800000000=", to({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(
-      "t05ag05fv0123456789abcdefghijklmnopqrstuv",
-      to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
-          0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-}
-
-TEST(CIDTest, to_base32hexpadupper) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base32hexpadupper);
-  };
-  EXPECT_EQ("T05AG000=", to({}));
-  EXPECT_EQ("T05AG0080", to({0x00}));
-  EXPECT_EQ("T05AG00G000======", to({0x00, 0x00}));
-  EXPECT_EQ("T05AG00O00000====", to({0x00, 0x00, 0x00}));
-  EXPECT_EQ("T05AG010000000===", to({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ("T05AG01800000000=", to({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(
-      "T05AG05FV0123456789ABCDEFGHIJKLMNOPQRSTUV",
-      to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
-          0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
 
 TEST(CIDTest, from_base32) {
@@ -322,78 +250,6 @@ TEST(CIDTest, to_base32upper) {
   EXPECT_EQ("BAFKQABIAAAAAAAA", to({0x00, 0x00, 0x00, 0x00, 0x00}));
   EXPECT_EQ(
       "BAFKQAFP7ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
-      to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
-          0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-}
-
-TEST(CIDTest, from_base32pad) {
-  EXPECT_EQ(CID::parse("cafkqaaa="), identityCID({}));
-  EXPECT_EQ(CID::parse("cafkqaaia"), identityCID({0x00}));
-  EXPECT_EQ(CID::parse("cafkqaaqaaa======"), identityCID({0x00, 0x00}));
-  EXPECT_EQ(CID::parse("cafkqaayaaaaa===="), identityCID({0x00, 0x00, 0x00}));
-  EXPECT_EQ(CID::parse("cafkqabaaaaaaa==="),
-            identityCID({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(CID::parse("cafkqabiaaaaaaaa="),
-            identityCID({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(CID::parse("cafkqafp7abcdefghijklmnopqrstuvwxyz234567"),
-            identityCID({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42,
-                         0x54, 0xb6, 0x35, 0xcf, 0x84, 0x65, 0x3a,
-                         0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-
-  EXPECT_EQ(CID::parse("c"), std::nullopt);
-  EXPECT_EQ(CID::parse("cafkqaaa"), std::nullopt);
-  EXPECT_EQ(CID::parse("cafkqaaia========"), std::nullopt);
-  EXPECT_EQ(CID::parse("cafkqabiaaaaaaa=a"), std::nullopt);
-}
-
-TEST(CIDTest, to_base32pad) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base32pad);
-  };
-  EXPECT_EQ("cafkqaaa=", to({}));
-  EXPECT_EQ("cafkqaaia", to({0x00}));
-  EXPECT_EQ("cafkqaaqaaa======", to({0x00, 0x00}));
-  EXPECT_EQ("cafkqaayaaaaa====", to({0x00, 0x00, 0x00}));
-  EXPECT_EQ("cafkqabaaaaaaa===", to({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ("cafkqabiaaaaaaaa=", to({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(
-      "cafkqafp7abcdefghijklmnopqrstuvwxyz234567",
-      to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
-          0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-}
-
-TEST(CIDTest, from_base32padupper) {
-  EXPECT_EQ(CID::parse("CAFKQAAA="), identityCID({}));
-  EXPECT_EQ(CID::parse("CAFKQAAIA"), identityCID({0x00}));
-  EXPECT_EQ(CID::parse("CAFKQAAQAAA======"), identityCID({0x00, 0x00}));
-  EXPECT_EQ(CID::parse("CAFKQAAYAAAAA===="), identityCID({0x00, 0x00, 0x00}));
-  EXPECT_EQ(CID::parse("CAFKQABAAAAAAA==="),
-            identityCID({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(CID::parse("CAFKQABIAAAAAAAA="),
-            identityCID({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(CID::parse("CAFKQAFP7ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"),
-            identityCID({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42,
-                         0x54, 0xb6, 0x35, 0xcf, 0x84, 0x65, 0x3a,
-                         0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
-
-  EXPECT_EQ(CID::parse("C"), std::nullopt);
-  EXPECT_EQ(CID::parse("CAFKQAAA"), std::nullopt);
-  EXPECT_EQ(CID::parse("CAFKQAAIA========"), std::nullopt);
-  EXPECT_EQ(CID::parse("CAFKQABIAAAAAAA=A"), std::nullopt);
-}
-
-TEST(CIDTest, to_base32padupper) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::base32padupper);
-  };
-  EXPECT_EQ("CAFKQAAA=", to({}));
-  EXPECT_EQ("CAFKQAAIA", to({0x00}));
-  EXPECT_EQ("CAFKQAAQAAA======", to({0x00, 0x00}));
-  EXPECT_EQ("CAFKQAAYAAAAA====", to({0x00, 0x00, 0x00}));
-  EXPECT_EQ("CAFKQABAAAAAAA===", to({0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ("CAFKQABIAAAAAAAA=", to({0x00, 0x00, 0x00, 0x00, 0x00}));
-  EXPECT_EQ(
-      "CAFKQAFP7ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
       to({0xff, 0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf,
           0x84, 0x65, 0x3a, 0x56, 0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf}));
 }
@@ -534,34 +390,6 @@ TEST(CIDTest, to_base64urlpad) {
                 0x61, 0x96, 0x9b, 0x71, 0xd7, 0x9f, 0x82, 0x18, 0xa3, 0x92,
                 0x59, 0xa7, 0xa2, 0x9a, 0xab, 0xb2, 0xdb, 0xaf, 0xc3, 0x1c,
                 0xb3, 0xd3, 0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf}));
-}
-
-TEST(CIDTest, from_proquint) {
-  EXPECT_EQ(CID::parse("pro-bajij-babad-zus"), identityCID({0xff}));
-  EXPECT_EQ(CID::parse("pro-bajij-babah-lusab-babad"),
-            identityCID({0x7f, 0x00, 0x00, 0x01}));
-  EXPECT_EQ(CID::parse("pro-bajij-babah-gutih-tugad"),
-            identityCID({0x3f, 0x54, 0xdc, 0xc1}));
-  EXPECT_EQ(CID::parse("pro-bajij-babar-badif-gohuj-kalim-nopur-sativ-zab"),
-            identityCID({0x00, 0x52, 0x39, 0x35, 0x61, 0xd8, 0x9a, 0xbb, 0xc3,
-                         0x5e, 0xf0}));
-
-  EXPECT_EQ(CID::parse("prq-bajij-babad-zus"), std::nullopt);
-  EXPECT_EQ(CID::parse("pro-bajij+babad-zus"), std::nullopt);
-  EXPECT_EQ(CID::parse("pro-bajij-aabad-zus"), std::nullopt);
-  EXPECT_EQ(CID::parse("pro-bajij-babad-zusa"), std::nullopt);
-}
-
-TEST(CIDTest, to_proquint) {
-  auto to = [](llvm::ArrayRef<std::uint8_t> Bytes) {
-    return identityCID(Bytes).asString(Multibase::proquint);
-  };
-  EXPECT_EQ("pro-bajij-babad-zus", to({0xff}));
-  EXPECT_EQ("pro-bajij-babah-lusab-babad", to({0x7f, 0x00, 0x00, 0x01}));
-  EXPECT_EQ("pro-bajij-babah-gutih-tugad", to({0x3f, 0x54, 0xdc, 0xc1}));
-  EXPECT_EQ(
-      "pro-bajij-babar-badif-gohuj-kalim-nopur-sativ-zab",
-      to({0x00, 0x52, 0x39, 0x35, 0x61, 0xd8, 0x9a, 0xbb, 0xc3, 0x5e, 0xf0}));
 }
 
 } // namespace

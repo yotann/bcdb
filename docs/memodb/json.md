@@ -37,7 +37,7 @@ Several other textual formats were considered and rejected:
   good way to encode CIDs or binary data.
 - CBOR's [Diagnostic Notation] or [Extended Diagnostic Notation] would work,
   but are not widely supported. They also format CIDs in an awkward way, using
-  `42(h'0001710001f6')` for the CID `bafyqaapw` for example.
+  `42(h'0001710001f6')` for the CID `uAXEAAfY` for example.
 
 
 ## Special JSON objects
@@ -53,7 +53,7 @@ For example, this MemoDB Node (in a made-up format):
 <!-- markdownlint-disable-next-line MD040 -->
 ```
 {
-  foo: CID(bafyqaapw),
+  foo: CID(uAXEAAfY),
   bar: 1.0,
   baz: bytes(0x55, 0xaa),
 }
@@ -64,7 +64,7 @@ would become this JSON:
 ```json
 {
   "map": {
-    "foo": {"cid": "MAXEAAfY="},
+    "foo": {"cid": "uAXEAAfY"},
     "bar": {"float": 1},
     "baz": {"base64": "Vao="}
   }
@@ -75,7 +75,7 @@ would become this JSON:
 
 Instead of using special maps to represent CIDs and byte strings, special
 arrays could have been used instead. For example, a CID would become `["cid",
-"bafyqaapw"]`, and an empty list would become `["list", []]`. This would be
+"uAXEAAfY"]`, and an empty list would become `["list", []]`. This would be
 pretty similar to the current solution overall, but indexing into the
 structures would be more confusing (`node.cid` is more clear than `node[1]`).
 
@@ -180,19 +180,24 @@ difficulties for clients that don't have a Multibase implementation available.
 ## CIDs
 
 ```json
-{"cid": "MAXEAAfY="}
+{"cid": "uAXEAAfY"}
 ```
 
 MemoDB CIDs are represented with a special single-element JSON object, with the
 name `"cid"` and a value which is a JSON string containing the string
-representation of the CID. Only the `base64pad` multibase may be used, so the
-string will always start with `M`.
+representation of the CID. Only the `base64url` multibase may be used, so the
+string will always start with `u`.
 
 #### Rationale
 
-Padded base64 is already used for byte strings, so it makes sense to reuse it
-for CIDs, so clients only need to support one binary-to-text encoding. Base64
-is also somewhat more efficient than base32.
+The `base64url` multibase is the default for MemoDB (see [MemoDB Data
+Model](./data-model.md)). It has the advantages of being efficient, and being
+suitable for use in URLs without any escaping. It might be nice to use
+`base64pad` instead, to match the representation of byte strings, but that
+would require CIDs to be reencoded or escaped when used in URLs, which would be
+inconvenient for debugging. On the rare occasions when it's necessary to decode
+a CID into binary, clients can easily convert the `base64url` CIDs into
+`base64pad`.
 
 The format could allow other multibases to be used, but that would create
 difficulties for clients that don't have a Multibase implementation available.

@@ -114,28 +114,48 @@ Depending on the format, the `0x00` multibase prefix may or may not be present;
 the [DAG-CBOR] format requires it.
 
 In plaintext, such as the output of command-line tools, the CID is normally
-printed using the `base32` multibase, which has a prefix of `b`; note that this
-multibase uses base32 with lowercase letters and omits padding. In [MemoDB
-JSON], CIDs are written using the `base64pad` multibase, which has a prefix of
-`M`. Other multibases may also be supported.
+printed using the `base64url` multibase, which has a prefix of `u`; note that
+this multibase omits padding. This multibase is also the only one supported for
+CIDs in [MemoDB JSON]. In URLs and command-line arguments, the following
+multibases are supported: `base16`, `base16upper`, `base32`, `base32upper`,
+`base64`, `base64pad`, `base64url`, and `base64urlpad`.
 
 #### Rationale
 
+- `base16` is supported because it can be copied from or compared against hex
+  dumps.
+- `base32` is supported because it is the default for CIDv1 in `ipfs`, and it
+  is more efficient than `base16` without needing any punctuation characters
+  and without being case-sensitive.
+- `base16upper` and `base32upper` are supported so that `base16` and `base32`
+  CIDs still work after being converted to uppercase.
+- `base64pad` is supported because it is the most widely supported
+  binary-to-text encoding. Note that some useful implementations, like Python's
+  `base64` module and the Busybox/Coreutils `base64` command, require padding.
+- `base64url` is supported because it is one of the most efficient multibases,
+  and it doesn't need to be escaped in URLs or command-line arguments. (The
+  first character is always `u`, so it can't be confused for a command-line
+  option.)
+- `base64` and `base64urlpad` are supported to round out the variations of
+  Base64.
+- `identity` is NOT supported in text formats because it's byte-based, not
+  text-based.
+- `base58btc` and `base58flickr` are NOT supported because they are more
+  complicated to encode and decode, and offer limited advantages over `base32`
+  and `base64url`.
+- `base32hex` and `base32pad` and their variants are NOT supported because they
+  offer limited advantages over `base32`.
+- Other Multibases are NOT supported because they are niche formats with no
+  clear use in the MemoDB context.
+
 Outside the MemoDB core, CIDs will usually be treated as opaque byte strings or
-text strings, so the exact encoding isn't important. However, it's occasionally
-useful to use other bases (such as `base16` when copying a CID from a hex
-dump).
+text strings, so being able to decode the multibase isn't usually important.
+The default multibase is `base64url` because:
 
-Base32 has several advantages that justify making it the default for textual
-CIDs:
-
-- It is more efficient than base16 and lower bases.
-- It avoids punctuation, unlike base64 and higher bases, making it easier to
-  select in terminals and reducing the amount of escaping necessary when
-  wrapping it in other formats, like filenames, URIs, and command-line
-  arguments.
-- It is simpler to encode and decode than non-power-of-two bases, like base58.
-- It is the default for CIDv1 in `ipfs`.
+- It is the most efficient Multibase (tied with `base64`).
+- It doesn't require escaping when used in URLs or command-line arguments.
+- If necessary, it can be decoded with a standard Base64 decoder after
+  adding padding and replacing `-` and `_` with `+` and `/`.
 
 ### CID version
 

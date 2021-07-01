@@ -1,9 +1,9 @@
 ; RUN: rm -rf %t
 ; RUN: memodb init -store rocksdb:%t
 
-; RUN: memodb set -store rocksdb:%t call:primes/bafyqaaif id:bafyqabufaibqkbyl
-; RUN: memodb set -store rocksdb:%t call:primes/bafyqaaig id:bafyqab4gaibqkbylbu
-; RUN: memodb set -store rocksdb:%t call:add/bafyqaaic/bafyqaaic id:bafyqaaie
+; RUN: memodb set -store rocksdb:%t call:primes/uAXEAAQU id:uAXEABoUCAwUHCw
+; RUN: memodb set -store rocksdb:%t call:primes/uAXEAAQY id:uAXEAB4YCAwUHCw0
+; RUN: memodb set -store rocksdb:%t call:add/uAXEAAQI/uAXEAAQI id:uAXEAAQQ
 
 ; RUN: memodb export -store rocksdb:%t > %t.car
 ; RUN: diff %t.car %p/Outputs/export-call.car
