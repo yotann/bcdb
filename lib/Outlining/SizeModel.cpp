@@ -234,6 +234,7 @@ SizeModelResults::SizeModelResults(Module &m) : m(m) {
   std::vector<unsigned> sizes;
   std::unique_ptr<MCStreamer> asm_streamer(
       new SizingStreamer(sizes, *context, *mce, sti));
+  target->createNullTargetStreamer(*asm_streamer);
   FunctionPass *printer =
       target->createAsmPrinter(llvmtm, std::move(asm_streamer));
   if (!printer)
@@ -259,6 +260,12 @@ SizeModelResults::SizeModelResults(Module &m) : m(m) {
   //   heuristically find a good place to assign that size. (Maybe by tracking
   //   the next instruction that uses the output of the unassigned
   //   instruction?)
+  //
+  // - On wasm32 and riscv32, the size of the prologue instructions gets added
+  //   to the size of the first instruction.
+  //
+  // - On wasm32, the size of the end_function instruction gets added to the
+  //   size of the last instruction.
   for (auto &f : *cloned) {
     for (auto &bb : f) {
       for (auto &i : bb) {
