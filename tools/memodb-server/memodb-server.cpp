@@ -56,24 +56,25 @@ namespace {
 struct NNGResponse : public Response {
   nng::HTTPResponse res;
 
-  NNGResponse() {
+  NNGResponse(const Request &request) : Response(request) {
     llvm::ExitOnError Err("memodb-server NNGResponse: ");
     res = Err(nng::HTTPResponse::alloc());
   }
 
   ~NNGResponse() override {}
 
-  void sendStatus(std::uint16_t status) override {
+  void sendStatusImpl(std::uint16_t status) override {
     llvm::ExitOnError Err("memodb-server sendStatus: ");
     Err(res.setStatus(status));
   }
 
-  void sendHeader(const llvm::Twine &key, const llvm::Twine &value) override {
+  void sendHeaderImpl(const llvm::Twine &key,
+                      const llvm::Twine &value) override {
     llvm::ExitOnError Err("memodb-server sendHeader: ");
     Err(res.addHeader(key, value));
   }
 
-  void sendBody(const llvm::Twine &body) override {
+  void sendBodyImpl(const llvm::Twine &body) override {
     llvm::ExitOnError Err("memodb-server sendBody: ");
     Err(res.copyData(body));
   }
@@ -89,7 +90,7 @@ static void httpHandler(nng_aio *raw_aio) {
   nng::HTTPRequestView nng_req(
       reinterpret_cast<nng_http_req *>(aio.getInput(0)));
   NNGRequest req(nng_req);
-  NNGResponse res;
+  NNGResponse res(req);
 
   g_server->handleRequest(req, res);
 
