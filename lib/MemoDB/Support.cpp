@@ -89,6 +89,8 @@ ParsedURI::ParsedURI(llvm::StringRef URI) {
   Fragment = percentDecode(FragmentRef);
 
   llvm::SmallVector<llvm::StringRef, 8> Segments;
+  if (PathRef.startswith("/"))
+    PathRef = PathRef.drop_front();
   PathRef.split(Segments, '/');
   for (const auto &Segment : Segments)
     PathSegments.emplace_back(percentDecode(Segment));

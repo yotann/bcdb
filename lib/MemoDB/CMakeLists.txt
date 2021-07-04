@@ -4,6 +4,7 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_library(MemoDB
   CAR.cpp
   CID.cpp
+  HTTP.cpp
   Multibase.cpp
   NNG.cpp
   Node.cpp

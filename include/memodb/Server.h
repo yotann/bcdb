@@ -1,57 +1,69 @@
 #ifndef MEMODB_SERVER_H
 #define MEMODB_SERVER_H
 
-#include <cstdint>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <optional>
 
+#include "CID.h"
 #include "Node.h"
 #include "Store.h"
+#include "Support.h"
 
 namespace memodb {
 
+// A single request for the MemoDB server to respond to.
+// This class is intended to work not only for HTTP requests but also CoAP
+// requests, if a suitable subclass is implemented.
 class Request {
 public:
+  enum class Method {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+  };
+
+  enum class ContentType {
+    OctetStream,
+    JSON,
+    CBOR,
+    HTML,
+    ProblemJSON,
+  };
+
+  enum class Status {
+    BadRequest = 400,
+    NotFound = 404,
+    MethodNotAllowed = 405,
+    NotImplemented = 501,
+  };
+
+  enum class CacheControl {
+    Mutable,
+    Immutable,
+  };
+
   virtual ~Request() {}
-  virtual llvm::StringRef getMethod() const = 0;
-  virtual llvm::StringRef getURI() const = 0;
-  virtual std::optional<llvm::StringRef>
-  getHeader(const llvm::Twine &key) const = 0;
+  virtual std::optional<Method> getMethod() const = 0;
+  virtual std::optional<ParsedURI> getURI() const = 0;
+  virtual unsigned getAcceptQuality(ContentType content_type) const = 0;
 
-  unsigned getAcceptQ(llvm::StringRef content_type) const;
-};
+  virtual void sendContentNode(const Node &node,
+                               const std::optional<CID> &cid_if_known,
+                               CacheControl cache_control) = 0;
 
-class Response {
-public:
-  Response(const Request &request) : request(request) {}
-  virtual ~Response() {}
-  void sendStatus(std::uint16_t status);
-  void sendHeader(const llvm::Twine &key, const llvm::Twine &value);
-  void sendBody(const llvm::Twine &body);
-  void sendError(std::uint16_t status, std::optional<llvm::StringRef> type,
-                 llvm::StringRef title,
-                 const std::optional<llvm::Twine> &detail);
-  void sendNode(const Node &node, const CID &cid);
+  virtual void sendError(Status status, std::optional<llvm::StringRef> type,
+                         llvm::StringRef title,
+                         const std::optional<llvm::Twine> &detail) = 0;
 
-protected:
-  virtual void sendStatusImpl(std::uint16_t status) = 0;
-  virtual void sendHeaderImpl(const llvm::Twine &key,
-                              const llvm::Twine &value) = 0;
-
-  // If request.getMethod() == "HEAD", this should just set Content-Length
-  // without sending anything.
-  virtual void sendBodyImpl(const llvm::Twine &body) = 0;
-
-  const Request &request;
-  bool status_sent = false;
-  bool body_sent = false;
+  virtual void sendMethodNotAllowed(llvm::StringRef allow) = 0;
 };
 
 class Server {
 public:
   Server(Store &store);
-  void handleRequest(const Request &request, Response &response);
+  void handleRequest(Request &request);
 
 private:
   Store &store;

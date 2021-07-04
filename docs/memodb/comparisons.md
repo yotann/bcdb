@@ -11,7 +11,7 @@
 - ✔️ Allows simultaneous access from multiple processes.
 - ✔️ Efficient even for short-lived processes.
 - ✔️ Supports transactions to ensure consistency.
-- ❌ No compression (either for records, or for chunks containing multiple records).
+- :x: No compression (either for records, or for chunks containing multiple records).
 - :x: Not as fast as RocksDB.
 - :x: Have to periodically flush the write-ahead log, which may cause stalls.
 
@@ -26,6 +26,74 @@
 - :x: Not efficient for short-lived processes.
 - :x: Somewhat complicated to tune (apparently Facebook uses machine learning internally to tune RocksDB).
 - :x: Not widely available.
+
+## Networking protocols
+
+### HTTP/1
+
+- ✔️ Ubiquitous.
+- ✔️ Proxies can add caching, authentication, encryption, etc.
+- ✔️ Content type negotiation.
+- ✔️ Optional compression.
+- ✔️ Optional encryption.
+- ✔️ Optional authentication.
+- ✔️ Range requests.
+- :x: Text-based format is inefficient.
+
+### HTTP/2
+
+- ✔️ Same features as HTTP/1.
+- ✔️ More efficient.
+- :x: Complicated.
+- :x: Few server implementations.
+- :x: Many REST clients lack support.
+
+### HTTP/3
+
+- ✔️ Same features as HTTP/1 and HTTP/2.
+- :x: Not yet standardized.
+- :x: Few server implementations.
+- :x: Many REST clients lack support.
+
+### CoAP
+
+[Constrained Application
+Protocol](https://en.wikipedia.org/wiki/Constrained_Application_Protocol). The
+MemoDB REST API is designed to use a CoAP-compatible subset of HTTP, in case we
+ever want to implement it in the future. (For instance, redirects are never
+used.)
+
+- ✔️ Lightweight and efficient.
+- ✔️ Removes unnecessary featuers from HTTP.
+- ✔️ Proxies can add caching, authentication, encryption, etc.
+- ✔️ Content type negotiation.
+- ✔️ Optional compression.
+- ✔️ Optional encryption.
+- ✔️ Optional authentication.
+- ✔️ Range requests.
+- ✔️ Supports UDP, TCP, and WebSockets.
+- :x: Limited support.
+
+### MQTT
+
+- ✔️ Lightweight and efficient.
+- ✔️ Fairly widely supported.
+- ✔️ Optional encryption.
+- ✔️ Optional authentication.
+- :x: No standardized support for content type negotiation, compression, range
+  requests, etc.
+- :x: Mainly designed for publish/subscribe, but MemoDB is mainly
+  request/reply.
+  - MQTT 5 adds some support for request/reply, but many client libraries don't
+    support it yet.
+
+### Minimalist request reply (NNG, ZeroMQ, custom)
+
+- ✔️ Lightweight and efficient.
+- :x: No standardized support for caching proxies, encryption, or
+  authentication.
+- :x: No standardized support for content type negotiation, compression, range
+  requests, etc.
 
 ## Networking server libraries
 
@@ -67,14 +135,3 @@ This rules out a lot of interesting libraries like Boost.Beast.
 - :x: No support for Unix sockets.
 - :x: No support for HTTP/2 or minimalist request/reply protocols.
 - :x: Not widely available.
-
-### Mosquitto
-
-Mosquitto actually implements MQTT, not HTTP. MQTT is a lightweight publish/subscribe protocol;
-version 5 adds some support for request/reply.
-But a lot of MQTT libraries don't support version 5 yet.
-
-Most MemoDB traffic is request/reply, so MQTT isn't a great fit.
-It also doesn't have built-in support for things like compression,
-content type negotiation, or range queries, so those things would
-need to be reimplemented by every client.
