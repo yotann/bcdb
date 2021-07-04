@@ -46,7 +46,7 @@ public:
 
   virtual ~Request() {}
   virtual std::optional<Method> getMethod() const = 0;
-  virtual std::optional<ParsedURI> getURI() const = 0;
+  virtual std::optional<URI> getURI() const = 0;
   virtual unsigned getAcceptQuality(ContentType content_type) const = 0;
 
   virtual void sendContentNode(const Node &node,

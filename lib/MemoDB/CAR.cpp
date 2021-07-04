@@ -113,13 +113,13 @@ Node CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
 
 void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
   llvm::ExitOnError Err("CARStore::open: ");
-  ParsedURI Parsed(uri);
-  if (Parsed.Scheme != "car" || !Parsed.Authority.empty() ||
-      !Parsed.Query.empty() || !Parsed.Fragment.empty())
+  auto Parsed = URI::parse(uri);
+  if (!Parsed || Parsed->scheme != "car" || !Parsed->authority.empty() ||
+      !Parsed->query_params.empty() || !Parsed->fragment.empty())
     llvm::report_fatal_error("Unsupported CAR URI");
   FileHandle = Err(llvm::sys::fs::openNativeFile(
-      Parsed.Path, llvm::sys::fs::CD_OpenExisting, llvm::sys::fs::FA_Read,
-      llvm::sys::fs::OF_None));
+      *Parsed->getPathString(), llvm::sys::fs::CD_OpenExisting,
+      llvm::sys::fs::FA_Read, llvm::sys::fs::OF_None));
 
   std::uint64_t Pos = 0;
   auto HeaderSize = *readVarInt(&Pos);

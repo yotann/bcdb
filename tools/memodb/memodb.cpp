@@ -99,20 +99,20 @@ static cl::opt<std::string>
              cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
 
 static Name GetNameFromURI(llvm::StringRef URI) {
-  ParsedURI Parsed(URI);
-  if (!Parsed.Authority.empty() || !Parsed.Query.empty() ||
-      !Parsed.Fragment.empty())
+  auto Parsed = ::URI::parse(URI, /*allow_relative_path*/ true);
+  if (!Parsed || !Parsed->authority.empty() || !Parsed->query_params.empty() ||
+      !Parsed->fragment.empty())
     report_fatal_error("invalid name URI");
-  if (Parsed.Scheme == "head") {
-    return Head(Parsed.Path);
-  } else if (Parsed.Scheme == "id") {
-    return *CID::parse(Parsed.Path);
-  } else if (Parsed.Scheme == "call") {
+  if (Parsed->scheme == "head" && Parsed->path_segments.size() == 1) {
+    return Head(Parsed->path_segments[0]);
+  } else if (Parsed->scheme == "id" && Parsed->path_segments.size() == 1) {
+    return *CID::parse(Parsed->path_segments[0]);
+  } else if (Parsed->scheme == "call") {
     std::vector<CID> Args;
-    if (Parsed.PathSegments.empty())
+    if (Parsed->path_segments.empty())
       report_fatal_error("invalid name URI");
-    auto FuncName = Parsed.PathSegments.front();
-    for (const auto &Arg : llvm::ArrayRef(Parsed.PathSegments).drop_front())
+    auto FuncName = Parsed->path_segments.front();
+    for (const auto &Arg : llvm::ArrayRef(Parsed->path_segments).drop_front())
       Args.emplace_back(*CID::parse(Arg));
     return Call(FuncName, Args);
   } else {
@@ -133,11 +133,12 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   if (URI == "-") {
     Buffer = Err(errorOrToExpected(MemoryBuffer::getSTDIN()));
   } else if (llvm::StringRef(URI).startswith("file:")) {
-    ParsedURI Parsed(URI);
-    if (!Parsed.Authority.empty() || !Parsed.Query.empty() ||
-        !Parsed.Fragment.empty())
+    auto Parsed = ::URI::parse(URI);
+    if (!Parsed || !Parsed->authority.empty() ||
+        !Parsed->query_params.empty() || !Parsed->fragment.empty())
       report_fatal_error("invalid input URI");
-    Buffer = Err(errorOrToExpected(MemoryBuffer::getFile(Parsed.Path)));
+    Buffer =
+        Err(errorOrToExpected(MemoryBuffer::getFile(*Parsed->getPathString())));
   } else {
     Name Name = GetNameFromURI(URI);
     return Db.resolveOptional(Name);

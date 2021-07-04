@@ -170,9 +170,9 @@ std::string RocksDBStore::makeKeyForCall(const Call &Call) {
 }
 
 void RocksDBStore::open(llvm::StringRef uri, bool create_if_missing) {
-  ParsedURI Parsed(uri);
-  if (Parsed.Scheme != "rocksdb" || !Parsed.Authority.empty() ||
-      !Parsed.Query.empty() || !Parsed.Fragment.empty())
+  auto Parsed = URI::parse(uri);
+  if (!Parsed || Parsed->scheme != "rocksdb" || !Parsed->authority.empty() ||
+      !Parsed->query_params.empty() || !Parsed->fragment.empty())
     llvm::report_fatal_error("Unsupported RocksDB URI");
 
   rocksdb::ColumnFamilyOptions BaseCFOptions;
@@ -262,7 +262,8 @@ void RocksDBStore::open(llvm::StringRef uri, bool create_if_missing) {
   std::vector<rocksdb::ColumnFamilyHandle *> FamilyHandles;
   rocksdb::OptimisticTransactionDB *TmpDB;
   checkStatus(rocksdb::OptimisticTransactionDB::Open(
-      DBOptions, {}, Parsed.Path, FamilyDescs, &FamilyHandles, &TmpDB));
+      DBOptions, {}, *Parsed->getPathString(), FamilyDescs, &FamilyHandles,
+      &TmpDB));
   DB.reset(TmpDB);
 
   assert(FamilyHandles.size() == 5);

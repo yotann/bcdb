@@ -49,8 +49,8 @@ struct NNGRequest : public HTTPRequest {
 
   llvm::StringRef getMethodString() const override { return req.getMethod(); }
 
-  std::optional<ParsedURI> getURI() const override {
-    return ParsedURI(req.getURI());
+  std::optional<URI> getURI() const override {
+    return URI::parse(req.getURI());
   }
 
   std::optional<llvm::StringRef>

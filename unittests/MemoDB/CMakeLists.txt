@@ -4,7 +4,7 @@ add_llvm_unittest(MemoDBTests
   CIDTest.cpp
   JSONLoadTest.cpp
   JSONWriteTest.cpp
-  ParsedURITest.cpp
+  URITest.cpp
 )
 
 target_link_libraries(MemoDBTests PRIVATE

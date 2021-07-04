@@ -23,11 +23,11 @@ void Server::handleRequest(Request &request) {
                              "Bad Request", std::nullopt);
   auto uri = std::move(*uri_or_null);
 
-  if (uri.PathSegments.size() == 2 && uri.PathSegments[0] == "cid" &&
-      !uri.PathSegments[1].empty()) {
+  if (uri.path_segments.size() == 2 && uri.path_segments[0] == "cid" &&
+      !uri.path_segments[1].empty()) {
     if (request.getMethod() != Request::Method::GET)
       return request.sendMethodNotAllowed("GET, HEAD");
-    const auto &cid_str = uri.PathSegments[1];
+    const auto &cid_str = uri.path_segments[1];
     auto cid = CID::parse(cid_str);
     if (!cid)
       return request.sendError(Request::Status::BadRequest,
@@ -44,5 +44,5 @@ void Server::handleRequest(Request &request) {
   }
 
   return request.sendError(Request::Status::NotFound, std::nullopt, "Not Found",
-                           "Unknown path\"" + uri.Path + "\".");
+                           std::nullopt);
 }

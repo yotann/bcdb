@@ -4,6 +4,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
+#include <optional>
 #include <string>
 
 using namespace memodb;
@@ -44,54 +45,86 @@ std::string memodb::utf8ToByteString(llvm::StringRef Str) {
   return Result;
 }
 
-ParsedURI::ParsedURI(llvm::StringRef URI) {
-  llvm::StringRef AuthorityRef, PathRef, QueryRef, FragmentRef;
+std::optional<URI> URI::parse(llvm::StringRef str, bool allow_relative_path) {
+  URI uri;
+  llvm::StringRef authority_ref, path_ref, query_ref, fragment_ref;
 
-  if (URI.contains(':'))
-    std::tie(Scheme, URI) = URI.split(':');
-  if (URI.startswith("//")) {
-    size_t i = URI.find_first_of("/?#", 2);
+  if (str.contains(':'))
+    std::tie(uri.scheme, str) = str.split(':');
+  if (str.startswith("//")) {
+    size_t i = str.find_first_of("/?#", 2);
     if (i == llvm::StringRef::npos) {
-      AuthorityRef = URI.substr(2);
-      URI = "";
+      authority_ref = str.substr(2);
+      str = "";
     } else {
-      AuthorityRef = URI.substr(2, i - 2);
-      URI = URI.substr(i);
+      authority_ref = str.substr(2, i - 2);
+      str = str.substr(i);
     }
   }
-  std::tie(URI, FragmentRef) = URI.split('#');
-  std::tie(PathRef, QueryRef) = URI.split('?');
+  std::tie(str, fragment_ref) = str.split('#');
+  std::tie(path_ref, query_ref) = str.split('?');
 
-  auto percentDecode = [](llvm::StringRef Str) -> std::string {
-    if (!Str.contains('%'))
-      return Str.str();
-    std::string Result;
-    while (!Str.empty()) {
-      size_t i = Str.find('%');
-      Result.append(Str.take_front(i));
-      Str = Str.substr(i);
-      if (Str.empty())
+  bool percent_decoding_error = false;
+
+  auto percentDecode =
+      [&percent_decoding_error](llvm::StringRef str) -> std::string {
+    if (!str.contains('%'))
+      return str.str();
+    std::string result;
+    while (!str.empty()) {
+      size_t i = str.find('%');
+      result.append(str.take_front(i));
+      str = str.substr(i);
+      if (str.empty())
         break;
-      unsigned Code;
-      if (Str.size() >= 3 && !Str.substr(1, 2).getAsInteger(16, Code)) {
-        Result.push_back(static_cast<char>(Code));
-        Str = Str.substr(3);
+      unsigned code;
+      if (str.size() >= 3 && !str.substr(1, 2).getAsInteger(16, code)) {
+        result.push_back(static_cast<char>(code));
+        str = str.drop_front(3);
       } else {
-        llvm::report_fatal_error("invalid percent encoding in URI");
+        percent_decoding_error = true;
+        break;
       }
     }
-    return Result;
+    return result;
   };
 
-  Authority = percentDecode(AuthorityRef);
-  Path = percentDecode(PathRef);
-  Query = percentDecode(QueryRef);
-  Fragment = percentDecode(FragmentRef);
+  uri.authority = percentDecode(authority_ref);
+  uri.fragment = percentDecode(fragment_ref);
 
-  llvm::SmallVector<llvm::StringRef, 8> Segments;
-  if (PathRef.startswith("/"))
-    PathRef = PathRef.drop_front();
-  PathRef.split(Segments, '/');
-  for (const auto &Segment : Segments)
-    PathSegments.emplace_back(percentDecode(Segment));
+  if (!path_ref.empty()) {
+    if (!allow_relative_path) {
+      if (!path_ref.startswith("/"))
+        return std::nullopt;
+      path_ref = path_ref.drop_front();
+    }
+    llvm::SmallVector<llvm::StringRef, 8> segments;
+    path_ref.split(segments, '/');
+    for (const auto &segment : segments) {
+      if (segment == "." || segment == "..")
+        return std::nullopt;
+      uri.path_segments.emplace_back(percentDecode(segment));
+    }
+  }
+
+  if (!query_ref.empty()) {
+    llvm::SmallVector<llvm::StringRef, 8> params;
+    query_ref.split(params, '&');
+    for (const auto &param : params)
+      uri.query_params.emplace_back(percentDecode(param));
+  }
+
+  if (percent_decoding_error)
+    return std::nullopt;
+  return uri;
+}
+
+std::optional<std::string> URI::getPathString() const {
+  std::string result;
+  for (const auto &segment : path_segments) {
+    if (llvm::StringRef(segment).contains('/'))
+      return std::nullopt;
+    result += "/" + segment;
+  }
+  return result;
 }

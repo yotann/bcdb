@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -26,15 +27,20 @@ std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes);
 std::string bytesToUTF8(llvm::StringRef Bytes);
 std::string utf8ToByteString(llvm::StringRef Str);
 
-// Parse a generic URI into its components.
-struct ParsedURI {
+// A generic URI parsed into its components.
+struct URI {
 public:
-  ParsedURI(llvm::StringRef URI);
+  static std::optional<URI> parse(llvm::StringRef str,
+                                  bool allow_relative_path = false);
 
-  // If input is "x:/foo%2Fbar", Path will be "/foo/bar" and PathSegments will
-  // be ["", "foo%2Fbar"].
-  std::string Scheme, Authority, Path, Query, Fragment;
-  std::vector<std::string> PathSegments;
+  // Returns path_segments joined by "/", with an extra "/" in front.
+  // Return std::nullopt if any path segment contains a "/".
+  std::optional<std::string> getPathString() const;
+
+  // If input is "x:/y/foo%2Fbar", path_segments will be ["y", "foo/bar"].
+  std::string scheme, authority, fragment;
+  std::vector<std::string> path_segments;
+  std::vector<std::string> query_params;
 };
 
 } // end namespace memodb
