@@ -477,6 +477,12 @@ Node::saveAsIPLD(bool noIdentity) const {
     return {std::move(Ref), std::move(Bytes)};
 }
 
+static llvm::Error createInvalidJSONError(llvm::StringRef message) {
+  return llvm::createStringError(
+      std::make_error_code(std::errc::invalid_argument),
+      "Invalid MemoDB JSON: " + message);
+}
+
 static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
   switch (value.kind()) {
   case llvm::json::Value::Null:
@@ -504,12 +510,18 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
         return Node(*f);
       }
       if (auto base64 = outer.getString("base64")) {
-        return Node(*Multibase::base64pad.decodeWithoutPrefix(*base64));
+        auto bytes = Multibase::base64pad.decodeWithoutPrefix(*base64);
+        if (!bytes)
+          return createInvalidJSONError("Invalid base64");
+        return Node(std::move(*bytes));
       }
-      if (auto cid = outer.getString("cid")) {
-        if (!cid->startswith("u"))
-          llvm::report_fatal_error("JSON CIDs must be base64url");
-        return Node(*CID::parse(*cid));
+      if (auto cid_str = outer.getString("cid")) {
+        if (!cid_str->startswith("u"))
+          return createInvalidJSONError("JSON CIDs must be base64url");
+        auto cid_or_err = CID::parse(*cid_str);
+        if (!cid_or_err)
+          return createInvalidJSONError("Invalid or unsupported CID");
+        return Node(std::move(*cid_or_err));
       }
       if (auto inner = outer.getObject("map")) {
         Node result(node_map_arg);
@@ -522,7 +534,7 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
         return result;
       }
     }
-    llvm::report_fatal_error("invalid special JSON object");
+    return createInvalidJSONError("Invalid special JSON object");
   }
   default:
     llvm_unreachable("impossible JSON type");
