@@ -34,6 +34,20 @@ public:
   // size may be 0 if it is merged with another instruction during compilation.
   DenseMap<Instruction *, unsigned> instruction_sizes;
 
+  // The estimated size, in bytes, of a typical call instruction.
+  unsigned call_instruction_size;
+
+  // The estimated size, in bytes, of a minimal function with no callees. This
+  // includes things like the return instruction and the average size of
+  // padding between functions.
+  unsigned function_size_without_callees;
+
+  // The estimated size, in bytes, of a function that has one or more callees.
+  // In addition to function_size_without_callees, this includes things like
+  // frame pointer management instructions and exception handling frame data.
+  unsigned function_size_with_callees;
+
+private:
   Module &m;
 };
 

@@ -1,8 +1,10 @@
+; REQUIRES: llvm12
+
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -size-model -analyze %s | FileCheck %s
 
-target datalayout = "e-m:e-p:32:32-i64:64-n32-S128"
-target triple = "riscv32-unknown-unknown-elf"
+target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n64-S128"
+target triple = "riscv64-unknown-linux-gnu"
 
 ; CHECK: estimated call instruction size: 8 bytes
 ; CHECK: estimated function size without callees: 4 bytes
@@ -45,13 +47,13 @@ define i32 @collatz_len(i32 %0) {
   %12 = add i32 %11, 1
 ; CHECK-NEXT: %13 = {{.*}} ; 0 bytes
   %13 = lshr i32 %8, 1
-; CHECK-NEXT: %14 = {{.*}} ; 4 bytes
+; CHECK-NEXT: %14 = {{.*}} ; 8 bytes
   %14 = select i1 %10, i32 %13, i32 %12
-; CHECK-NEXT: %15 = {{.*}} ; 8 bytes
+; CHECK-NEXT: %15 = {{.*}} ; 4 bytes
   %15 = add i32 %7, 1
 ; CHECK-NEXT: %16 = {{.*}} ; 0 bytes
   %16 = icmp sgt i32 %14, 1
-; CHECK-NEXT: br i1 %16, {{.*}} ; 8 bytes
+; CHECK-NEXT: br i1 %16, {{.*}} ; 4 bytes
   br i1 %16, label %6, label %17
 
 ; CHECK: 17:

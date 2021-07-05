@@ -37,12 +37,14 @@ public:
   SizeModelWriter(const SizeModelResults *size_model)
       : size_model(size_model) {}
 
-  void emitInstructionAnnot(const Instruction *I,
-                            formatted_raw_ostream &os) override {
-    auto it = size_model->instruction_sizes.find(I);
-    if (it == size_model->instruction_sizes.end())
-      return;
-    os << formatv("; {0} bytes\n", it->second);
+  void printInfoComment(const Value &value,
+                        formatted_raw_ostream &os) override {
+    if (const Instruction *ins = dyn_cast<Instruction>(&value)) {
+      auto it = size_model->instruction_sizes.find(ins);
+      if (it == size_model->instruction_sizes.end())
+        return;
+      os.PadToColumn(60) << formatv("; {0} bytes", it->second);
+    }
   }
 };
 } // end anonymous namespace
@@ -277,9 +279,75 @@ SizeModelResults::SizeModelResults(Module &m) : m(m) {
       }
     }
   }
+
+  // TODO: take options that affect these sizes, like the code model, into
+  // account.
+  unsigned ret_size = 0;           // Return instruction size.
+  unsigned extra_func_size = 0;    // Extra bytes for each instruction.
+  unsigned eh_frame_size = 16;     // Most targets use .eh_frame.
+  unsigned fp_management_size = 0; // Frame pointer management instructions.
+  unsigned function_alignment = 0;
+  switch (target_machine->getTargetTriple().getArch()) {
+  case Triple::ArchType::arm:
+  case Triple::ArchType::armeb:
+    // Functions are aligned to 4 bytes, but that's almost always a no-op.
+    call_instruction_size = 4;
+    ret_size = 4;
+    eh_frame_size = 8; // uses .ARM.exidx, not .eh_frame
+    fp_management_size = 8;
+    break;
+  case Triple::ArchType::aarch64:
+  case Triple::ArchType::aarch64_be:
+    // Functions are aligned to 4 bytes, but that's almost always a no-op.
+    call_instruction_size = 4;
+    ret_size = 4;
+    fp_management_size = 8;
+    break;
+  case Triple::ArchType::riscv32:
+  case Triple::ArchType::riscv64:
+    // Functions are aligned to 4 bytes, but that's almost always a no-op.
+    call_instruction_size = 8;
+    ret_size = 4;
+    fp_management_size = 16;
+    break;
+  case Triple::ArchType::thumb:
+  case Triple::ArchType::thumbeb:
+    // Functions are aligned to 2 bytes, but that's almost always a no-op.
+    call_instruction_size = 4;
+    ret_size = 2;
+    eh_frame_size = 8; // uses .ARM.exidx, not .eh_frame
+    fp_management_size = 4;
+    break;
+  case Triple::ArchType::wasm32:
+  case Triple::ArchType::wasm64:
+    call_instruction_size = 6;
+    ret_size = 1;
+    extra_func_size = 2; // Estimate 2 bytes function type in the Function Section.
+    extra_func_size += 1; // Estimate 1 byte code size in the Code Section.
+    eh_frame_size = 0;
+    fp_management_size = 0;
+    break;
+  case Triple::ArchType::x86_64:
+    call_instruction_size = 5;
+    ret_size = 1;
+    function_alignment = 16;
+    break;
+  default:
+    llvm::report_fatal_error("unsupported target for size estimation");
+  }
+  function_size_without_callees = ret_size + extra_func_size + (function_alignment + 1) / 2;
+  function_size_with_callees =
+      function_size_without_callees + eh_frame_size + fp_management_size;
 }
 
 void SizeModelResults::print(raw_ostream &os) const {
+  os << "; estimated call instruction size: " << call_instruction_size
+     << " bytes\n";
+  os << "; estimated function size without callees: "
+     << function_size_without_callees << " bytes\n";
+  os << "; estimated function size with callees: " << function_size_with_callees
+     << " bytes\n";
+  os << "\n";
   SizeModelWriter writer(this);
   m.print(os, &writer);
 }

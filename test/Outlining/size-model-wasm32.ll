@@ -4,76 +4,61 @@
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128-ni:1"
 target triple = "wasm32"
 
+; CHECK: estimated call instruction size: 6 bytes
+; CHECK: estimated function size without callees: 4 bytes
+; CHECK: estimated function size with callees: 4 bytes
+
 ; CHECK: define i32 @collatz_len(i32 %0)
 define i32 @collatz_len(i32 %0) {
-; CHECK-NEXT: ; 7 bytes
-; CHECK-NEXT: %2 =
+; CHECK-NEXT: %2 = {{.*}} ; 7 bytes
   %2 = icmp slt i32 %0, 1
-; CHECK-NEXT: ; 2 bytes
-; CHECK-NEXT: br i1 %2
+; CHECK-NEXT: br i1 %2, {{.*}} ; 2 bytes
   br i1 %2, label %5, label %3
 
 ; CHECK: 3:
 3:
-; CHECK-NEXT: ; 5 bytes
-; CHECK-NEXT: %4 =
+; CHECK-NEXT: %4 = {{.*}} ; 5 bytes
   %4 = icmp eq i32 %0, 1
-; CHECK-NEXT: ; 2 bytes
-; CHECK-NEXT: br i1 %4
+; CHECK-NEXT: br i1 %4, {{.*}} ; 2 bytes
   br i1 %4, label %17, label %6
 
 ; CHECK: 5:
 5:
-; CHECK-NEXT: ; 6 bytes
-; CHECK-NEXT: tail call void @abort()
+; CHECK-NEXT: tail call void @abort() ; 6 bytes
   tail call void @abort()
-; CHECK-NEXT: ; 2 bytes
-; CHECK-NEXT: unreachable
+; CHECK-NEXT: unreachable ; 2 bytes
   unreachable
 
 ; CHECK: 6:
 6:
-; CHECK-NEXT: ; 0 bytes
-; CHECK-NEXT: %7 =
+; CHECK-NEXT: %7 = {{.*}} ; 0 bytes
   %7 = phi i32 [ %15, %6 ], [ 0, %3 ]
-; CHECK-NEXT: ; 0 bytes
-; CHECK-NEXT: %8 =
+; CHECK-NEXT: %8 = {{.*}} ; 0 bytes
   %8 = phi i32 [ %14, %6 ], [ %0, %3 ]
-; CHECK-NEXT: ; 5 bytes
-; CHECK-NEXT: %9 =
+; CHECK-NEXT: %9 = {{.*}} ; 5 bytes
   %9 = and i32 %8, 1
-; CHECK-NEXT: ; 0 bytes
-; CHECK-NEXT: %10 =
+; CHECK-NEXT: %10 = {{.*}} ; 0 bytes
   %10 = icmp eq i32 %9, 0
-; CHECK-NEXT: ; 5 bytes
-; CHECK-NEXT: %11 =
+; CHECK-NEXT: %11 = {{.*}} ; 5 bytes
   %11 = mul i32 %8, 3
-; CHECK-NEXT: ; 1 bytes
-; CHECK-NEXT: %12 =
+; CHECK-NEXT: %12 = {{.*}} ; 1 bytes
   %12 = add i32 %11, 1
-; CHECK-NEXT: ; 5 bytes
-; CHECK-NEXT: %13 =
+; CHECK-NEXT: %13 = {{.*}} ; 5 bytes
   %13 = lshr i32 %8, 1
-; CHECK-NEXT: ; 1 bytes
-; CHECK-NEXT: %14 =
+; CHECK-NEXT: %14 = {{.*}} ; 1 bytes
   %14 = select i1 %10, i32 %13, i32 %12
-; CHECK-NEXT: ; 7 bytes
-; CHECK-NEXT: %15 =
+; CHECK-NEXT: %15 = {{.*}} ; 7 bytes
   %15 = add i32 %7, 1
-; CHECK-NEXT: ; 1 bytes
-; CHECK-NEXT: %16 =
+; CHECK-NEXT: %16 = {{.*}} ; 1 bytes
   %16 = icmp sgt i32 %14, 1
-; CHECK-NEXT: ; 4 bytes
-; CHECK-NEXT: br i1 %16
+; CHECK-NEXT: br i1 %16, {{.*}} ; 4 bytes
   br i1 %16, label %6, label %17
 
 ; CHECK: 17:
 17:
-; CHECK-NEXT: ; 0 bytes
-; CHECK-NEXT: %18 =
+; CHECK-NEXT: %18 = {{.*}} ; 0 bytes
   %18 = phi i32 [ 0, %3 ], [ %15, %6 ]
-; CHECK-NEXT: ; 3 bytes
-; CHECK-NEXT: ret i32 %18
+; CHECK-NEXT: ret i32 %18 ; 3 bytes
   ret i32 %18
 }
 
