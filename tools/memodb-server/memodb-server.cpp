@@ -58,6 +58,8 @@ struct NNGRequest : public HTTPRequest {
     return req.getHeader(key);
   }
 
+  llvm::StringRef getBody() const override { return req.getData(); }
+
   void sendStatus(std::uint16_t status) override {
     llvm::ExitOnError Err("memodb-server sendStatus: ");
     Err(res.setStatus(status));
@@ -72,6 +74,8 @@ struct NNGRequest : public HTTPRequest {
     llvm::ExitOnError Err("memodb-server sendBody: ");
     Err(res.copyData(body));
   }
+
+  void sendEmptyBody() override { sendHeader("Content-Length", "0"); }
 };
 } // end anonymous namespace
 

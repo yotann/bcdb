@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "CID.h"
+#include "Node.h"
 #include "Server.h"
 
 namespace memodb {
@@ -15,10 +16,13 @@ class HTTPRequest : public Request {
 public:
   virtual std::optional<Method> getMethod() const override;
   virtual unsigned getAcceptQuality(ContentType content_type) const override;
+  virtual std::optional<Node> getContentNode() override;
 
   virtual void sendContentNode(const Node &node,
                                const std::optional<CID> &cid_if_known,
                                CacheControl cache_control) override;
+
+  virtual void sendCreated(const llvm::Twine &path) override;
 
   virtual void sendError(Status status, std::optional<llvm::StringRef> type,
                          llvm::StringRef title,
@@ -28,8 +32,14 @@ public:
 
 protected:
   virtual llvm::StringRef getMethodString() const = 0;
+
+  // Should use case-insensitive comparison for key.
+  // If more than one header matches, should return their values joined with
+  // commas.
   virtual std::optional<llvm::StringRef>
   getHeader(const llvm::Twine &key) const = 0;
+
+  virtual llvm::StringRef getBody() const = 0;
 
   virtual void sendStatus(std::uint16_t status) = 0;
   virtual void sendHeader(llvm::StringRef key, const llvm::Twine &value) = 0;
@@ -39,7 +49,17 @@ protected:
   // setting the Content-Length header.
   virtual void sendBody(const llvm::Twine &body) = 0;
 
+  // Should set Content-Length header to 0.
+  virtual void sendEmptyBody() = 0;
+
 private:
+  bool hasIfNoneMatch(llvm::StringRef etag);
+
+  void startResponse(std::uint16_t status, CacheControl cache_control);
+
+  void sendContent(CacheControl cache_control, llvm::StringRef etag,
+                   llvm::StringRef content_type, const llvm::Twine &content);
+
   void sendErrorAfterStatus(Status status, std::optional<llvm::StringRef> type,
                             llvm::StringRef title,
                             const std::optional<llvm::Twine> &detail);

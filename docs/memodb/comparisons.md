@@ -57,11 +57,9 @@
 
 ### CoAP
 
-[Constrained Application
-Protocol](https://en.wikipedia.org/wiki/Constrained_Application_Protocol). The
-MemoDB REST API is designed to use a CoAP-compatible subset of HTTP, in case we
-ever want to implement it in the future. (For instance, redirects are never
-used.)
+[Constrained Application Protocol](https://coap.technology/). The MemoDB REST
+API is designed to use a CoAP-compatible subset of HTTP, in case we ever want
+to implement it in the future. (For instance, redirects are never used.)
 
 - ✔️ Lightweight and efficient.
 - ✔️ Removes unnecessary featuers from HTTP.

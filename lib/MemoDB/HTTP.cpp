@@ -146,15 +146,53 @@ unsigned HTTPRequest::getAcceptQuality(ContentType content_type) const {
   return any_type_q;
 }
 
+std::optional<Node> HTTPRequest::getContentNode() {
+  auto type_str_or_null = getHeader("Content-Type");
+  llvm::StringRef type_str =
+      type_str_or_null ? type_str_or_null->split(';').first.trim(" \t") : "";
+  llvm::StringRef body_str = getBody();
+
+  if (type_str.equals_lower("application/cbor")) {
+    BytesRef body_bytes(reinterpret_cast<const std::uint8_t *>(body_str.data()),
+                        body_str.size());
+    auto node_or_err = Node::loadFromCBOR(body_bytes);
+    if (!node_or_err) {
+      sendError(Status::BadRequest, "/problems/invalid-or-unsupported-cbor",
+                "Invalid or unsupported CBOR",
+                llvm::toString(node_or_err.takeError()));
+      return std::nullopt;
+    }
+    return *node_or_err;
+
+  } else if (type_str.equals_lower("application/octet-stream")) {
+    return Node(byte_string_arg, body_str);
+
+  } else if (type_str.equals_lower("application/json")) {
+    auto node_or_err = Node::loadFromJSON(body_str);
+    if (!node_or_err) {
+      sendError(Status::BadRequest, "/problems/invalid-or-unsupported-json",
+                "Invalid or unsupported JSON",
+                llvm::toString(node_or_err.takeError()));
+      return std::nullopt;
+    }
+    return *node_or_err;
+
+  } else {
+    sendError(Status::UnsupportedMediaType, std::nullopt,
+              "Unsupported Media Type", std::nullopt);
+    return std::nullopt;
+  }
+}
+
 void HTTPRequest::sendError(Status status, std::optional<llvm::StringRef> type,
                             llvm::StringRef title,
                             const std::optional<llvm::Twine> &detail) {
-  sendStatus(static_cast<std::uint16_t>(status));
+  startResponse(static_cast<std::uint16_t>(status), CacheControl::Ephemeral);
   return sendErrorAfterStatus(status, type, title, detail);
 }
 
 void HTTPRequest::sendMethodNotAllowed(llvm::StringRef allow) {
-  sendStatus(405);
+  startResponse(405, CacheControl::Mutable);
   sendHeader("Allow", allow);
   return sendErrorAfterStatus(Status::MethodNotAllowed, std::nullopt,
                               "Method Not Allowed", std::nullopt);
@@ -195,6 +233,66 @@ void HTTPRequest::sendErrorAfterStatus(
   }
 }
 
+bool HTTPRequest::hasIfNoneMatch(llvm::StringRef etag) {
+  auto if_none_match = getHeader("If-None-Match");
+  if (!if_none_match)
+    return false;
+  llvm::StringRef remainder = *if_none_match;
+  while (true) {
+    remainder = remainder.ltrim(" \t");
+    if (remainder.empty())
+      break;
+    if (remainder.startswith("*"))
+      return true;
+    if (remainder.startswith("W/"))
+      remainder = remainder.drop_front(2);
+    if (!remainder.startswith("\""))
+      return false; // invalid header
+    remainder = remainder.drop_front(1);
+    if (!remainder.contains('"'))
+      return false; // invalid header
+    llvm::StringRef wanted_etag;
+    std::tie(wanted_etag, remainder) = remainder.split('"');
+    if (wanted_etag == etag)
+      return true;
+    remainder = remainder.ltrim(" \t");
+    if (!remainder.startswith(","))
+      return false;
+    remainder = remainder.drop_front(1);
+  }
+  return false;
+}
+
+void HTTPRequest::startResponse(std::uint16_t status,
+                                CacheControl cache_control) {
+  sendStatus(status);
+  sendHeader("Server", "MemoDB");
+  sendHeader("Vary", "Accept, Accept-Encoding");
+
+  // TODO: consider adding "public".
+  switch (cache_control) {
+  case CacheControl::Ephemeral:
+    sendHeader("Cache-Control", "max-age=0, must-revalidate");
+    break;
+  case CacheControl::Mutable:
+    // TODO: consider caching these.
+    sendHeader("Cache-Control", "max-age=0, must-revalidate");
+    break;
+  case CacheControl::Immutable:
+    sendHeader("Cache-Control", "max-age=604800, immutable");
+    break;
+  }
+}
+
+void HTTPRequest::sendContent(CacheControl cache_control, llvm::StringRef etag,
+                              llvm::StringRef content_type,
+                              const llvm::Twine &content) {
+  startResponse(200, cache_control);
+  sendHeader("Content-Type", content_type);
+  sendHeader("ETag", "\"" + etag + "\"");
+  sendBody(content);
+}
+
 void HTTPRequest::sendContentNode(const Node &node,
                                   const std::optional<CID> &cid_if_known,
                                   CacheControl cache_control) {
@@ -203,27 +301,43 @@ void HTTPRequest::sendContentNode(const Node &node,
   unsigned cbor_quality = getAcceptQuality(ContentType::CBOR);
   unsigned html_quality = getAcceptQuality(ContentType::HTML);
 
-  // TODO: add Cache-Control, ETag, and Server headers.
+  CID cid = cid_if_known ? *cid_if_known : node.saveAsIPLD().first;
+  std::string etag = cid.asString(Multibase::base64url);
 
+  ContentType type = ContentType::JSON;
   if (node.kind() == Kind::Bytes && octet_stream_quality >= json_quality &&
       octet_stream_quality >= cbor_quality &&
       octet_stream_quality >= html_quality) {
-    sendStatus(200);
-    sendHeader("Content-Type", "application/octet-stream");
-    sendBody(node.as<llvm::StringRef>(byte_string_arg));
+    etag = "raw+" + etag;
+    type = ContentType::OctetStream;
+  } else if (html_quality > cbor_quality && html_quality > json_quality) {
+    etag = "html+" + etag;
+    type = ContentType::HTML;
+  } else if (cbor_quality != 0 && cbor_quality >= json_quality) {
+    etag = "cbor+" + etag;
+    type = ContentType::CBOR;
+  } else {
+    etag = "json+" + etag;
+    type = ContentType::JSON;
+  }
+
+  if (hasIfNoneMatch(etag)) {
+    startResponse(304, cache_control);
+    sendHeader("ETag", "\"" + etag + "\"");
+    sendEmptyBody();
     return;
   }
 
-  if (html_quality > cbor_quality && html_quality > json_quality) {
+  if (type == ContentType::OctetStream) {
+    sendContent(cache_control, etag, "application/octet-stream",
+                node.as<llvm::StringRef>(byte_string_arg));
+  } else if (type == ContentType::HTML) {
     std::string cid_string = "MemoDB Node";
     if (cid_if_known)
       cid_string = cid_if_known->asString(Multibase::base64url);
     llvm::SmallVector<char, 256> buffer;
     llvm::raw_svector_ostream stream(buffer);
     stream << node;
-
-    sendStatus(200);
-    sendHeader("Content-Type", "text/html");
 
     // Display JSON using jQuery json-viewer:
     // https://github.com/abodelot/jquery.json-viewer
@@ -236,7 +350,8 @@ void HTTPRequest::sendContentNode(const Node &node,
     // - Integers larger than 53 bits will be converted to floats by
     //   JSON.parse().
     // - No special handling for MemoDB JSON types, like CIDs.
-    sendBody(R"(<!DOCTYPE html>
+    sendContent(cache_control, etag, "text/html",
+                R"(<!DOCTYPE html>
 <script src="https://unpkg.com/jquery@3.6/dist/jquery.min.js"></script>
 <script src="https://unpkg.com/jquery.json-viewer@1.4/json-viewer/jquery.json-viewer.js"></script>
 <link href="https://unpkg.com/jquery.json-viewer@1.4/json-viewer/jquery.json-viewer.css" type="text/css" rel="stylesheet">
@@ -246,23 +361,27 @@ void HTTPRequest::sendContentNode(const Node &node,
   });
 </script>
 <title>)" + llvm::StringRef(cid_string) +
-             "</title>\n<h1>" + llvm::StringRef(cid_string) + "</h1>\n<pre>" +
-             escapeForHTML(stream.str()) + "</pre>\n");
-  } else if (cbor_quality != 0 && cbor_quality >= json_quality) {
+                    "</title>\n<h1>" + llvm::StringRef(cid_string) +
+                    "</h1>\n<pre>" + escapeForHTML(stream.str()) + "</pre>\n");
+  } else if (type == ContentType::CBOR) {
     std::vector<std::uint8_t> buffer;
     node.save_cbor(buffer);
-    sendStatus(200);
-    sendHeader("Content-Type", "application/cbor");
-    sendBody(llvm::StringRef(reinterpret_cast<const char *>(buffer.data()),
-                             buffer.size()));
+    sendContent(cache_control, etag, "application/cbor",
+                llvm::StringRef(reinterpret_cast<const char *>(buffer.data()),
+                                buffer.size()));
   } else {
-    std::string buffer;
-    llvm::raw_string_ostream stream(buffer);
+    llvm::SmallVector<char, 256> buffer;
+    llvm::raw_svector_ostream stream(buffer);
     stream << node << "\n";
-    sendStatus(200);
-    sendHeader("Content-Type", "application/json");
-    sendBody(stream.str());
+    sendContent(cache_control, etag, "application/json", stream.str());
   }
+}
+
+void HTTPRequest::sendCreated(const llvm::Twine &path) {
+  // TODO: sent ETag.
+  startResponse(201, CacheControl::Ephemeral);
+  sendHeader("Location", path);
+  sendEmptyBody();
 }
 
 std::optional<Request::Method> HTTPRequest::getMethod() const {

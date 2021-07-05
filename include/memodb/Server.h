@@ -36,10 +36,12 @@ public:
     BadRequest = 400,
     NotFound = 404,
     MethodNotAllowed = 405,
+    UnsupportedMediaType = 415,
     NotImplemented = 501,
   };
 
   enum class CacheControl {
+    Ephemeral,
     Mutable,
     Immutable,
   };
@@ -48,10 +50,13 @@ public:
   virtual std::optional<Method> getMethod() const = 0;
   virtual std::optional<URI> getURI() const = 0;
   virtual unsigned getAcceptQuality(ContentType content_type) const = 0;
+  virtual std::optional<Node> getContentNode() = 0;
 
   virtual void sendContentNode(const Node &node,
                                const std::optional<CID> &cid_if_known,
                                CacheControl cache_control) = 0;
+
+  virtual void sendCreated(const llvm::Twine &path) = 0;
 
   virtual void sendError(Status status, std::optional<llvm::StringRef> type,
                          llvm::StringRef title,
@@ -66,6 +71,9 @@ public:
   void handleRequest(Request &request);
 
 private:
+  void handleRequestCIDWithoutCID(Request &request);
+  void handleRequestCIDWithCID(Request &request, llvm::StringRef cid_str);
+
   Store &store;
 };
 
