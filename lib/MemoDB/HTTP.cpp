@@ -372,7 +372,7 @@ void HTTPRequest::sendContentNode(const Node &node,
   } else {
     llvm::SmallVector<char, 256> buffer;
     llvm::raw_svector_ostream stream(buffer);
-    stream << node << "\n";
+    stream << node;
     sendContent(cache_control, etag, "application/json", stream.str());
   }
 }

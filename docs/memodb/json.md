@@ -236,6 +236,36 @@ details so a given MemoDB Node would always be encoded as the same JSON string.
 However, this would create too much extra work for clients. When determinism is
 important, CBOR should be used instead.
 
+## Determinism
+
+Clients need not produce deterministic JSON for a given Node. They may use
+arbitrary whitespace, put object elements in arbitrary orders, and make other
+decisions nondeterministically as long as the result is valid JSON.
+
+The MemoDB server will produce deterministic JSON for a given Node, using the
+following rules:
+
+- No unnecessary whitespace will be used.
+- Object elements will be in the same order that would be used for
+  deterministically encoded CBOR. That is, shorter names come before longer
+  ones, and names with the same length are ordered lexicographically.
+- Escape codes in strings will only be used when necessary.
+- The choice between escape codes like `\u000a`, `\u000A`, and `\n` will be
+  made in an unspecified but deterministic manner.
+- Floats will be formatted in an unspecified but deterministic manner.
+
+#### Rationale
+
+Requiring clients to be deterministic would demand too much extra effort of
+them.
+
+The server needs to produce deterministic JSON in order for the HTTP ETag
+header to be valid, allowing cached JSON responses to be validated.
+
+The exact details of the server's JSON encoding are partially unspecified in
+order to allow the server to switch to a different JSON implementation in the
+future.
+
 [DAG-JSON]: https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-json.md
 [Diagnostic Notation]: https://www.rfc-editor.org/rfc/rfc8949.html#name-diagnostic-notation
 [Extended Diagnostic Notation]: https://datatracker.ietf.org/doc/html/rfc8610#appendix-G
