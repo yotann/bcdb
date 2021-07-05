@@ -496,8 +496,10 @@ void Context::handleMessage() {
   auto Msg = Aio.get_msg();
   ArrayRef<uint8_t> Data(reinterpret_cast<const uint8_t *>(Msg.body().data()),
                          Msg.body().size());
-  // FIXME: handle CBOR errors using exceptions, don't just abort.
-  Node Header = Node::load_cbor_from_sequence(Data);
+  auto header_or_err = Node::loadFromCBORSequence(Data);
+  if (!header_or_err)
+    return invalidMessage();
+  auto Header = std::move(*header_or_err);
 
   if (Header.kind() != Kind::List || Header.size() < 3 ||
       Header[0] != "memo01" || !Header[1].is<std::uint8_t>() ||

@@ -108,7 +108,7 @@ Node CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
   std::vector<std::uint8_t> Buf(Size);
   if (!readBytes(Buf, Pos))
     llvm::report_fatal_error("Unexpected end of file in value");
-  return Node::load_cbor(Buf);
+  return llvm::cantFail(Node::loadFromCBOR(Buf));
 }
 
 void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
@@ -153,7 +153,7 @@ CARStore::~CARStore() {
 
 llvm::Optional<Node> CARStore::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return Node::loadFromIPLD(CID, {});
+    return llvm::cantFail(Node::loadFromIPLD(CID, {}));
   if (!BlockPositions.count(CID))
     return {};
   auto Pos = BlockPositions[CID];
@@ -165,7 +165,7 @@ llvm::Optional<Node> CARStore::getOptional(const CID &CID) {
   std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
   if (!readBytes(Buffer, &Pos))
     llvm::report_fatal_error("Unexpected end of file in content");
-  return Node::loadFromIPLD(CID, Buffer);
+  return llvm::cantFail(Node::loadFromIPLD(CID, Buffer));
 }
 
 llvm::Optional<memodb::CID> CARStore::resolveOptional(const Name &Name) {

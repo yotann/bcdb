@@ -145,11 +145,12 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   }
   Node Value;
   switch (format_option) {
-  case Format_CBOR:
-    Value = Node::load_cbor(
+  case Format_CBOR: {
+    Value = llvm::cantFail(Node::loadFromCBOR(
         {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
-         Buffer->getBufferSize()});
+         Buffer->getBufferSize()}));
     break;
+  }
   case Format_Raw:
     Value = Node(byte_string_arg, Buffer->getBuffer());
     break;

@@ -4,6 +4,7 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 #include <sstream>
+#include <system_error>
 
 #include "memodb/Multibase.h"
 
@@ -153,9 +154,23 @@ static bool encode_float(std::uint64_t &result, double value, int total_size,
   return exact;
 }
 
-Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
+static llvm::Error createInvalidCBORError(llvm::StringRef message) {
+  return llvm::createStringError(
+      std::make_error_code(std::errc::invalid_argument),
+      "Invalid CBOR: " + message);
+}
+
+static llvm::Error createUnsupportedCBORError(llvm::StringRef message) {
+  return llvm::createStringError(std::make_error_code(std::errc::not_supported),
+                                 "Unsupported CBOR: " + message);
+}
+
+llvm::Expected<Node>
+Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
   auto start = [&](int &major_type, int &minor_type, std::uint64_t &additional,
-                   bool &indefinite) {
+                   bool &indefinite) -> llvm::Error {
+    if (in.empty())
+      return createInvalidCBORError("unexpected end of input");
     major_type = in.front() >> 5;
     minor_type = in.front() & 0x1f;
     in = in.drop_front();
@@ -165,38 +180,43 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     if (minor_type < 24) {
       additional = minor_type;
     } else if (minor_type < 28) {
-      int num_bytes = 1 << (minor_type - 24);
+      unsigned num_bytes = 1 << (minor_type - 24);
+      if (in.size() < num_bytes)
+        return createInvalidCBORError("truncated head");
       while (num_bytes--) {
         additional = additional << 8 | in.front();
         in = in.drop_front();
       }
-    } else if (minor_type == 31) {
+    } else if (minor_type == 31 && major_type >= 2 && major_type <= 5) {
       indefinite = true;
     } else {
-      llvm::report_fatal_error("Invalid minor type");
+      return createInvalidCBORError("invalid minor type");
     }
+    return llvm::Error::success();
   };
 
   int major_type, minor_type;
   bool indefinite;
   std::uint64_t additional;
   bool in_middle_of_string = false;
-  auto next_string = [&] {
+
+  auto next_string = [&]() -> llvm::Expected<bool> {
     if (!indefinite && in_middle_of_string)
       return false;
     in_middle_of_string = true;
     if (indefinite) {
-      if (in.front() == 0xff) {
+      if (!in.empty() && in.front() == 0xff) {
         in = in.drop_front();
         return false;
       }
       int inner_major_type, inner_minor_type;
       bool inner_indefinite;
-      start(inner_major_type, inner_minor_type, additional, inner_indefinite);
-      if (inner_major_type != major_type)
-        llvm::report_fatal_error("Invalid indefinite-length string");
-      if (inner_indefinite)
-        llvm::report_fatal_error("Invalid nested indefinite-length strings");
+      auto error = start(inner_major_type, inner_minor_type, additional,
+                         inner_indefinite);
+      if (error)
+        return std::move(error);
+      if (inner_major_type != major_type || inner_indefinite)
+        return createInvalidCBORError("invalid indefinite-length string");
       return true;
     } else {
       return true;
@@ -205,7 +225,7 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
 
   auto next_item = [&] {
     if (indefinite) {
-      if (in.front() == 0xff) {
+      if (!in.empty() && in.front() == 0xff) {
         in = in.drop_front();
         return false;
       }
@@ -216,39 +236,48 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
   };
 
   bool is_cid = false;
-  do {
-    start(major_type, minor_type, additional, indefinite);
-    if (major_type == 6 && additional == 42)
-      is_cid = true;
-  } while (major_type == 6);
+  auto error = start(major_type, minor_type, additional, indefinite);
+  if (error)
+    return std::move(error);
+  if (major_type == 6 && additional == 42) {
+    is_cid = true;
+    error = start(major_type, minor_type, additional, indefinite);
+    if (error)
+      return std::move(error);
+  } else if (major_type == 6) {
+    return createUnsupportedCBORError("unsupported tag");
+  }
 
   if (is_cid && major_type != 2)
-    llvm::report_fatal_error("Invalid CID type");
+    return createInvalidCBORError("invalid kind in CID tag");
 
   switch (major_type) {
   case 0:
-    if (indefinite)
-      llvm::report_fatal_error("Integers may not be indefinite");
     return additional;
   case 1:
-    if (indefinite)
-      llvm::report_fatal_error("Integers may not be indefinite");
     if (additional > std::uint64_t(std::numeric_limits<std::int64_t>::max()))
-      llvm::report_fatal_error("Integer too large");
+      return createUnsupportedCBORError("integer too large");
     return -std::int64_t(additional) - 1;
   case 2: {
     BytesStorage result;
-    while (next_string()) {
+    while (true) {
+      auto next = next_string();
+      if (!next)
+        return next.takeError();
+      if (!*next)
+        break;
+      if (in.size() < additional)
+        return createUnsupportedCBORError("missing data from string");
       result.insert(result.end(), in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
     if (is_cid) {
       if (result.empty() || result[0] != 0x00)
-        llvm::report_fatal_error("invalid encoded CID");
+        return createInvalidCBORError("missing CID prefix");
       auto CID =
           CID::fromBytes(llvm::ArrayRef<std::uint8_t>(result).drop_front(1));
       if (!CID)
-        llvm::report_fatal_error("invalid encoded CID");
+        return createUnsupportedCBORError("unsupported or invalid CID");
       return *CID;
     }
     Node node;
@@ -257,32 +286,48 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
   }
   case 3: {
     StringStorage result;
-    while (next_string()) {
+    while (true) {
+      auto next = next_string();
+      if (!next)
+        return next.takeError();
+      if (!*next)
+        break;
+      if (in.size() < additional)
+        return createUnsupportedCBORError("missing data from string");
       result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
+    auto ptr = reinterpret_cast<const llvm::UTF8 *>(result.data());
+    if (!llvm::isLegalUTF8String(&ptr, ptr + result.size()))
+      return createInvalidCBORError("invalid UTF-8 in string value");
     return Node(utf8_string_arg, std::move(result));
   }
   case 4: {
     List result;
-    while (next_item())
-      result.emplace_back(load_cbor_from_sequence(in));
+    while (next_item()) {
+      auto item = loadFromCBORSequence(in);
+      if (!item)
+        return item.takeError();
+      result.emplace_back(*item);
+    }
     return result;
   }
   case 5: {
     Map result;
     while (next_item()) {
-      Node key = load_cbor_from_sequence(in);
-      if (!key.is<llvm::StringRef>())
-        llvm::report_fatal_error("Map keys must be strings");
-      result.insert_or_assign(key.as<llvm::StringRef>(),
-                              load_cbor_from_sequence(in));
+      auto key = loadFromCBORSequence(in);
+      if (!key)
+        return key.takeError();
+      if (!key->is<llvm::StringRef>())
+        return createUnsupportedCBORError("map keys must be strings");
+      auto value = loadFromCBORSequence(in);
+      if (!value)
+        return value.takeError();
+      result.insert_or_assign(key->as<llvm::StringRef>(), *value);
     }
     return result;
   }
   case 7:
-    if (indefinite)
-      llvm::report_fatal_error("Simple values may not be indefinite");
     switch (minor_type) {
     case 20:
       return false;
@@ -299,7 +344,7 @@ Node Node::load_cbor_from_sequence(llvm::ArrayRef<std::uint8_t> &in) {
     case 27:
       return decode_float(additional, 64, 52, 1023);
     }
-    llvm::report_fatal_error("Unsupported simple value");
+    return createUnsupportedCBORError("unsupported simple value");
   default:
     llvm_unreachable("impossible major type");
   }
@@ -390,16 +435,29 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
       variant_);
 }
 
-Node Node::loadFromIPLD(const CID &CID, llvm::ArrayRef<std::uint8_t> Content) {
+static llvm::Error createInvalidIPLDError(llvm::StringRef message) {
+  return llvm::createStringError(
+      std::make_error_code(std::errc::invalid_argument),
+      "Invalid IPLD block: " + message);
+}
+
+static llvm::Error createUnsupportedIPLDError(llvm::StringRef message) {
+  return llvm::createStringError(std::make_error_code(std::errc::not_supported),
+                                 "Unsupported IPLD block: " + message);
+}
+
+llvm::Expected<Node> Node::loadFromIPLD(const CID &CID,
+                                        llvm::ArrayRef<std::uint8_t> Content) {
   if (CID.isIdentity()) {
-    assert(Content.empty());
+    if (!Content.empty())
+      return createInvalidIPLDError("identity CID should have empty payload");
     Content = CID.getHashBytes();
   }
   if (CID.getContentType() == Multicodec::Raw)
     return Node(Content);
   if (CID.getContentType() == Multicodec::DAG_CBOR)
-    return Node::load_cbor(Content);
-  llvm::report_fatal_error("Unsupported CID content type");
+    return Node::loadFromCBOR(Content);
+  return createUnsupportedIPLDError("unsupported CID content type");
 }
 
 std::pair<CID, std::vector<std::uint8_t>>

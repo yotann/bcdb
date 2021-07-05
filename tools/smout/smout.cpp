@@ -163,20 +163,24 @@ static Node evaluate_refines_alive2(Store &db, const Node &AliveSettings,
   Msg = Aio.release_msg();
   llvm::ArrayRef<uint8_t> Reply(Msg.body().data<uint8_t>(), Msg.body().size());
 
-  Header = Node::load_cbor_from_sequence(Reply);
-  if (Header.kind() != Kind::List || Header.size() < 3 ||
-      Header[0] != "memo01" || Header[1] != 0x03) {
-    errs() << "received invalid reply header: " << Header << "\n";
+  auto RepHeader = Node::loadFromCBORSequence(Reply);
+  if (!RepHeader)
+    report_fatal_error("invalid CBOR from worker");
+  if (RepHeader->kind() != Kind::List || RepHeader->size() < 3 ||
+      (*RepHeader)[0] != "memo01" || (*RepHeader)[1] != 0x03) {
+    errs() << "received invalid reply header: " << *RepHeader << "\n";
     report_fatal_error("invalid reply header");
   }
 
-  Node Result = Node::load_cbor(Reply);
-  if (Result.kind() != Kind::List || Result.size() < 2 || Result[0] != 0) {
-    errs() << "received error from worker: " << Result << "\n";
+  auto Result = Node::loadFromCBOR(Reply);
+  if (!Result)
+    report_fatal_error("invalid CBOR from worker");
+  if (Result->kind() != Kind::List || Result->size() < 2 || (*Result)[0] != 0) {
+    errs() << "received error from worker: " << *Result << "\n";
     report_fatal_error("error from worker");
   }
 
-  return Result[1][""]["forward"];
+  return (*Result)[1][""]["forward"];
 }
 
 static int Alive2() {
