@@ -413,22 +413,11 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
               item.save_cbor(out);
           },
           [&](const Map &x) {
-            std::vector<std::pair<std::vector<std::uint8_t>, const Node *>>
-                items;
+            start(5, x.size());
             for (const auto &item : x) {
-              items.emplace_back(std::vector<std::uint8_t>(), &item.value());
-              Node(utf8_string_arg, item.key()).save_cbor(items.back().first);
-            }
-            std::sort(items.begin(), items.end(),
-                      [](const auto &A, const auto &B) {
-                        if (A.first.size() != B.first.size())
-                          return A.first.size() < B.first.size();
-                        return A.first < B.first;
-                      });
-            start(5, items.size());
-            for (const auto &item : items) {
-              out.insert(out.end(), item.first.begin(), item.first.end());
-              item.second->save_cbor(out);
+              start(3, item.key().size());
+              out.insert(out.end(), item.key().begin(), item.key().end());
+              item.value().save_cbor(out);
             }
           },
       },

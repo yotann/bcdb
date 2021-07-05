@@ -56,6 +56,8 @@ private:
   using container_type = std::vector<key_value_type>;
   container_type members_;
   static bool compare(const key_value_type &a, const llvm::StringRef &b) {
+    if (a.key().size() != b.size())
+      return a.key().size() < b.size();
     return a.key() < b;
   }
 
