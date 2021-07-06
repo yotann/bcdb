@@ -322,7 +322,8 @@ SizeModelResults::SizeModelResults(Module &m) : m(m) {
   case Triple::ArchType::wasm64:
     call_instruction_size = 6;
     ret_size = 1;
-    extra_func_size = 2; // Estimate 2 bytes function type in the Function Section.
+    extra_func_size =
+        2; // Estimate 2 bytes function type in the Function Section.
     extra_func_size += 1; // Estimate 1 byte code size in the Code Section.
     eh_frame_size = 0;
     fp_management_size = 0;
@@ -335,7 +336,8 @@ SizeModelResults::SizeModelResults(Module &m) : m(m) {
   default:
     llvm::report_fatal_error("unsupported target for size estimation");
   }
-  function_size_without_callees = ret_size + extra_func_size + (function_alignment + 1) / 2;
+  function_size_without_callees =
+      ret_size + extra_func_size + (function_alignment + 1) / 2;
   function_size_with_callees =
       function_size_without_callees + eh_frame_size + fp_management_size;
 }

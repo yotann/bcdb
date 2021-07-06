@@ -377,51 +377,51 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
       out.push_back((additional >> 8 * (num_bytes - i - 1)) & 0xff);
   };
 
-  std::visit(
-      Overloaded{
-          [&](const std::monostate &) { start(7, 22); },
-          [&](const bool &x) { start(7, x ? 21 : 20); },
-          [&](const std::int64_t &x) {
-            if (x < 0)
-              start(1, -(x + 1));
-            else
-              start(0, x);
-          },
-          [&](const double &x) {
-            std::uint64_t additional;
-            encode_float(additional, x, 64, 52, 1023);
-            start(7, additional, 27);
-          },
-          [&](const BytesStorage &x) {
-            start(2, x.size());
-            out.insert(out.end(), x.begin(), x.end());
-          },
-          [&](const StringStorage &x) {
-            start(3, x.size());
-            out.insert(out.end(), x.begin(), x.end());
-          },
-          [&](const CID &x) {
-            auto Bytes = x.asBytes();
-            start(6, 42); // CID tag
-            start(2, Bytes.size() + 1);
-            out.push_back(0x00); // DAG-CBOR requires multibase prefix
-            out.insert(out.end(), Bytes.begin(), Bytes.end());
-          },
-          [&](const List &x) {
-            start(4, x.size());
-            for (const Node &item : x)
-              item.save_cbor(out);
-          },
-          [&](const Map &x) {
-            start(5, x.size());
-            for (const auto &item : x) {
-              start(3, item.key().size());
-              out.insert(out.end(), item.key().begin(), item.key().end());
-              item.value().save_cbor(out);
-            }
-          },
-      },
-      variant_);
+  std::visit(Overloaded{
+                 [&](const std::monostate &) { start(7, 22); },
+                 [&](const bool &x) { start(7, x ? 21 : 20); },
+                 [&](const std::int64_t &x) {
+                   if (x < 0)
+                     start(1, -(x + 1));
+                   else
+                     start(0, x);
+                 },
+                 [&](const double &x) {
+                   std::uint64_t additional;
+                   encode_float(additional, x, 64, 52, 1023);
+                   start(7, additional, 27);
+                 },
+                 [&](const BytesStorage &x) {
+                   start(2, x.size());
+                   out.insert(out.end(), x.begin(), x.end());
+                 },
+                 [&](const StringStorage &x) {
+                   start(3, x.size());
+                   out.insert(out.end(), x.begin(), x.end());
+                 },
+                 [&](const CID &x) {
+                   auto Bytes = x.asBytes();
+                   start(6, 42); // CID tag
+                   start(2, Bytes.size() + 1);
+                   out.push_back(0x00); // DAG-CBOR requires multibase prefix
+                   out.insert(out.end(), Bytes.begin(), Bytes.end());
+                 },
+                 [&](const List &x) {
+                   start(4, x.size());
+                   for (const Node &item : x)
+                     item.save_cbor(out);
+                 },
+                 [&](const Map &x) {
+                   start(5, x.size());
+                   for (const auto &item : x) {
+                     start(3, item.key().size());
+                     out.insert(out.end(), item.key().begin(),
+                                item.key().end());
+                     item.value().save_cbor(out);
+                   }
+                 },
+             },
+             variant_);
 }
 
 static llvm::Error createInvalidIPLDError(llvm::StringRef message) {
