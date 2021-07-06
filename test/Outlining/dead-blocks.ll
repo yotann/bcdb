@@ -1,5 +1,3 @@
-; XFAIL: *
-
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-dependence -analyze %s | FileCheck %s
 

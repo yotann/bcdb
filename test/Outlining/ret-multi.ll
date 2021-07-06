@@ -2,9 +2,8 @@
 ; RUN:     -outline-only=1,2,3,4,5 -outlining-extractor -verify -S %s \
 ; RUN: | FileCheck %s
 
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outline-only=1,4,5 -outlining-extractor -verify -S %s \
-; RUN: | FileCheck --check-prefix=PARTIAL %s
+; RUN: not --crash opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
+; RUN:     -outline-only=1,4,5 -outlining-extractor -verify -S %s
 
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
@@ -38,15 +37,3 @@ false:
 ; CHECK: br label %outline_return
 ; CHECK: false:
 ; CHECK: br label %outline_return
-
-; PARTIAL-LABEL: define { i32 } @f.outlined.1.4-5.callee(i1 %cond) {
-; PARTIAL: outline_entry:
-; PARTIAL: br label %2
-; PARTIAL: outline_return:
-; PARTIAL: %0 = phi i32 [ 0, %false ], [ undef, %2 ]
-; PARTIAL: %1 = insertvalue { i32 } undef, i32 %0, 0
-; PARTIAL: ret { i32 } %1
-; PARTIAL: 2:
-; PARTIAL: br i1 %cond, label %outline_return, label %false
-; PARTIAL: false:
-; PARTIAL: br label %outline_return

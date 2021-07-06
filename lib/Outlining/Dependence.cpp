@@ -18,13 +18,6 @@
 using namespace bcdb;
 using namespace llvm;
 
-// useful LLVM:
-// - ImplicitControlFlowTracking: find insns like throws/guards with implicit
-//   control flow
-//   - or just use isGuaranteedToTransferExecutionToSuccessor, excluding
-//     volatile loads and stores
-// - PointerMayBeCaptured: relevant for allocas?
-
 namespace {
 class OutliningDependenceWriter : public AssemblyAnnotationWriter {
   const OutliningDependenceResults *OutDep;
@@ -94,7 +87,7 @@ OutliningDependenceResults::OutliningDependenceResults(Function &F,
     else if (Instruction *I = dyn_cast<Instruction>(V))
       analyzeInstruction(I);
     else
-      assert(0 && "Illegal node type.");
+      llvm_unreachable("Impossible node type.");
   }
   finalizeDepends();
 }
@@ -111,109 +104,57 @@ bool OutliningDependenceResults::isOutlinable(
   int OP = BV.find_first();
   if (OP < 0)
     return false;
+  auto BVAndDominators = BV | Dominators[OP];
   for (auto x : BV) {
     if (!Dominators[x].test(OP))
-      return false;
-    for (auto y : ForcedDepends[x])
-      if (!BV.test(y))
-        return false;
-    for (auto y : DominatingDepends[x])
-      if (!BV.test(y) && !Dominators[OP].test(y))
-        return false;
+      return false; // outlining point does not dominate all nodes
+    if (!BV.contains(ForcedDepends[x]))
+      return false; // forced dependency not satisfied
+    if (!BVAndDominators.contains(DominatingDepends[x]))
+      return false; // dominating dependency not satisfied
   }
   return true;
 }
 
-ssize_t OutliningDependenceResults::lookupNode(Value *V) {
+std::optional<size_t> OutliningDependenceResults::lookupNode(Value *V) {
   auto It = NodeIndices.find(V);
   if (It != NodeIndices.end())
     return It->second;
   if (MemoryAccess *MA = dyn_cast<MemoryAccess>(V)) {
     if (MSSA.isLiveOnEntryDef(MA))
-      return -1;
+      return std::nullopt;
     if (MemoryUseOrDef *MUOD = dyn_cast<MemoryUseOrDef>(MA))
       return lookupNode(MUOD->getMemoryInst());
   }
-  return -1;
+  return std::nullopt;
 }
 
-void OutliningDependenceResults::addDepend(Value *Def, Value *User, bool data) {
-  ssize_t UserI = lookupNode(User);
-  if (UserI < 0)
+void OutliningDependenceResults::addDepend(Value *Def, Value *User,
+                                           bool is_data_dependency) {
+  auto UserI = lookupNode(User);
+  if (!UserI)
     return;
   if (Argument *A = dyn_cast<Argument>(Def))
-    ArgDepends[UserI].set(A->getArgNo());
-  ssize_t DefI = lookupNode(Def);
-  if (DefI < 0 || UserI < 0)
+    ArgDepends[*UserI].set(A->getArgNo());
+  auto DefI = lookupNode(Def);
+  if (!DefI)
     return;
-  if (Dominators[UserI].test(DefI))
-    DominatingDepends[UserI].set(DefI);
+
+  if (Dominators[*UserI].test(*DefI))
+    DominatingDepends[*UserI].set(*DefI);
   else
-    ForcedDepends[UserI].set(DefI);
-  if (data)
-    DataDepends[UserI].set(DefI);
+    ForcedDepends[*UserI].set(*DefI);
+
+  if (is_data_dependency)
+    DataDepends[*UserI].set(*DefI);
 }
 
 void OutliningDependenceResults::addForcedDepend(Value *Def, Value *User) {
-  ssize_t UserI = lookupNode(User);
-  ssize_t DefI = lookupNode(Def);
-  if (DefI < 0 || UserI < 0)
+  auto UserI = lookupNode(User);
+  auto DefI = lookupNode(Def);
+  if (!UserI || !DefI)
     return;
-  ForcedDepends[UserI].set(DefI);
-}
-
-void OutliningDependenceResults::finalizeDepends() {
-  // Make DominatingDepends transitive.
-  for (size_t i = 0; i < Nodes.size(); i++)
-    for (auto x : DominatingDepends[i])
-      DominatingDepends[i] |= DominatingDepends[x];
-
-  // If a phi node is outlined, force the block header to be outlined too.
-  // (It doesn't make sense to outline a phi node without the other phi nodes,
-  // or without some control flow leading to the block.)
-  size_t HeaderI = 0;
-  for (size_t i = 0; i < Nodes.size(); i++) {
-    if (isa<BasicBlock>(Nodes[i]))
-      HeaderI = i;
-    if (isa<PHINode>(Nodes[i]) || isa<MemoryPhi>(Nodes[i]))
-      ForcedDepends[i].set(HeaderI);
-  }
-
-  // Make ForcedDepends[i] include everything we need to outline in order to
-  // outline Nodes[i]. We add several things to ForcedDepends[i]:
-  //
-  // A. A node that dominates i and also dominates x for each x in
-  //    ForcedDepends[i]. This node may be i itself. Ensures we have a valid
-  //    outlining point.
-  //
-  // B. ForcedDepends[x] for each x in ForcedDepends[i]. Ensures ForcedDepends
-  //    is transitive.
-  //
-  // C. DominatingDepends[x] for each x in ForcedDepends[i], excluding nodes
-  //    that dominate the outlining point from part A. We need to outline these
-  //    nodes in order to use the chosen outlining point.
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    for (size_t i = 0; i < Nodes.size(); i++) {
-      if (ForcedDepends[i].empty())
-        continue;
-
-      SparseBitVector OldForcedDepends = ForcedDepends[i];
-      SparseBitVector Doms = Dominators[i];
-      SparseBitVector Deps = DominatingDepends[i];
-      for (auto x : ForcedDepends[i]) {
-        ForcedDepends[i] |= ForcedDepends[x];
-        Doms &= Dominators[x];
-        Deps |= DominatingDepends[x];
-      }
-      Deps.intersectWithComplement(Doms);
-      ForcedDepends[i] |= Deps;
-      ForcedDepends[i].set(Doms.find_last());
-      if (ForcedDepends[i] != OldForcedDepends)
-        changed = true;
-    }
-  }
+  ForcedDepends[*UserI].set(*DefI);
 }
 
 void OutliningDependenceResults::numberNodes() {
@@ -232,15 +173,13 @@ void OutliningDependenceResults::numberNodes() {
       Blocks.push_back(BB);
     }
   };
-  for (BasicBlock &BB : F) {
+  for (BasicBlock &BB : F)
     VisitBlock(&BB, VisitBlock);
-  }
 
   // Create all the nodes.
   for (BasicBlock *BB : Blocks) {
     Nodes.push_back(BB);
-    MemoryPhi *MPhi = MSSA.getMemoryAccess(BB);
-    if (MPhi)
+    if (MemoryPhi *MPhi = MSSA.getMemoryAccess(BB))
       Nodes.push_back(MPhi);
     for (Instruction &I : *BB)
       Nodes.push_back(&I);
@@ -259,12 +198,9 @@ void OutliningDependenceResults::numberNodes() {
   for (size_t i = 0; i < Nodes.size(); i++) {
     Value *V = Nodes[i];
     if (BasicBlock *BB = dyn_cast<BasicBlock>(V)) {
-      auto IDom = DT[BB]->getIDom();
-      if (IDom) {
-        ssize_t IDomI = lookupNode(IDom->getBlock()->getTerminator());
-        assert(IDomI >= 0);
-        Dominators[i] = Dominators[IDomI];
-      }
+      if (auto IDom = DT[BB]->getIDom())
+        Dominators[i] =
+            Dominators[NodeIndices[IDom->getBlock()->getTerminator()]];
     } else {
       // Inherit dominators from the previous node.
       Dominators[i] = Dominators[i - 1];
@@ -276,53 +212,65 @@ void OutliningDependenceResults::numberNodes() {
 
 void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // Calculate control dependence as described in section 3.1 of:
-  // J. Farrante et al., "Program Dependence Graph and Its Use in
-  // Optimization".
-  //
-  // But with an exception: if Y is control-dependent on X purely because one
-  // of Y's dominators is control-dependent on X, we ignore the dependence of
-  // Y on X; instead, we mark Y as control-dependent on the dominator. This
-  // is useful in a case like the following:
-  //
-  // do { a=A(); if(a) { B(); }; c=C(); } while(c);
-  //
-  // Normally blocks A, B, and C would all be control-dependent on C,
-  // preventing us from outlining any part of the loop body; we could only
-  // outline the loop as a whole. Instead, we make only A control-dependent
-  // on C, and we make B and C control-dependent on A, so we aren't forced to
-  // outline the whole loop if we just want to outline part of the body.
-
-  // TODO: There might be a faster way to compute this.
-
-  for (BasicBlock *Succ : successors(BB)) {
-    if (PDT.properlyDominates(Succ, BB))
+  // J. Ferrante et al., "Program Dependence Graph and Its Use in
+  // Optimization". We use the same variable names as that paper.
+  BasicBlock *a = BB;
+  for (BasicBlock *b : successors(a)) {
+    if (PDT.properlyDominates(b, a))
       continue;
-    auto Parent = PDT[BB]->getIDom();
-    auto Cur = PDT[Succ];
-    SmallVector<BasicBlock *, 8> Path;
-    for (; Cur != Parent; Cur = Cur->getIDom())
-      Path.push_back(Cur->getBlock());
 
-    for (size_t i = 0; i < Path.size(); i++) {
-      Value *Dep = BB->getTerminator();
+    auto l = PDT[a]->getIDom();
+    SmallVector<BasicBlock *, 8> path;
+    for (auto m = PDT[b]; m != l; m = m->getIDom())
+      path.push_back(m->getBlock());
+
+    // Instead of always making every node in the path control-dependent on A,
+    // like in the Ferrante paper, we make an exception. If M is
+    // control-dependent on A purely because one of M's dominators is
+    // control-dependent on A, we ignore the dependence of M on A; instead, we
+    // mark M as control-dependent on the dominator. This is useful in a case
+    // like the following:
+    //
+    // do { a=A(); if(a) { B(); }; c=C(); } while(c);
+    //
+    // Normally blocks A, B, and C would all be control-dependent on C,
+    // preventing us from outlining any part of the loop body; we could only
+    // outline the loop as a whole. Instead, we make only A control-dependent
+    // on C, and we make B and C control-dependent on A, so we aren't forced to
+    // outline the whole loop if we just want to outline part of the body.
+    for (size_t i = 0; i < path.size(); i++) {
+      Value *dep = a->getTerminator();
       for (size_t j = 0; j < i; j++)
-        if (DT.dominates(Path[j], Path[i]))
-          Dep = Path[j];
-      addDepend(Dep, Path[i]);
+        if (DT.dominates(path[j], path[i]))
+          dep = path[j];
+      addDepend(dep, path[i]);
+    }
+
+    // If we outline a conditional branch, we must also outline every node
+    // that's control-dependent on the branch (using the standard definition of
+    // control dependence, not the modified one used above). Otherwise we would
+    // end up needing the same conditional branch in both the outlined callee
+    // and the modified caller.
+    //
+    // TODO: Experiment with relaxing this restriction; if the outlined callee
+    // returns a value that indicates which path it took, we can duplicate the
+    // conditional branches in both the caller and callee and make the caller
+    // follow the same path. This still wouldn't work well for complex control
+    // flow (if there's a loop containing an if-else, there's no efficient way
+    // to indicate the entire path through the loop).
+    Value *branch = a->getTerminator();
+    for (BasicBlock *m : path) {
+      addForcedDepend(m, branch);
+      for (Instruction &ins : *m)
+        addForcedDepend(&ins, branch);
     }
   }
 
-  // TODO: When outlining the control flow of a loop, we must also outline
-  // any instruction control-dependent on the number of executions of the
-  // loop.
-
-  // TODO: relax these restrictions.
+  // Don't outline computed goto targets. We could outline computed gotos if we
+  // also outlined every possible target of the goto, but computed gotos are
+  // too rare to make it worth the trouble.
   if (BB->hasAddressTaken())
     PreventsOutlining.set(NodeIndices[BB]);
-
-  // TODO: add support for control flow (also modifying the extractor).
-  PreventsOutlining.set(NodeIndices[BB->getTerminator()]);
-  PreventsOutlining.set(NodeIndices[BB]);
 }
 
 void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
@@ -374,6 +322,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     if (AI->isSwiftError())
       prevent_all_outlining = true; // paranoid
 
+  // TODO: use PointerMayBeCaptured and mark some allocas as outlineable.
   switch (I->getOpcode()) {
   case Instruction::Alloca:
   case Instruction::IndirectBr:
@@ -489,6 +438,60 @@ void OutliningDependenceResults::getExternals(
     ExternalOutputs |= DataDepends[i];
   }
   ExternalOutputs &= BV;
+}
+
+void OutliningDependenceResults::finalizeDepends() {
+  // Make DominatingDepends transitive.
+  for (size_t i = 0; i < Nodes.size(); i++)
+    for (auto x : DominatingDepends[i])
+      DominatingDepends[i] |= DominatingDepends[x];
+
+  // If a phi node is outlined, force the block header to be outlined too.
+  // (It doesn't make sense to outline a phi node without the other phi nodes,
+  // or without some control flow leading to the block.)
+  size_t HeaderI = 0;
+  for (size_t i = 0; i < Nodes.size(); i++) {
+    if (isa<BasicBlock>(Nodes[i]))
+      HeaderI = i;
+    if (isa<PHINode>(Nodes[i]) || isa<MemoryPhi>(Nodes[i]))
+      ForcedDepends[i].set(HeaderI);
+  }
+
+  // Make ForcedDepends[i] include everything we need to outline in order to
+  // outline Nodes[i]. We add several things to ForcedDepends[i]:
+  //
+  // A. A node that dominates i and also dominates x for each x in
+  //    ForcedDepends[i]. This node may be i itself. Ensures we have a valid
+  //    outlining point.
+  //
+  // B. ForcedDepends[x] for each x in ForcedDepends[i]. Ensures ForcedDepends
+  //    is transitive.
+  //
+  // C. DominatingDepends[x] for each x in ForcedDepends[i], excluding nodes
+  //    that dominate the outlining point from part A. We need to outline these
+  //    nodes in order to use the chosen outlining point.
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t i = 0; i < Nodes.size(); i++) {
+      if (ForcedDepends[i].empty())
+        continue;
+
+      SparseBitVector OldForcedDepends = ForcedDepends[i];
+      SparseBitVector Doms = Dominators[i];
+      SparseBitVector Deps = DominatingDepends[i];
+      for (auto x : ForcedDepends[i]) {
+        ForcedDepends[i] |= ForcedDepends[x];
+        Doms &= Dominators[x];
+        Deps |= DominatingDepends[x];
+      }
+      Deps.intersectWithComplement(Doms);
+      ForcedDepends[i] |= Deps;
+      ForcedDepends[i].set(Doms.find_last());
+      if (ForcedDepends[i] != OldForcedDepends)
+        changed = true;
+    }
+  }
 }
 
 OutliningDependenceWrapperPass::OutliningDependenceWrapperPass()
