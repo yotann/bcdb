@@ -1,8 +1,8 @@
 #ifndef BCDB_OUTLINING_EXTRACTOR_H
 #define BCDB_OUTLINING_EXTRACTOR_H
 
-#include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Pass.h>
 #include <string>
 #include <utility>
@@ -25,21 +25,21 @@ using namespace llvm;
 class OutliningExtractor {
 public:
   OutliningExtractor(Function &F, OutliningDependenceResults &OutDep,
-                     BitVector &BV);
+                     SparseBitVector<> &BV);
 
   Function *createNewCallee();
   Function *createNewCaller();
 
   Function &F;
   OutliningDependenceResults &OutDep;
-  BitVector &BV;
+  SparseBitVector<> &BV;
 
 private:
   Function *NewCallee;
   Function *NewCaller;
   bool OutliningReturn = false;
-  BitVector OutlinedBlocks;
-  BitVector ArgInputs, ExternalInputs, ExternalOutputs;
+  SparseBitVector<> OutlinedBlocks;
+  SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
   std::string NewName;
 };
 
@@ -55,7 +55,7 @@ struct OutliningExtractorWrapperPass : public ModulePass {
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
 private:
-  DenseMap<Function *, std::vector<std::pair<BitVector, Function *>>>
+  DenseMap<Function *, std::vector<std::pair<SparseBitVector<>, Function *>>>
       NewFunctions;
 };
 

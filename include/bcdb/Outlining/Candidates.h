@@ -1,8 +1,8 @@
 #ifndef BCDB_OUTLINING_CANDIDATES_H
 #define BCDB_OUTLINING_CANDIDATES_H
 
-#include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SparseBitVector.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Pass.h>
 #include <set>
@@ -21,13 +21,22 @@ namespace bcdb {
 
 using namespace llvm;
 
-struct BitVectorCompare {
-  bool operator()(const BitVector &A, const BitVector &B) const {
-    BitVector C = A;
-    C ^= B;
-    if (!C.any())
+// TODO: delete this.
+struct SparseBitVectorCompare {
+  bool operator()(const SparseBitVector<> &a,
+                  const SparseBitVector<> &b) const {
+    if (a == b)
       return false;
-    return B.test(C.find_first());
+    auto ia = a.begin(), ib = b.begin();
+    auto iae = a.end(), ibe = b.end();
+    for (; ia != iae && ib != ibe; ++ia, ++ib) {
+      if (*ia > *ib)
+        return true;
+      if (*ia < *ib)
+        return false;
+    }
+    assert(ia != iae || ib != ibe);
+    return ib != ibe;
   }
 };
 
@@ -40,15 +49,15 @@ public:
   Function &F;
   OutliningDependenceResults &OutDep;
 
-  std::vector<BitVector> Candidates;
+  std::vector<SparseBitVector<>> Candidates;
 
 private:
-  std::vector<BitVector> Queue;
-  std::set<BitVector, BitVectorCompare> AlreadyVisited;
+  std::vector<SparseBitVector<>> Queue;
+  std::set<SparseBitVector<>, SparseBitVectorCompare> AlreadyVisited;
 
   void createInitialCandidates();
-  void queueBV(BitVector BV);
-  void processCandidate(BitVector BV);
+  void queueBV(SparseBitVector<> BV);
+  void processCandidate(SparseBitVector<> BV);
 };
 
 struct OutliningCandidatesWrapperPass : public FunctionPass {

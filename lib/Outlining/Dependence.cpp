@@ -1,6 +1,6 @@
 #include "bcdb/Outlining/Dependence.h"
 
-#include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/AssemblyAnnotationWriter.h>
@@ -36,12 +36,27 @@ class OutliningDependenceWriter : public AssemblyAnnotationWriter {
       return;
     int i = II->second;
     OS << formatv("; {0} {1} ", type, i);
-    if (OutDep->PreventsOutlining.test(i))
+    if (OutDep->PreventsOutlining.test(i)) {
       OS << "prevents outlining\n";
-    else
-      OS << formatv("depends [{0}] forced [{1}]\n",
-                    OutDep->DominatingDepends[i].set_bits(),
-                    OutDep->ForcedDepends[i].set_bits());
+    } else {
+      OS << "depends [";
+      bool first = true;
+      for (auto j : OutDep->DominatingDepends[i]) {
+        if (!first)
+          OS << ", ";
+        first = false;
+        OS << j;
+      }
+      OS << "] forced [";
+      first = true;
+      for (auto j : OutDep->ForcedDepends[i]) {
+        if (!first)
+          OS << ", ";
+        first = false;
+        OS << j;
+      }
+      OS << "]\n";
+    }
   }
 
 public:
@@ -89,20 +104,21 @@ void OutliningDependenceResults::print(raw_ostream &OS) const {
   F.print(OS, &Writer);
 }
 
-bool OutliningDependenceResults::isOutlinable(const BitVector &BV) const {
-  if (BV.size() != Nodes.size())
+bool OutliningDependenceResults::isOutlinable(
+    const SparseBitVector<> &BV) const {
+  if (!BV.empty() && static_cast<size_t>(BV.find_last()) >= Nodes.size())
     return false;
   int OP = BV.find_first();
   if (OP < 0)
     return false;
-  for (auto x : BV.set_bits()) {
-    if (!Dominators[x][OP])
+  for (auto x : BV) {
+    if (!Dominators[x].test(OP))
       return false;
-    for (auto y : ForcedDepends[x].set_bits())
-      if (!BV[y])
+    for (auto y : ForcedDepends[x])
+      if (!BV.test(y))
         return false;
-    for (auto y : DominatingDepends[x].set_bits())
-      if (!BV[y] && !Dominators[OP][y])
+    for (auto y : DominatingDepends[x])
+      if (!BV.test(y) && !Dominators[OP].test(y))
         return false;
   }
   return true;
@@ -149,7 +165,7 @@ void OutliningDependenceResults::addForcedDepend(Value *Def, Value *User) {
 void OutliningDependenceResults::finalizeDepends() {
   // Make DominatingDepends transitive.
   for (size_t i = 0; i < Nodes.size(); i++)
-    for (auto x : DominatingDepends[i].set_bits())
+    for (auto x : DominatingDepends[i])
       DominatingDepends[i] |= DominatingDepends[x];
 
   // If a phi node is outlined, force the block header to be outlined too.
@@ -180,18 +196,18 @@ void OutliningDependenceResults::finalizeDepends() {
   while (changed) {
     changed = false;
     for (size_t i = 0; i < Nodes.size(); i++) {
-      if (!ForcedDepends[i].any())
+      if (ForcedDepends[i].empty())
         continue;
 
-      BitVector OldForcedDepends = ForcedDepends[i];
-      BitVector Doms = Dominators[i];
-      BitVector Deps = DominatingDepends[i];
-      for (auto x : ForcedDepends[i].set_bits()) {
+      SparseBitVector OldForcedDepends = ForcedDepends[i];
+      SparseBitVector Doms = Dominators[i];
+      SparseBitVector Deps = DominatingDepends[i];
+      for (auto x : ForcedDepends[i]) {
         ForcedDepends[i] |= ForcedDepends[x];
         Doms &= Dominators[x];
         Deps |= DominatingDepends[x];
       }
-      Deps.reset(Doms);
+      Deps.intersectWithComplement(Doms);
       ForcedDepends[i] |= Deps;
       ForcedDepends[i].set(Doms.find_last());
       if (ForcedDepends[i] != OldForcedDepends)
@@ -233,12 +249,11 @@ void OutliningDependenceResults::numberNodes() {
   // Initialize NodeIndices and other fields.
   for (size_t i = 0; i < Nodes.size(); i++)
     NodeIndices[Nodes[i]] = i;
-  Dominators.resize(Nodes.size(), BitVector(Nodes.size()));
-  DominatingDepends.resize(Nodes.size(), BitVector(Nodes.size()));
-  ForcedDepends.resize(Nodes.size(), BitVector(Nodes.size()));
-  DataDepends.resize(Nodes.size(), BitVector(Nodes.size()));
-  ArgDepends.resize(Nodes.size(), BitVector(F.arg_size()));
-  PreventsOutlining = BitVector(Nodes.size());
+  Dominators.resize(Nodes.size());
+  DominatingDepends.resize(Nodes.size());
+  ForcedDepends.resize(Nodes.size());
+  DataDepends.resize(Nodes.size());
+  ArgDepends.resize(Nodes.size());
 
   // Fill in Dominators.
   for (size_t i = 0; i < Nodes.size(); i++) {
@@ -351,12 +366,13 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
 
   // TODO: relax some of these restrictions.
 
+  bool prevent_all_outlining = false;
   for (Argument &Arg : F.args())
     if (Arg.hasSwiftErrorAttr())
-      PreventsOutlining.set(); // disable outlining entirely (paranoid)
+      prevent_all_outlining = true; // paranoid
   if (AllocaInst *AI = dyn_cast<AllocaInst>(I))
     if (AI->isSwiftError())
-      PreventsOutlining.set(); // disable outlining entirely (paranoid)
+      prevent_all_outlining = true; // paranoid
 
   switch (I->getOpcode()) {
   case Instruction::Alloca:
@@ -435,24 +451,27 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::stacksave:
     case Intrinsic::strip_invariant_group:
     case Intrinsic::var_annotation:
-      PreventsOutlining.set(); // disable outlining entirely (paranoid)
+      prevent_all_outlining = true; // paranoid
       break;
     default:
       break;
     }
   }
+
+  if (prevent_all_outlining)
+    for (size_t i = 0; i < Nodes.size(); i++)
+      PreventsOutlining.set(i);
 }
 
-void OutliningDependenceResults::getExternals(const BitVector &BV,
-                                              BitVector &ArgInputs,
-                                              BitVector &ExternalInputs,
-                                              BitVector &ExternalOutputs) {
+void OutliningDependenceResults::getExternals(
+    const SparseBitVector<> &BV, SparseBitVector<> &ArgInputs,
+    SparseBitVector<> &ExternalInputs, SparseBitVector<> &ExternalOutputs) {
   // Figure out which inputs the outlined function will need to take as
   // arguments.
-  ArgInputs = BitVector(F.arg_size());
-  ExternalInputs = BitVector(Nodes.size());
-  ExternalOutputs = BitVector(Nodes.size());
-  for (size_t i : BV.set_bits()) {
+  ArgInputs.clear();
+  ExternalInputs.clear();
+  ExternalOutputs.clear();
+  for (auto i : BV) {
     // TODO: phi nodes could be handled better in certain cases. If the
     // outlining point is a block header, a phi node may have multiple inputs
     // from non-included blocks. The outlined function will really only need
@@ -460,14 +479,15 @@ void OutliningDependenceResults::getExternals(const BitVector &BV,
     ExternalInputs |= DataDepends[i];
     ArgInputs |= ArgDepends[i];
   }
-  ExternalInputs.reset(BV);
+  ExternalInputs.intersectWithComplement(BV);
 
   // Figure out which outputs the outlined function will need to include in its
   // return value.
-  BitVector NotBV = BV;
-  NotBV.flip();
-  for (size_t i : NotBV.set_bits())
+  for (size_t i = 0; i < Nodes.size(); i++) {
+    if (BV.test(i))
+      continue;
     ExternalOutputs |= DataDepends[i];
+  }
   ExternalOutputs &= BV;
 }
 

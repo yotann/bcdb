@@ -10,18 +10,6 @@
 #define isPassPointeeByValueArgument isByValOrInAllocaArgument
 #endif
 
-#if defined(LLVM_ADT_BITVECTOR_H)
-#include <iterator>
-// Add full iterator support for BitVector::set_bits().
-template <> struct std::iterator_traits<llvm::BitVector::set_iterator> {
-  typedef void difference_type;
-  typedef llvm::BitVector::size_type value_type;
-  typedef value_type reference;
-  typedef void pointer;
-  typedef std::input_iterator_tag iterator_category;
-};
-#endif
-
 #if defined(LLVM_IR_METADATA_H) && defined(LLVM_IR_MODULE_H)
 namespace bcdb {
 static inline void eraseModuleFlag(llvm::Module &M, llvm::StringRef Key) {

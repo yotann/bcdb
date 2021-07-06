@@ -33,7 +33,7 @@ OutliningCandidates::OutliningCandidates(Function &F,
                                          OutliningDependenceResults &OutDep)
     : F(F), OutDep(OutDep) {
   if (!OutlineOnly.empty()) {
-    BitVector BV(OutDep.Nodes.size());
+    SparseBitVector<> BV;
     for (int i : OutlineOnly)
       BV.set(i);
     if (!OutDep.isOutlinable(BV))
@@ -45,15 +45,17 @@ OutliningCandidates::OutliningCandidates(Function &F,
 
   createInitialCandidates();
   while (!Queue.empty()) {
-    BitVector BV = std::move(Queue.back());
+    SparseBitVector<> BV = std::move(Queue.back());
     Queue.pop_back();
     processCandidate(std::move(BV));
   }
 }
 
 void OutliningCandidates::print(raw_ostream &OS) const {
-  for (const BitVector &BV : Candidates)
-    OS << formatv("candidate: [{0}]\n", BV.set_bits());
+  for (const SparseBitVector<> &BV : Candidates) {
+    OS << "candidate: ";
+    dump(BV, OS);
+  }
 }
 
 void OutliningCandidates::createInitialCandidates() {
@@ -70,7 +72,7 @@ void OutliningCandidates::createInitialCandidates() {
       Last--;
 
     for (; First <= Last; First++) {
-      BitVector BV(OutDep.Nodes.size());
+      SparseBitVector<> BV;
       for (size_t i = First; i <= Last && i - First < OutlineMaxAdjacent; i++) {
         BV.set(i);
         BV |= OutDep.ForcedDepends[i];
@@ -80,24 +82,24 @@ void OutliningCandidates::createInitialCandidates() {
   }
 }
 
-void OutliningCandidates::queueBV(BitVector BV) {
+void OutliningCandidates::queueBV(SparseBitVector<> BV) {
   auto Pair = AlreadyVisited.insert(std::move(BV));
   if (Pair.second) {
     Queue.push_back(*Pair.first);
   }
 }
 
-void OutliningCandidates::processCandidate(BitVector BV) {
+void OutliningCandidates::processCandidate(SparseBitVector<> BV) {
   if (BV.count() > OutlineMaxNodes)
     return;
-  if (OutDep.PreventsOutlining.anyCommon(BV))
+  if (OutDep.PreventsOutlining.intersects(BV))
     return;
 
-  BitVector ArgInputs, ExternalInputs, ExternalOutputs;
+  SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
   OutDep.getExternals(BV, ArgInputs, ExternalInputs, ExternalOutputs);
   int score =
       -1 - ArgInputs.count() - ExternalInputs.count() - ExternalOutputs.count();
-  for (size_t i : BV.set_bits()) {
+  for (size_t i : BV) {
     if (Instruction *I = dyn_cast<Instruction>(OutDep.Nodes[i])) {
       score += 1;
       if (CallBase *CB = dyn_cast<CallBase>(I))
@@ -106,8 +108,8 @@ void OutliningCandidates::processCandidate(BitVector BV) {
   }
 
   if (!OutDep.isOutlinable(BV)) {
-    report_fatal_error(
-        formatv("invalid outlining candidate: [{0}]", BV.set_bits()).str());
+    dump(BV, errs());
+    report_fatal_error("invalid outlining candidate");
   }
   if (OutlineUnprofitable || score > 0)
     Candidates.push_back(BV);
@@ -122,21 +124,31 @@ void OutliningCandidates::processCandidate(BitVector BV) {
   // - in general, boring terminators need more thought
 
   // Generate the next candidate.
-  BitVector Deps;
-  for (size_t i : BV.set_bits())
+  SparseBitVector<> Deps;
+  for (auto i : BV)
     Deps |= OutDep.DominatingDepends[i];
-  int NewI = Deps.find_prev(DomI);
-  if (NewI < 0)
+  int new_i = -1;
+  for (auto i : Deps) {
+    if (i >= DomI)
+      break;
+    new_i = i;
+  }
+  if (new_i < 0)
     return;
-  BV.set(NewI);
+  BV.set(new_i);
 
-  BV |= OutDep.ForcedDepends[NewI];
-  // Forced depends may cause the outlining point to move before NewI, in which
-  // case we need to add any dominating depends that lie between the outlining
-  // point and NewI.
-  for (int i = Deps.find_next(BV.find_first()); i >= 0 && i < NewI;
-       i = Deps.find_next(i))
-    BV.set(i);
+  BV |= OutDep.ForcedDepends[new_i];
+  // Forced depends may cause the outlining point to move before new_i, in
+  // which case we need to add any dominating depends that lie between the
+  // outlining point and new_i.
+  auto new_op = BV.find_first();
+  assert(new_op >= 0);
+  for (auto i : Deps) {
+    if (i >= static_cast<size_t>(new_i))
+      break;
+    if (i > static_cast<size_t>(new_op))
+      BV.set(i);
+  }
 
   queueBV(BV);
 }

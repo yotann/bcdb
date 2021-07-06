@@ -1,9 +1,9 @@
 #ifndef BCDB_OUTLINING_DEPENDENCE_H
 #define BCDB_OUTLINING_DEPENDENCE_H
 
-#include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Pass.h>
 #include <vector>
 
@@ -37,10 +37,11 @@ public:
 
   void print(raw_ostream &OS) const;
 
-  bool isOutlinable(const BitVector &BV) const;
+  bool isOutlinable(const SparseBitVector<> &BV) const;
 
-  void getExternals(const BitVector &BV, BitVector &ArgInputs,
-                    BitVector &ExternalInputs, BitVector &ExternalOutputs);
+  void getExternals(const SparseBitVector<> &BV, SparseBitVector<> &ArgInputs,
+                    SparseBitVector<> &ExternalInputs,
+                    SparseBitVector<> &ExternalOutputs);
 
   // Each node must be one of the following types:
   // - Instruction
@@ -51,23 +52,23 @@ public:
   // We guarantee Nodes[NodeIndices[V]] == V.
   DenseMap<Value *, ssize_t> NodeIndices;
 
-  BitVector PreventsOutlining;
+  SparseBitVector<> PreventsOutlining;
 
-  std::vector<BitVector> DataDepends;
-  std::vector<BitVector> ArgDepends;
+  std::vector<SparseBitVector<>> DataDepends;
+  std::vector<SparseBitVector<>> ArgDepends;
 
   // If Dominators[i][j] is true, Nodes[i] is dominated by Nodes[j]. Note that
   // nodes dominate themselves--Dominators[i][i] is always true.
-  std::vector<BitVector> Dominators;
+  std::vector<SparseBitVector<>> Dominators;
 
   // If ForcedDepends[i][j] is true, in order for Nodes[i] to be outlined,
   // Nodes[j] must also be outlined.
-  std::vector<BitVector> ForcedDepends;
+  std::vector<SparseBitVector<>> ForcedDepends;
 
   // If DominatingDepends[i][j] is true, in order for Nodes[i] to be outlined,
   // either Nodes[j] must also be outlined, or Nodes[j] must dominate the
   // outlining point.
-  std::vector<BitVector> DominatingDepends;
+  std::vector<SparseBitVector<>> DominatingDepends;
 
   Function &F;
   DominatorTree &DT;
