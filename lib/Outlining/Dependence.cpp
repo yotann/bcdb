@@ -130,7 +130,7 @@ std::optional<size_t> OutliningDependenceResults::lookupNode(Value *V) {
   return std::nullopt;
 }
 
-void OutliningDependenceResults::addDepend(Value *Def, Value *User,
+void OutliningDependenceResults::addDepend(Value *User, Value *Def,
                                            bool is_data_dependency) {
   auto UserI = lookupNode(User);
   if (!UserI)
@@ -150,7 +150,7 @@ void OutliningDependenceResults::addDepend(Value *Def, Value *User,
     DataDepends[*UserI].set(*DefI);
 }
 
-void OutliningDependenceResults::addForcedDepend(Value *Def, Value *User) {
+void OutliningDependenceResults::addForcedDepend(Value *User, Value *Def) {
   auto UserI = lookupNode(User);
   auto DefI = lookupNode(Def);
   if (!UserI || !DefI)
@@ -263,7 +263,7 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
       for (size_t j = 0; j < i; j++)
         if (DT.dominates(path[j], path[i]))
           dep = path[j];
-      addDepend(dep, path[i]);
+      addDepend(path[i], dep);
     }
 
     // If we outline a conditional branch, we must also outline every node
@@ -280,9 +280,9 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
     // to indicate the entire path through the loop).
     Value *branch = a->getTerminator();
     for (BasicBlock *m : path) {
-      addForcedDepend(m, branch);
+      addForcedDepend(branch, m);
       for (Instruction &ins : *m)
-        addForcedDepend(&ins, branch);
+        addForcedDepend(branch, &ins);
     }
   }
 
@@ -294,9 +294,9 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
 }
 
 void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
-  addForcedDepend(MPhi->getBlock(), MPhi);
+  addForcedDepend(MPhi, MPhi->getBlock());
   for (Value *V2 : MPhi->incoming_values())
-    addDepend(V2, MPhi);
+    addDepend(MPhi, V2);
 }
 
 void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
@@ -307,29 +307,29 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       addForcedDepend(Op, I);
       addForcedDepend(I, Op);
     } else if (!isa<BasicBlock>(Op)) {
-      addDepend(Op, I, /*is_data_dependency*/ true);
+      addDepend(I, Op, /*is_data_dependency*/ true);
     }
   }
 
   // Memory dependences
   if (MSSA.getMemoryAccess(I)) {
     MemoryAccess *MA = MSSA.getWalker()->getClobberingMemoryAccess(I);
-    addDepend(MA, I);
+    addDepend(I, MA);
   }
 
   // Control dependences
-  addDepend(I->getParent(), I);
+  addDepend(I, I->getParent());
 
   if (I->isEHPad())
     for (BasicBlock *BB : predecessors(I->getParent()))
-      addForcedDepend(BB->getTerminator(), I);
+      addForcedDepend(I, BB->getTerminator());
 
   if (I->mayThrow() || !I->willReturn()) {
     // All subsequent instructions are actually control-dependent on this one.
     for (Instruction *J = I->getNextNode(); J != nullptr; J = J->getNextNode())
-      addDepend(I, J);
+      addDepend(J, I);
     for (BasicBlock *BB : successors(I->getParent()))
-      addDepend(I, BB);
+      addDepend(BB, I);
   }
   // XXX: we ignore control dependences on instructions that might trap (divide
   // by 0, load from invalid address, etc.) as well as volatile memory
@@ -337,7 +337,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
 
   switch (I->getOpcode()) {
   case Instruction::PHI:
-    addForcedDepend(I->getParent(), I);
+    addForcedDepend(I, I->getParent());
     break;
   case Instruction::Ret:
     // TODO: if we're returning a value other than void, we could outline the
@@ -354,7 +354,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   case Instruction::Invoke:
     // TODO: we could outline invoke instructions as call instructions, and
     // leave the exception handling in the caller.
-    addForcedDepend(cast<InvokeInst>(I)->getUnwindDest()->getFirstNonPHI(), I);
+    addForcedDepend(I, cast<InvokeInst>(I)->getUnwindDest()->getFirstNonPHI());
     break;
   case Instruction::Resume:
     // landingpad and resume instructions must stay together.
@@ -375,7 +375,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       if (csi->unwindsToCaller())
         PreventsOutlining.set(NodeIndices[I]); // same as a return instruction
     for (BasicBlock *Succ : successors(I->getParent()))
-      addForcedDepend(Succ->getFirstNonPHI(), I);
+      addForcedDepend(I, Succ->getFirstNonPHI());
     break;
   case Instruction::Alloca: {
     RecordingCaptureTracker tracker;
@@ -386,7 +386,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       // If the alloca is outlined, everything that could possibly use it must
       // be outlined too.
       for (Instruction *use : tracker.uses)
-        addForcedDepend(use, I);
+        addForcedDepend(I, use);
     }
     break;
   }

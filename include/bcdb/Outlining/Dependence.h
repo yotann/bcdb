@@ -89,8 +89,8 @@ public:
 
 private:
   std::optional<size_t> lookupNode(Value *V);
-  void addDepend(Value *Def, Value *User, bool is_data_dependency = false);
-  void addForcedDepend(Value *Def, Value *User);
+  void addDepend(Value *User, Value *Def, bool is_data_dependency = false);
+  void addForcedDepend(Value *User, Value *Def);
   void numberNodes();
   void analyzeBlock(BasicBlock *BB);
   void analyzeMemoryPhi(MemoryPhi *MPhi);
