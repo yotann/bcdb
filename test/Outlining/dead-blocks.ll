@@ -8,7 +8,7 @@
 ; CHECK-LABEL: define void @f()
 define void @f() {
 ; CHECK: block 0 depends [] forced []
-; CHECK-NEXT: node 1 depends [0] forced []
+; CHECK-NEXT: node 1 prevents outlining
 ; CHECK-NEXT: ret void
   ret void
 

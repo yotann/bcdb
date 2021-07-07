@@ -31,7 +31,7 @@ else:
 
 ; CHECK: endif:
 ; CHECK-NEXT: block 6 depends [] forced []
-; CHECK-NEXT: node 7 depends [6] forced []
+; CHECK-NEXT: node 7 prevents outlining
 ; CHECK-NEXT: ret void
 endif:
   ret void
@@ -78,7 +78,7 @@ body:
 
 ; CHECK: exit:
 ; CHECK-NEXT: block 10 depends [] forced []
-; CHECK-NEXT: node 11 depends [10] forced []
+; CHECK-NEXT: node 11 prevents outlining
 ; CHECK-NEXT: ret void
 exit:
   ret void
@@ -125,7 +125,7 @@ body:
 
 ; CHECK: exit:
 ; CHECK-NEXT: block 10 depends [] forced []
-; CHECK-NEXT: node 11 depends [10] forced []
+; CHECK-NEXT: node 11 prevents outlining
 ; CHECK-NEXT: ret void
 exit:
   ret void
@@ -158,7 +158,7 @@ right:
 
 ; CHECK: exit:
 ; CHECK-NEXT: block 6 depends [] forced []
-; CHECK-NEXT: node 7 depends [6] forced []
+; CHECK-NEXT: node 7 prevents outlining
 ; CHECK-NEXT: ret void
 exit:
   ret void

@@ -1,6 +1,7 @@
 #include "bcdb/Outlining/Dependence.h"
 
 #include <llvm/ADT/SparseBitVector.h>
+#include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/AssemblyAnnotationWriter.h>
@@ -210,6 +211,25 @@ void OutliningDependenceResults::numberNodes() {
   }
 }
 
+namespace {
+struct RecordingCaptureTracker : CaptureTracker {
+  SmallVector<Instruction *, 20> uses;
+  bool Captured = false;
+
+  void tooManyUses() override { Captured = true; }
+
+  bool shouldExplore(const Use *use) override {
+    uses.push_back(cast<Instruction>(use->getUser()));
+    return true;
+  }
+
+  bool captured(const Use *use) override {
+    Captured = true;
+    return true;
+  }
+};
+} // end anonymous namespace
+
 void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // Calculate control dependence as described in section 3.1 of:
   // J. Ferrante et al., "Program Dependence Graph and Its Use in
@@ -274,59 +294,61 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
 }
 
 void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
+  addForcedDepend(MPhi->getBlock(), MPhi);
   for (Value *V2 : MPhi->incoming_values())
     addDepend(V2, MPhi);
 }
 
 void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
-  // Data dependencies
+  // Data dependences
   for (Value *Op : I->operands()) {
     if (Op->getType()->isTokenTy()) {
       // We can't pass a token as an argument or return value.
       addForcedDepend(Op, I);
       addForcedDepend(I, Op);
     } else if (!isa<BasicBlock>(Op)) {
-      addDepend(Op, I, /* data */ true);
+      addDepend(Op, I, /*is_data_dependency*/ true);
     }
   }
 
-  // The value of a PHI node depends on which branch led to it.
-  // TODO: if the PHI assigns the same value to multiple edges, we could
-  // simplify the dependencies in some cases.
-  if (PHINode *PHI = dyn_cast<PHINode>(I))
-    for (BasicBlock *BB : PHI->blocks())
-      addForcedDepend(BB->getTerminator(), PHI);
-
-  // Memory dependencies
+  // Memory dependences
   if (MSSA.getMemoryAccess(I)) {
-    // FIXME: should we be using getSkipSelfWalker?
     MemoryAccess *MA = MSSA.getWalker()->getClobberingMemoryAccess(I);
     addDepend(MA, I);
   }
 
-  // Control dependencies
+  // Control dependences
   addDepend(I->getParent(), I);
 
   if (I->isEHPad())
     for (BasicBlock *BB : predecessors(I->getParent()))
       addForcedDepend(BB->getTerminator(), I);
-  // FIXME: is "unwind to caller" handled correctly?
 
-  // TODO: relax some of these restrictions.
+  if (I->mayThrow() || !I->willReturn()) {
+    // All subsequent instructions are actually control-dependent on this one.
+    for (Instruction *J = I->getNextNode(); J != nullptr; J = J->getNextNode())
+      addDepend(I, J);
+    for (BasicBlock *BB : successors(I->getParent()))
+      addDepend(I, BB);
+  }
+  // XXX: we ignore control dependences on instructions that might trap (divide
+  // by 0, load from invalid address, etc.) as well as volatile memory
+  // accesses.
 
-  bool prevent_all_outlining = false;
-  for (Argument &Arg : F.args())
-    if (Arg.hasSwiftErrorAttr())
-      prevent_all_outlining = true; // paranoid
-  if (AllocaInst *AI = dyn_cast<AllocaInst>(I))
-    if (AI->isSwiftError())
-      prevent_all_outlining = true; // paranoid
-
-  // TODO: use PointerMayBeCaptured and mark some allocas as outlineable.
   switch (I->getOpcode()) {
-  case Instruction::Alloca:
+  case Instruction::PHI:
+    addForcedDepend(I->getParent(), I);
+    break;
+  case Instruction::Ret:
+    // TODO: if we're returning a value other than void, we could outline the
+    // return instructions as long as every path in the outlined callee reaches
+    // a return instruction (or unreachable, or a call to abort(), etc.). But
+    // there isn't an easy way to represent this constraint.
+    PreventsOutlining.set(NodeIndices[I]);
+    break;
   case Instruction::IndirectBr:
   case Instruction::CallBr:
+    // Too rare to bother adding outlining support.
     PreventsOutlining.set(NodeIndices[I]);
     break;
   case Instruction::Invoke:
@@ -334,11 +356,40 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     // leave the exception handling in the caller.
     addForcedDepend(cast<InvokeInst>(I)->getUnwindDest()->getFirstNonPHI(), I);
     break;
-  case Instruction::CleanupRet:
+  case Instruction::Resume:
+    // landingpad and resume instructions must stay together.
+    for (BasicBlock &BB : F) {
+      Instruction *first = BB.getFirstNonPHI();
+      if (first->getOpcode() == Instruction::LandingPad) {
+        addForcedDepend(I, first);
+        addForcedDepend(first, I);
+      }
+    }
+    break;
   case Instruction::CatchSwitch:
+  case Instruction::CleanupRet:
+    if (auto cri = dyn_cast<CleanupReturnInst>(I))
+      if (cri->unwindsToCaller())
+        PreventsOutlining.set(NodeIndices[I]); // same as a return instruction
+    if (auto csi = dyn_cast<CatchSwitchInst>(I))
+      if (csi->unwindsToCaller())
+        PreventsOutlining.set(NodeIndices[I]); // same as a return instruction
     for (BasicBlock *Succ : successors(I->getParent()))
       addForcedDepend(Succ->getFirstNonPHI(), I);
     break;
+  case Instruction::Alloca: {
+    RecordingCaptureTracker tracker;
+    PointerMayBeCaptured(I, &tracker, /*MaxUsesToExplore*/ 100);
+    if (tracker.Captured) {
+      PreventsOutlining.set(NodeIndices[I]);
+    } else {
+      // If the alloca is outlined, everything that could possibly use it must
+      // be outlined too.
+      for (Instruction *use : tracker.uses)
+        addForcedDepend(use, I);
+    }
+    break;
+  }
   default:
     break;
   }
@@ -350,8 +401,6 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     switch (CB->getIntrinsicID()) {
     case Intrinsic::addressofreturnaddress:
     case Intrinsic::frameaddress:
-    case Intrinsic::lifetime_end:
-    case Intrinsic::lifetime_start:
     case Intrinsic::returnaddress:
     case Intrinsic::vaend:
     case Intrinsic::vastart:
@@ -400,16 +449,13 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::stacksave:
     case Intrinsic::strip_invariant_group:
     case Intrinsic::var_annotation:
-      prevent_all_outlining = true; // paranoid
+      // Not sure if all of these prevent outlining, but let's be conservative.
+      PreventsOutlining.set(NodeIndices[I]);
       break;
     default:
       break;
     }
   }
-
-  if (prevent_all_outlining)
-    for (size_t i = 0; i < Nodes.size(); i++)
-      PreventsOutlining.set(i);
 }
 
 void OutliningDependenceResults::getExternals(
@@ -420,24 +466,75 @@ void OutliningDependenceResults::getExternals(
   ArgInputs.clear();
   ExternalInputs.clear();
   ExternalOutputs.clear();
+
+  auto addInputValue = [&](Value *v) {
+    if (Argument *arg = dyn_cast<Argument>(v)) {
+      ArgInputs.set(arg->getArgNo());
+    } else if (NodeIndices.count(v)) {
+      ExternalInputs.set(NodeIndices[v]);
+    }
+  };
+
+  // Figure out which outputs the outlined function will need to include in its
+  // return value.
+  SparseBitVector<> output_phis;
+  for (size_t i = 0; i < Nodes.size(); i++) {
+    if (BV.test(i))
+      continue;
+    if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
+      unsigned num_outlined = 0;
+      SmallVector<Value *, 8> phi_incoming;
+      for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
+        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()])) {
+          phi_incoming.push_back(phi->getIncomingValue(j));
+          num_outlined++;
+        }
+      }
+      if (num_outlined > 1) {
+        // The phi value partly depends on control flow within the outlined
+        // callee, so we need to outline part or all of the phi. We also need
+        // to make sure the appropriate phi input values are accessible.
+        for (Value *v : phi_incoming)
+          addInputValue(v);
+        output_phis.set(i);
+        continue;
+      }
+    }
+    ExternalOutputs |= DataDepends[i];
+  }
+  ExternalOutputs &= BV;
+  ExternalOutputs |= output_phis;
+
+  SparseBitVector<> input_phis;
   for (auto i : BV) {
-    // TODO: phi nodes could be handled better in certain cases. If the
-    // outlining point is a block header, a phi node may have multiple inputs
-    // from non-included blocks. The outlined function will really only need
-    // one argument to handle all of those inputs.
+    if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
+      SmallPtrSet<Value *, 8> phi_incoming;
+      for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
+        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()])) {
+          // This part of the phi will be outlined, so we need to make sure the
+          // appropriate phi input values are accessible.
+          addInputValue(phi->getIncomingValue(j));
+        } else {
+          phi_incoming.insert(phi->getIncomingValue(j));
+        }
+      }
+      if (phi_incoming.size() > 1) {
+        // The phi value partly depends on control flow within the outlined
+        // caller, so we need to leave part or all of the phi in the caller,
+        // and provide its value to the callee.
+        input_phis.set(i);
+      } else if (!phi_incoming.empty()) {
+        // The phi value only depends on control flow within the outlined
+        // callee, but there's one value we need from the caller.
+        addInputValue(*phi_incoming.begin());
+      }
+      continue;
+    }
     ExternalInputs |= DataDepends[i];
     ArgInputs |= ArgDepends[i];
   }
   ExternalInputs.intersectWithComplement(BV);
-
-  // Figure out which outputs the outlined function will need to include in its
-  // return value.
-  for (size_t i = 0; i < Nodes.size(); i++) {
-    if (BV.test(i))
-      continue;
-    ExternalOutputs |= DataDepends[i];
-  }
-  ExternalOutputs &= BV;
+  ExternalInputs |= input_phis;
 }
 
 void OutliningDependenceResults::finalizeDepends() {
@@ -445,17 +542,6 @@ void OutliningDependenceResults::finalizeDepends() {
   for (size_t i = 0; i < Nodes.size(); i++)
     for (auto x : DominatingDepends[i])
       DominatingDepends[i] |= DominatingDepends[x];
-
-  // If a phi node is outlined, force the block header to be outlined too.
-  // (It doesn't make sense to outline a phi node without the other phi nodes,
-  // or without some control flow leading to the block.)
-  size_t HeaderI = 0;
-  for (size_t i = 0; i < Nodes.size(); i++) {
-    if (isa<BasicBlock>(Nodes[i]))
-      HeaderI = i;
-    if (isa<PHINode>(Nodes[i]) || isa<MemoryPhi>(Nodes[i]))
-      ForcedDepends[i].set(HeaderI);
-  }
 
   // Make ForcedDepends[i] include everything we need to outline in order to
   // outline Nodes[i]. We add several things to ForcedDepends[i]:
