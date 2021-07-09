@@ -8,6 +8,8 @@
 #include <optional>
 #include <vector>
 
+#include "bcdb/Outlining/CorrectPostDominatorTree.h"
+
 namespace llvm {
 class AnalysisUsage;
 class BasicBlock;
@@ -85,6 +87,7 @@ public:
   Function &F;
   DominatorTree &DT;
   PostDominatorTree &PDT;
+  CorrectPostDominatorTree CPDT;
   MemorySSA &MSSA;
 
 private:

@@ -4,6 +4,7 @@
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/PostDominators.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "bcdb/LLVMCompat.h"
+#include "bcdb/Outlining/CorrectPostDominatorTree.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -76,9 +78,10 @@ OutliningDependenceResults::OutliningDependenceResults(Function &F,
                                                        DominatorTree &DT,
                                                        PostDominatorTree &PDT,
                                                        MemorySSA &MSSA)
-    : F(F), DT(DT), PDT(PDT), MSSA(MSSA) {
-  DT.updateDFSNumbers();  // Needed for fast queries.
-  PDT.updateDFSNumbers(); // Needed for fast queries.
+    : F(F), DT(DT), PDT(PDT), CPDT(F), MSSA(MSSA) {
+  DT.updateDFSNumbers();   // Needed for fast queries.
+  PDT.updateDFSNumbers();  // Needed for fast queries.
+  CPDT.updateDFSNumbers(); // Needed for fast queries.
   numberNodes();
   for (Value *V : Nodes) {
     if (BasicBlock *BB = dyn_cast<BasicBlock>(V))
@@ -234,15 +237,34 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // Calculate control dependence as described in section 3.1 of:
   // J. Ferrante et al., "Program Dependence Graph and Its Use in
   // Optimization". We use the same variable names as that paper.
+
+  // This loop finds all control dependences and adds corresponding dominating
+  // dependences.
+  //
+  // We can't use LLVM's standard PostDominatorTree because it ignores implicit
+  // control dependences in cases like this:
+  //
+  // function_that_sometimes_calls_abort();
+  // if (condition) { /* ... */ }
+  // puts("success");
+  //
+  // The puts() has a control dependence on
+  // function_that_sometimes_calls_abort(), but PostDominatorTree ignores the
+  // dependence. We use CorrectPostDominatorTree instead, which handles the
+  // dependence properly.
+  //
+  // Note that this loop doesn't need to iterate over the new CFG edges added
+  // by CorrectPostDominatorTree. (They only affect the dependences of the
+  // implicit node, which we don't care about.)
   BasicBlock *a = BB;
   for (BasicBlock *b : successors(a)) {
-    if (PDT.properlyDominates(b, a))
+    if (CPDT.properlyDominates(b, a))
       continue;
 
-    auto l = PDT[a]->getIDom();
+    auto l = CPDT[a]->getIDom();
     SmallVector<BasicBlock *, 8> path;
-    for (auto m = PDT[b]; m != l; m = m->getIDom())
-      path.push_back(m->getBlock());
+    for (auto m = CPDT[b]; m != l; m = m->getIDom())
+      path.push_back(m->getBlock()->bb);
 
     // Instead of always making every node in the path control-dependent on A,
     // like in the Ferrante paper, we make an exception. If M is
@@ -259,25 +281,48 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
     // on C, and we make B and C control-dependent on A, so we aren't forced to
     // outline the whole loop if we just want to outline part of the body.
     for (size_t i = 0; i < path.size(); i++) {
+      if (!path[i]) {
+        // We reached the implicit CFG node added by CorrectPostDominatorTree,
+        // which doesn't have a dependence node.
+        assert(i == path.size() - 1);
+        break;
+      }
       Value *dep = a->getTerminator();
       for (size_t j = 0; j < i; j++)
         if (DT.dominates(path[j], path[i]))
           dep = path[j];
       addDepend(path[i], dep);
     }
+  }
 
-    // If we outline a conditional branch, we must also outline every node
-    // that's control-dependent on the branch (using the standard definition of
-    // control dependence, not the modified one used above). Otherwise we would
-    // end up needing the same conditional branch in both the outlined callee
-    // and the modified caller.
-    //
-    // TODO: Experiment with relaxing this restriction; if the outlined callee
-    // returns a value that indicates which path it took, we can duplicate the
-    // conditional branches in both the caller and callee and make the caller
-    // follow the same path. This still wouldn't work well for complex control
-    // flow (if there's a loop containing an if-else, there's no efficient way
-    // to indicate the entire path through the loop).
+  // If we outline a conditional branch, we must also outline every node that's
+  // control-dependent on the branch (using the standard definition of control
+  // dependence, not the modified one used above). Otherwise we would end up
+  // needing the same conditional branch in both the outlined callee and the
+  // modified caller.
+  //
+  // This loop needs to use the standard PostDominatorTree, not
+  // CorrectPostDominatorTree, because we only care about explicit control
+  // flow. If we outline a call like function_that_sometimes_calls_abort(),
+  // without the other statements that have a control dependence on it, the
+  // program will still work fine.
+  //
+  // TODO: Experiment with relaxing this restriction; if the outlined callee
+  // returns a value that indicates which path it took, we can duplicate the
+  // conditional branches in both the caller and callee and make the caller
+  // follow the same path. This still wouldn't work well for complex control
+  // flow (if there's a loop containing an if-else, there's no efficient way to
+  // indicate the entire path through the loop).
+  a = BB;
+  for (BasicBlock *b : successors(a)) {
+    if (PDT.properlyDominates(b, a))
+      continue;
+
+    auto l = PDT[a]->getIDom();
+    SmallVector<BasicBlock *, 8> path;
+    for (auto m = PDT[b]; m != l; m = m->getIDom())
+      path.push_back(m->getBlock());
+
     Value *branch = a->getTerminator();
     for (BasicBlock *m : path) {
       addForcedDepend(branch, m);
@@ -300,7 +345,7 @@ void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
 }
 
 void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
-  // Data dependences
+  // Data dependences.
   for (Value *Op : I->operands()) {
     if (Op->getType()->isTokenTy()) {
       // We can't pass a token as an argument or return value.
@@ -311,29 +356,31 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     }
   }
 
-  // Memory dependences
+  // Memory dependences.
   if (MSSA.getMemoryAccess(I)) {
     MemoryAccess *MA = MSSA.getWalker()->getClobberingMemoryAccess(I);
     addDepend(I, MA);
   }
 
-  // Control dependences
+  // Control dependences.
   addDepend(I, I->getParent());
 
-  if (I->isEHPad())
-    for (BasicBlock *BB : predecessors(I->getParent()))
-      addForcedDepend(I, BB->getTerminator());
-
-  if (I->mayThrow() || !I->willReturn()) {
+  // Implicit control dependences within the same block.
+  // (For implicit control dependences that cross multiple blocks, the
+  // depending instruction will depend on its own block thanks to the line
+  // above, which will depend on this instruction's block's terminator thanks
+  // to analyzeBlock(), which will depend on this instruction thanks to the
+  // following code.)
+  if (!isGuaranteedToTransferExecutionToSuccessor(I)) {
     // All subsequent instructions are actually control-dependent on this one.
     for (Instruction *J = I->getNextNode(); J != nullptr; J = J->getNextNode())
       addDepend(J, I);
-    for (BasicBlock *BB : successors(I->getParent()))
-      addDepend(BB, I);
   }
-  // XXX: we ignore control dependences on instructions that might trap (divide
-  // by 0, load from invalid address, etc.) as well as volatile memory
-  // accesses.
+
+  // Exception pad instructions must stay with their predecessors.
+  if (I->isEHPad())
+    for (BasicBlock *BB : predecessors(I->getParent()))
+      addForcedDepend(I, BB->getTerminator());
 
   switch (I->getOpcode()) {
   case Instruction::PHI:
@@ -342,8 +389,8 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   case Instruction::Ret:
     // TODO: if we're returning a value other than void, we could outline the
     // return instructions as long as every path in the outlined callee reaches
-    // a return instruction (or unreachable, or a call to abort(), etc.). But
-    // there isn't an easy way to represent this constraint.
+    // a return instruction (or unreachable, or a call to abort(), etc.). It
+    // might help to use the mergereturn pass first.
     PreventsOutlining.set(NodeIndices[I]);
     break;
   case Instruction::IndirectBr:
@@ -374,17 +421,20 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     if (auto csi = dyn_cast<CatchSwitchInst>(I))
       if (csi->unwindsToCaller())
         PreventsOutlining.set(NodeIndices[I]); // same as a return instruction
+    // These instructions must stay together with their successors.
     for (BasicBlock *Succ : successors(I->getParent()))
       addForcedDepend(I, Succ->getFirstNonPHI());
     break;
   case Instruction::Alloca: {
+    // If the alloca is outlined, everything that could possibly use it must be
+    // outlined too.
     RecordingCaptureTracker tracker;
     PointerMayBeCaptured(I, &tracker, /*MaxUsesToExplore*/ 100);
     if (tracker.Captured) {
+      // We can't tell which instructions might use the alloca, so we can't
+      // outline it.
       PreventsOutlining.set(NodeIndices[I]);
     } else {
-      // If the alloca is outlined, everything that could possibly use it must
-      // be outlined too.
       for (Instruction *use : tracker.uses)
         addForcedDepend(I, use);
     }
@@ -398,6 +448,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     if (CB->isMustTailCall())
       PreventsOutlining.set(NodeIndices[I]);
 
+    // FIXME: use a whitelist instead of a blacklist.
     switch (CB->getIntrinsicID()) {
     case Intrinsic::addressofreturnaddress:
     case Intrinsic::frameaddress:
