@@ -448,62 +448,154 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     if (CB->isMustTailCall())
       PreventsOutlining.set(NodeIndices[I]);
 
-    // FIXME: use a whitelist instead of a blacklist.
+    // Some intrinsics, like vastart, will not work correctly if moved to
+    // another function. Unfortunately there's no simple way to check which
+    // intrinsics are outlinable, so we need to list all the safe ones.
     switch (CB->getIntrinsicID()) {
-    case Intrinsic::addressofreturnaddress:
-    case Intrinsic::frameaddress:
-    case Intrinsic::returnaddress:
-    case Intrinsic::vaend:
-    case Intrinsic::vastart:
+
+    case Intrinsic::not_intrinsic:
+      // Safe to outline.
+      break;
+
+    case Intrinsic::bitreverse:
+    case Intrinsic::bswap:
+    case Intrinsic::canonicalize:
+    case Intrinsic::ceil:
+    case Intrinsic::convert_from_fp16:
+    case Intrinsic::convert_to_fp16:
+    case Intrinsic::copysign:
+    case Intrinsic::cos:
+    case Intrinsic::ctlz:
+    case Intrinsic::ctpop:
+    case Intrinsic::cttz:
+    case Intrinsic::exp:
+    case Intrinsic::exp2:
+    case Intrinsic::fabs:
+    case Intrinsic::floor:
+    case Intrinsic::fma:
+    case Intrinsic::fmuladd:
+    case Intrinsic::fshl:
+    case Intrinsic::fshr:
+    case Intrinsic::llrint:
+    case Intrinsic::llround:
+    case Intrinsic::log:
+    case Intrinsic::log10:
+    case Intrinsic::log2:
+    case Intrinsic::lrint:
+    case Intrinsic::lround:
+    case Intrinsic::maximum:
+    case Intrinsic::maxnum:
+    case Intrinsic::minimum:
+    case Intrinsic::minnum:
+    case Intrinsic::nearbyint:
+    case Intrinsic::pow:
+    case Intrinsic::powi:
+    case Intrinsic::rint:
+    case Intrinsic::round:
+    case Intrinsic::sadd_sat:
+    case Intrinsic::sadd_with_overflow:
+    case Intrinsic::sdiv_fix:
+    case Intrinsic::sin:
+    case Intrinsic::smul_fix:
+    case Intrinsic::smul_fix_sat:
+    case Intrinsic::smul_with_overflow:
+    case Intrinsic::sqrt:
+    case Intrinsic::ssub_sat:
+    case Intrinsic::ssub_with_overflow:
+    case Intrinsic::trunc:
+    case Intrinsic::uadd_sat:
+    case Intrinsic::uadd_with_overflow:
+    case Intrinsic::udiv_fix:
+    case Intrinsic::umul_fix:
+    case Intrinsic::umul_fix_sat:
+    case Intrinsic::umul_with_overflow:
+    case Intrinsic::usub_sat:
+    case Intrinsic::usub_with_overflow:
+#if LLVM_VERSION_MAJOR >= 11
+    case Intrinsic::roundeven:
+    case Intrinsic::sdiv_fix_sat:
+    case Intrinsic::udiv_fix_sat:
+    case Intrinsic::vp_add:
+    case Intrinsic::vp_and:
+    case Intrinsic::vp_ashr:
+    case Intrinsic::vp_lshr:
+    case Intrinsic::vp_mul:
+    case Intrinsic::vp_or:
+    case Intrinsic::vp_sdiv:
+    case Intrinsic::vp_shl:
+    case Intrinsic::vp_srem:
+    case Intrinsic::vp_sub:
+    case Intrinsic::vp_udiv:
+    case Intrinsic::vp_urem:
+    case Intrinsic::vp_xor:
+#endif
+#if LLVM_VERSION_MAJOR >= 12
+    case Intrinsic::abs:
+    case Intrinsic::fptosi_sat:
+    case Intrinsic::fptoui_sat:
+    case Intrinsic::smax:
+    case Intrinsic::smin:
+    case Intrinsic::sshl_sat:
+    case Intrinsic::umax:
+    case Intrinsic::umin:
+    case Intrinsic::ushl_sat:
+    case Intrinsic::vector_reduce_add:
+    case Intrinsic::vector_reduce_and:
+    case Intrinsic::vector_reduce_fadd:
+    case Intrinsic::vector_reduce_fmax:
+    case Intrinsic::vector_reduce_fmin:
+    case Intrinsic::vector_reduce_fmul:
+    case Intrinsic::vector_reduce_mul:
+    case Intrinsic::vector_reduce_or:
+    case Intrinsic::vector_reduce_smax:
+    case Intrinsic::vector_reduce_smin:
+    case Intrinsic::vector_reduce_umax:
+    case Intrinsic::vector_reduce_umin:
+    case Intrinsic::vector_reduce_xor:
+#endif
+      // Simple computations (may depend on rounding mode). Safe to outline.
+      break;
+
+    case Intrinsic::expect:
+    case Intrinsic::lifetime_end:
+    case Intrinsic::memcpy:
+    case Intrinsic::memmove:
+    case Intrinsic::memset:
+    case Intrinsic::vacopy:
+#if LLVM_VERSION_MAJOR >= 11
+    case Intrinsic::expect_with_probability:
+    case Intrinsic::memcpy_inline:
+#endif
+      // Should be safe to outline.
+      break;
+
+    case Intrinsic::lifetime_start:
+      // Can't necessarily be outlined. If there are two
+      // lifetime_start...lifetime_end ranges, and we outline the first one,
+      // LLVM will incorrectly assume the object is dead until the start of the
+      // second range.
+      //
+      // TODO: Try to handle this using forced dependences (reuse the code that
+      // handles allocas).
       PreventsOutlining.set(NodeIndices[I]);
       break;
 
-    case Intrinsic::annotation:
-    case Intrinsic::codeview_annotation:
-    case Intrinsic::dbg_addr:
-    case Intrinsic::dbg_declare:
-    case Intrinsic::dbg_label:
-    case Intrinsic::dbg_value:
-    case Intrinsic::eh_dwarf_cfa:
-    case Intrinsic::eh_exceptioncode:
-    case Intrinsic::eh_recoverfp:
-    case Intrinsic::eh_return_i32:
-    case Intrinsic::eh_return_i64:
-    case Intrinsic::eh_sjlj_callsite:
-    case Intrinsic::eh_sjlj_functioncontext:
-    case Intrinsic::eh_sjlj_longjmp:
-    case Intrinsic::eh_sjlj_lsda:
-    case Intrinsic::eh_sjlj_setjmp:
-    case Intrinsic::eh_sjlj_setup_dispatch:
+    case Intrinsic::addressofreturnaddress:
     case Intrinsic::eh_typeid_for:
-    case Intrinsic::eh_unwind_init:
-    case Intrinsic::experimental_deoptimize:
-    case Intrinsic::experimental_gc_relocate:
-    case Intrinsic::experimental_gc_result:
-    case Intrinsic::experimental_gc_statepoint:
-    case Intrinsic::experimental_guard:
-    case Intrinsic::gcread:
-    case Intrinsic::gcroot:
-    case Intrinsic::gcwrite:
-    case Intrinsic::get_dynamic_area_offset:
-    case Intrinsic::invariant_end:
-    case Intrinsic::invariant_start:
-    case Intrinsic::launder_invariant_group:
-    case Intrinsic::localaddress:
-    case Intrinsic::localescape:
-    case Intrinsic::localrecover:
-    case Intrinsic::ptr_annotation:
+    case Intrinsic::frameaddress:
+    case Intrinsic::returnaddress:
     case Intrinsic::sponentry:
-    case Intrinsic::stackguard:
     case Intrinsic::stackprotector:
-    case Intrinsic::stackrestore:
-    case Intrinsic::stacksave:
-    case Intrinsic::strip_invariant_group:
-    case Intrinsic::var_annotation:
-      // Not sure if all of these prevent outlining, but let's be conservative.
+    case Intrinsic::vaend:
+    case Intrinsic::vastart:
+      // Inherently can't be outlined.
       PreventsOutlining.set(NodeIndices[I]);
       break;
+
     default:
+      errs() << "note: assuming intrinsic can't be outlined: "
+             << CB->getCalledFunction()->getName() << "\n";
+      PreventsOutlining.set(NodeIndices[I]);
       break;
     }
   }
