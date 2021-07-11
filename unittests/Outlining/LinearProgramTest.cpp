@@ -1,4 +1,4 @@
-#include "bcdb/Outlining/LinearProgram.h"
+#include "Outlining/LinearProgram.h"
 
 #include <llvm/Support/raw_ostream.h>
 

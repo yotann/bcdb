@@ -44,12 +44,12 @@
 #include <set>
 #include <string>
 
+#include "Outlining/Candidates.h"
+#include "Outlining/Dependence.h"
+#include "Outlining/Extractor.h"
+#include "Outlining/LinearProgram.h"
 #include "bcdb/BCDB.h"
 #include "bcdb/LLVMCompat.h"
-#include "bcdb/Outlining/Candidates.h"
-#include "bcdb/Outlining/Dependence.h"
-#include "bcdb/Outlining/Extractor.h"
-#include "bcdb/Outlining/LinearProgram.h"
 #include "bcdb/Split.h"
 #include "memodb/Multibase.h"
 #include "memodb/Store.h"

@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-#include "bcdb/Outlining/CorrectPostDominatorTree.h"
+#include "Outlining/CorrectPostDominatorTree.h"
 
 namespace llvm {
 class AnalysisUsage;

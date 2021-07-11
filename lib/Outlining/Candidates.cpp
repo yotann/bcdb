@@ -1,4 +1,4 @@
-#include "bcdb/Outlining/Candidates.h"
+#include "Outlining/Candidates.h"
 
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/InitializePasses.h>

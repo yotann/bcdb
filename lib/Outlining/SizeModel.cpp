@@ -1,4 +1,4 @@
-#include "bcdb/Outlining/SizeModel.h"
+#include "Outlining/SizeModel.h"
 
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/CodeGen/AsmPrinter.h>

@@ -1,4 +1,4 @@
-#include "bcdb/Outlining/Dependence.h"
+#include "Outlining/Dependence.h"
 
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Analysis/CaptureTracking.h>
@@ -15,8 +15,8 @@
 #include <llvm/Support/FormattedStream.h>
 #include <vector>
 
+#include "Outlining/CorrectPostDominatorTree.h"
 #include "bcdb/LLVMCompat.h"
-#include "bcdb/Outlining/CorrectPostDominatorTree.h"
 
 using namespace bcdb;
 using namespace llvm;
