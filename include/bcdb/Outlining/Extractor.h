@@ -37,7 +37,6 @@ public:
 private:
   Function *NewCallee;
   Function *NewCaller;
-  bool OutliningReturn = false;
   SparseBitVector<> OutlinedBlocks;
   SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
   std::string NewName;

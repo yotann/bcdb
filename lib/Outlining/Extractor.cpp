@@ -22,6 +22,10 @@ OutliningExtractor::OutliningExtractor(Function &F,
   auto &Nodes = OutDep.Nodes;
   auto &NodeIndices = OutDep.NodeIndices;
 
+  if (!OutDep.isOutlinable(BV))
+    report_fatal_error("Specified nodes cannot be outlined",
+                       /* gen_crash_diag */ false);
+
   OutDep.getExternals(BV, ArgInputs, ExternalInputs, ExternalOutputs);
 
   OutlinedBlocks = SparseBitVector();
@@ -30,15 +34,11 @@ OutliningExtractor::OutliningExtractor(Function &F,
       OutlinedBlocks.set(i);
     } else if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
       OutlinedBlocks.set(NodeIndices[I->getParent()]);
-      if (isa<ReturnInst>(I) && !F.getReturnType()->isVoidTy())
-        OutliningReturn = true;
     }
   }
 
   // Determine the type of the outlined function.
   SmallVector<Type *, 8> Types;
-  if (OutliningReturn)
-    Types.push_back(F.getReturnType());
   for (auto i : ExternalOutputs)
     Types.push_back(Nodes[i]->getType());
   Type *ResultType = StructType::get(F.getContext(), Types);
@@ -87,9 +87,6 @@ Function *OutliningExtractor::createNewCallee() {
       BasicBlock::Create(NewCallee->getContext(), "outline_entry", NewCallee);
   BasicBlock *ExitBlock =
       BasicBlock::Create(NewCallee->getContext(), "outline_return", NewCallee);
-  PHINode *RetValuePhi = nullptr;
-  if (OutliningReturn)
-    RetValuePhi = PHINode::Create(F.getReturnType(), 0, "", ExitBlock);
 
   // Set up the return instruction and PHI nodes.
   DenseMap<size_t, PHINode *> OutputPhis;
@@ -97,9 +94,6 @@ Function *OutliningExtractor::createNewCallee() {
     OutputPhis[i] = PHINode::Create(Nodes[i]->getType(), 0, "", ExitBlock);
   Value *ResultValue = UndefValue::get(ResultType);
   unsigned ResultI = 0;
-  if (OutliningReturn)
-    ResultValue = InsertValueInst::Create(ResultValue, RetValuePhi, {ResultI++},
-                                          "", ExitBlock);
   for (auto i : ExternalOutputs)
     ResultValue = InsertValueInst::Create(ResultValue, OutputPhis[i],
                                           {ResultI++}, "", ExitBlock);
@@ -161,19 +155,12 @@ Function *OutliningExtractor::createNewCallee() {
     if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
       BasicBlock *BB = BBMap[I->getParent()];
       Instruction *NewI;
-      if (isa<ReturnInst>(I)) {
-        // Return instructions become branches to the new exit block.
-        if (OutliningReturn)
-          RetValuePhi->addIncoming(VM.mapValue(*I->getOperand(0)), BB);
-        NewI = BranchInst::Create(ExitBlock);
-      } else {
-        NewI = I->clone();
-        // PHI nodes can't be remapped until the other instructions are done.
-        if (PHINode *PN = dyn_cast<PHINode>(NewI))
-          PHIToResolve.push_back(PN);
-        else
-          VM.remapInstruction(*NewI);
-      }
+      NewI = I->clone();
+      // PHI nodes can't be remapped until the other instructions are done.
+      if (PHINode *PN = dyn_cast<PHINode>(NewI))
+        PHIToResolve.push_back(PN);
+      else
+        VM.remapInstruction(*NewI);
       VMap[I] = NewI;
       NewI->setName(I->getName());
       BB->getInstList().push_back(NewI);
@@ -222,10 +209,6 @@ Function *OutliningExtractor::createNewCallee() {
     if (!NumBranchesToExit)
       continue;
 
-    if (RetValuePhi && RetValuePhi->getBasicBlockIndex(NewBB) < 0) {
-      for (int j = 0; j < NumBranchesToExit; j++)
-        RetValuePhi->addIncoming(UndefValue::get(F.getReturnType()), NewBB);
-    }
     for (auto i : ExternalOutputs) {
       Value *V = UndefValue::get(Nodes[i]->getType());
       if (OutDep.DT.dominates(cast<Instruction>(Nodes[i]), BB->getTerminator()))
@@ -239,19 +222,6 @@ Function *OutliningExtractor::createNewCallee() {
   if (pred_empty(ExitBlock))
     ExitBlock->eraseFromParent();
 
-  // TODO: calculate outlining cost
-  // - benefit of outlining the instructions (per-caller)
-  // - cost of setting up arguments (per-caller)
-  // - cost of the call instruction (per-caller)
-  // - cost of returning values (once)
-  // - cost of the outlined function body (once)
-  // - see getInlineCost()
-  //   - most instructions cost InstrCost
-  //   - bitcasts, unconditional branches, first return instruction,
-  //     unreachable are all zero cost
-  //   - getelementptr, ptrtoint, inttoptr, cast use
-  //     TargetTransformInfo::getUserCost()
-  //   - call cost is arg_size()*InstrCost + CallPenalty
   return NewCallee;
 }
 
@@ -279,11 +249,6 @@ Function *OutliningExtractor::createNewCaller() {
   // Extract outputs.
   DenseMap<size_t, Value *> OutputValues;
   unsigned ResultI = 0;
-#if 0
-  Value *ReturnValue = nullptr;
-  if (OutliningReturn)
-    ReturnValue = ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
-#endif
   for (auto i : ExternalOutputs)
     OutputValues[i] =
         ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);

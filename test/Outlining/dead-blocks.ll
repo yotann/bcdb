@@ -1,3 +1,5 @@
+; XFAIL: *
+
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-dependence -analyze %s | FileCheck %s
 
@@ -8,12 +10,15 @@
 ; CHECK-LABEL: define void @f()
 define void @f() {
 ; CHECK: block 0 depends [] forced []
-; CHECK-NEXT: node 1 prevents outlining
+; CHECK-NEXT: node 1 depends [0] forced []
+; CHECK-NEXT: %x = add i32 1, 2
+  %x = add i32 1, 2
+; CHECK-NEXT: node 2 prevents outlining
 ; CHECK-NEXT: ret void
   ret void
 
-; CHECK-NOT: block 2
-; CHECK-NOT: node 2
+; CHECK-NOT: block 3
+; CHECK-NOT: node 3
 dead0:
   ret void
 
@@ -27,6 +32,7 @@ dead1:
 ; EXTRACT: outline_return:
 ; EXTRACT: ret {} undef
 ; EXTRACT: 0:
+; EXTRACT: %x = add i32 1, 2
 ; EXTRACT: br label %outline_return
 
 ; EXTRACT-LABEL: define void @f.outlined.1.caller() {

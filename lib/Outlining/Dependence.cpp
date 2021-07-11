@@ -105,6 +105,8 @@ bool OutliningDependenceResults::isOutlinable(
     const SparseBitVector<> &BV) const {
   if (!BV.empty() && static_cast<size_t>(BV.find_last()) >= Nodes.size())
     return false;
+  if (BV.intersects(PreventsOutlining))
+    return false;
   int OP = BV.find_first();
   if (OP < 0)
     return false;
