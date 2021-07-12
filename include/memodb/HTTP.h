@@ -14,21 +14,20 @@ namespace memodb {
 
 class HTTPRequest : public Request {
 public:
-  virtual std::optional<Method> getMethod() const override;
-  virtual unsigned getAcceptQuality(ContentType content_type) const override;
-  virtual std::optional<Node> getContentNode() override;
+  std::optional<Method> getMethod() const override;
+  unsigned getAcceptQuality(ContentType content_type) const override;
+  std::optional<Node> getContentNode() override;
 
-  virtual void sendContentNode(const Node &node,
-                               const std::optional<CID> &cid_if_known,
-                               CacheControl cache_control) override;
+  void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
+                       CacheControl cache_control) override;
 
-  virtual void sendCreated(const llvm::Twine &path) override;
+  void sendCreated(const llvm::Twine &path) override;
 
-  virtual void sendError(Status status, std::optional<llvm::StringRef> type,
-                         llvm::StringRef title,
-                         const std::optional<llvm::Twine> &detail) override;
+  void sendError(Status status, std::optional<llvm::StringRef> type,
+                 llvm::StringRef title,
+                 const std::optional<llvm::Twine> &detail) override;
 
-  virtual void sendMethodNotAllowed(llvm::StringRef allow) override;
+  void sendMethodNotAllowed(llvm::StringRef allow) override;
 
 protected:
   virtual llvm::StringRef getMethodString() const = 0;
