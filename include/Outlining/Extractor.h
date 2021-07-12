@@ -35,10 +35,18 @@ public:
   SparseBitVector<> &BV;
 
 private:
-  Function *NewCallee;
-  Function *NewCaller;
+  void createNewCalleeDeclarationAndName();
+
+  FunctionType *CalleeType = nullptr;
+  Function *NewCallee = nullptr;
+  Function *NewCaller = nullptr;
   SparseBitVector<> OutlinedBlocks;
   SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
+
+  // PHI nodes that were not chosen for outlining, but which depend on control
+  // flow in the outlined set.
+  SparseBitVector<> output_phis;
+
   std::string NewName;
 };
 

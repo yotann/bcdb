@@ -17,8 +17,8 @@ if:
   br label %then
 
 then:
-; CHECK: block 4 depends [] forced []
-; CHECK-NEXT: node 5 depends [4] forced [4]
+; CHECK: block 4 depends [] forced [4, 5]
+; CHECK-NEXT: node 5 depends [4] forced [4, 5]
 ; CHECK-NEXT: %x = phi
   %x = phi i32 [ 0, %entry ], [ 1, %if ]
   ret i32 %x
