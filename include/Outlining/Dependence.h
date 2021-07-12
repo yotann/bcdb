@@ -43,14 +43,6 @@ public:
   // Check whether a candidate can be legally outlined.
   bool isOutlinable(const SparseBitVector<> &BV) const;
 
-  // Get the list of function arguments and other nodes that would need to be
-  // passed to the candidate if it were outlined, and the list of nodes inside
-  // the candidate that would need to have their results passed back to the
-  // original function.
-  void getExternals(const SparseBitVector<> &BV, SparseBitVector<> &ArgInputs,
-                    SparseBitVector<> &ExternalInputs,
-                    SparseBitVector<> &ExternalOutputs);
-
   // Each node must be one of the following types:
   // - Instruction
   // - BasicBlock, used before instructions to represent control dependencies

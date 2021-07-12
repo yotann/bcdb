@@ -94,25 +94,13 @@ void OutliningCandidates::processCandidate(SparseBitVector<> BV) {
     return;
   if (OutDep.PreventsOutlining.intersects(BV))
     return;
-
-  SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
-  OutDep.getExternals(BV, ArgInputs, ExternalInputs, ExternalOutputs);
-  int score =
-      -1 - ArgInputs.count() - ExternalInputs.count() - ExternalOutputs.count();
-  for (size_t i : BV) {
-    if (Instruction *I = dyn_cast<Instruction>(OutDep.Nodes[i])) {
-      score += 1;
-      if (CallBase *CB = dyn_cast<CallBase>(I))
-        score += CB->arg_size();
-    }
-  }
-
   if (!OutDep.isOutlinable(BV)) {
     dump(BV, errs());
     report_fatal_error("invalid outlining candidate");
   }
-  if (OutlineUnprofitable || score > 0)
-    Candidates.push_back(BV);
+
+  // TODO: check profitability.
+  Candidates.push_back(BV);
 
   size_t DomI = BV.find_first();
 
