@@ -27,7 +27,7 @@ exit:                                             ; preds = %loopentry
   ret i32 %x
 }
 
-; CHECK-LABEL: define { i32 } @f.outlined.3.callee(i32 %arg) {
+; CHECK-LABEL: define fastcc { i32 } @f.outlined.3.callee(i32 %arg) {
 ; CHECK: outline_entry:
 ; CHECK-NEXT: br label %loopentry
 ; CHECK: loopentry:
@@ -36,7 +36,7 @@ exit:                                             ; preds = %loopentry
 
 ; CHECK-LABEL: define i32 @f.outlined.3.caller(i32 %arg) {
 ; CHECK: loopentry:
-; CHECK-NEXT: %1 = call { i32 } @f.outlined.3.callee(i32 %arg)
+; CHECK-NEXT: %1 = call fastcc { i32 } @f.outlined.3.callee(i32 %arg)
 ; CHECK-NEXT: %x = extractvalue { i32 } %1, 0
 ; CHECK: exit:
 ; CHECK-NEXT: ret i32 %x

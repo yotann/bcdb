@@ -146,6 +146,10 @@ void OutliningExtractor::createNewCalleeDeclarationAndName() {
   }
   NewCallee = Function::Create(CalleeType, GlobalValue::ExternalLinkage,
                                NewNameOS.str() + ".callee", F.getParent());
+
+  // Pass more arguments and return values in registers.
+  // TODO: experiment to check whether the code is actually smaller this way.
+  NewCallee->setCallingConv(CallingConv::Fast);
 }
 
 Function *OutliningExtractor::createNewCallee() {
@@ -336,6 +340,7 @@ Function *OutliningExtractor::createNewCaller() {
     Args.push_back(VMap[Nodes[i]]);
   CallInst *CI = CallInst::Create(NewCallee->getFunctionType(), NewCallee, Args,
                                   "", InsertionPoint);
+  CI->setCallingConv(NewCallee->getCallingConv());
 
   // Extract outputs.
   DenseMap<size_t, Value *> OutputValues;
