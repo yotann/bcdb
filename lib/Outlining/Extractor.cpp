@@ -129,20 +129,8 @@ void OutliningExtractor::createNewCalleeDeclarationAndName() {
     return;
 
   raw_string_ostream NewNameOS(NewName);
-  NewNameOS << F.getName() << ".outlined";
-  size_t last_end = 0;
-  for (auto start : BV) {
-    if (start < last_end)
-      continue;
-    auto end = start + 1;
-    while (BV.test(end))
-      end++;
-    last_end = end;
-    if (start + 1 == end)
-      NewNameOS << formatv(".{0}", start);
-    else
-      NewNameOS << formatv(".{0}-{1}", start, end - 1);
-  }
+  NewNameOS << F.getName() << ".outlined.";
+  OutDep.printSet(NewNameOS, BV, ".", "_");
   NewCallee = Function::Create(CalleeType, GlobalValue::ExternalLinkage,
                                NewNameOS.str() + ".callee", F.getParent());
 

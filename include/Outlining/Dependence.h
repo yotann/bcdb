@@ -28,11 +28,11 @@ namespace bcdb {
 
 using namespace llvm;
 
-// Like a program dependency graph, except:
-// - we include separate nodes for BasicBlock headers and MemorySSA
-// - we distinguish ForcedDepends from DominatingDepends
-// - we can get better results when X would normally depend on Y by making X
-//   depend on Z (a dominator of X) and Z depend on Y.
+// Calculates dependence information used to decide which sets of instructions
+// can be outlined. The primary results are ForcedDepends and DominatingDepends,
+// which have indices specified by Nodes and NodeIndices. DataDepends and
+// ArgDepends are also used to determine input and output values for the
+// outlined callee.
 class OutliningDependenceResults {
 public:
   OutliningDependenceResults(Function &F, DominatorTree &DT,
@@ -42,6 +42,10 @@ public:
 
   // Check whether a candidate can be legally outlined.
   bool isOutlinable(const SparseBitVector<> &BV) const;
+
+  // Print the bitvector, in the form "1.3.5_10".
+  void printSet(llvm::raw_ostream &os, const SparseBitVector<> &bv,
+                llvm::StringRef sep = ", ", llvm::StringRef range = "-") const;
 
   // Each node must be one of the following types:
   // - Instruction
@@ -56,7 +60,7 @@ public:
   SparseBitVector<> PreventsOutlining;
 
   // If DataDepends[i].test(j) is true, Nodes[i] has a data dependency on
-  // Nodes[j]. Used by getExternals().
+  // Nodes[j].
   std::vector<SparseBitVector<>> DataDepends;
 
   // If ArgDepends[i].test(j) is true, Nodes[i] has a data dependency on

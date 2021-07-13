@@ -1,22 +1,22 @@
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-dependence -analyze %s | FileCheck %s
+; RUN:     -outlining-dependence -analyze %s | FileCheck %s --match-full-lines
 
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outline-only=1 -outlining-extractor -verify -S %s \
 ; RUN: | FileCheck --check-prefix=EXTRACT %s
 
-; CHECK-LABEL: define void @f()
+; CHECK-LABEL: define void @f() {
 define void @f() {
-; CHECK: block 0 depends [] forced []
-; CHECK-NEXT: node 1 depends [0] forced []
+; CHECK: ; block 0
+; CHECK-NEXT: ; node 1 dominating [0]
 ; CHECK-NEXT: %x = add i32 1, 2
   %x = add i32 1, 2
-; CHECK-NEXT: node 2 prevents outlining
+; CHECK-NEXT: ; node 2 prevents outlining
 ; CHECK-NEXT: ret void
   ret void
 
-; CHECK-NOT: block 3
-; CHECK-NOT: node 3
+; CHECK-NOT: ; block 3{{.*}}
+; CHECK-NOT: ; node 3{{.*}}
 dead0:
   ret void
 

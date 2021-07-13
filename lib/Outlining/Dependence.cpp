@@ -31,28 +31,34 @@ class OutliningDependenceWriter : public AssemblyAnnotationWriter {
     if (II == OutDep->NodeIndices.end())
       return;
     int i = II->second;
-    OS << formatv("; {0} {1} ", type, i);
-    if (OutDep->PreventsOutlining.test(i)) {
-      OS << "prevents outlining\n";
-    } else {
-      OS << "depends [";
-      bool first = true;
-      for (auto j : OutDep->DominatingDepends[i]) {
-        if (!first)
-          OS << ", ";
-        first = false;
-        OS << j;
-      }
-      OS << "] forced [";
-      first = true;
-      for (auto j : OutDep->ForcedDepends[i]) {
-        if (!first)
-          OS << ", ";
-        first = false;
-        OS << j;
-      }
-      OS << "]\n";
+    OS << formatv("; {0} {1}", type, i);
+    const auto &arg = OutDep->ArgDepends[i];
+    const auto &data = OutDep->DataDepends[i];
+    const auto &dominating = OutDep->DominatingDepends[i];
+    const auto &forced = OutDep->ForcedDepends[i];
+    if (!arg.empty()) {
+      OS << " arg [";
+      OutDep->printSet(OS, arg);
+      OS << "]";
     }
+    if (!data.empty()) {
+      OS << " data [";
+      OutDep->printSet(OS, data);
+      OS << "]";
+    }
+    if (!dominating.empty()) {
+      OS << " dominating [";
+      OutDep->printSet(OS, dominating);
+      OS << "]";
+    }
+    if (!forced.empty()) {
+      OS << " forced [";
+      OutDep->printSet(OS, forced);
+      OS << "]";
+    }
+    if (OutDep->PreventsOutlining.test(i))
+      OS << " prevents outlining";
+    OS << "\n";
   }
 
 public:
@@ -103,23 +109,44 @@ void OutliningDependenceResults::print(raw_ostream &OS) const {
 
 bool OutliningDependenceResults::isOutlinable(
     const SparseBitVector<> &BV) const {
-  if (!BV.empty() && static_cast<size_t>(BV.find_last()) >= Nodes.size())
+  if (BV.empty())
+    return false;
+  if (static_cast<size_t>(BV.find_last()) >= Nodes.size())
     return false;
   if (BV.intersects(PreventsOutlining))
     return false;
-  int OP = BV.find_first();
-  if (OP < 0)
-    return false;
+  unsigned OP = static_cast<unsigned>(BV.find_first());
   auto BVAndDominators = BV | Dominators[OP];
-  for (auto x : BV) {
-    if (!Dominators[x].test(OP))
+  for (auto i : BV) {
+    if (!Dominators[i].test(OP))
       return false; // outlining point does not dominate all nodes
-    if (!BV.contains(ForcedDepends[x]))
+    if (!BV.contains(ForcedDepends[i]))
       return false; // forced dependency not satisfied
-    if (!BVAndDominators.contains(DominatingDepends[x]))
+    if (!BVAndDominators.contains(DominatingDepends[i]))
       return false; // dominating dependency not satisfied
   }
   return true;
+}
+
+void OutliningDependenceResults::printSet(raw_ostream &os,
+                                          const SparseBitVector<> &bv,
+                                          llvm::StringRef sep,
+                                          llvm::StringRef range) const {
+  size_t last_end = 0;
+  for (auto start : bv) {
+    if (start < last_end)
+      continue;
+    auto end = start + 1;
+    while (bv.test(end))
+      end++;
+    if (last_end != 0)
+      os << sep;
+    last_end = end;
+    if (start + 1 == end)
+      os << formatv("{0}", start);
+    else
+      os << formatv("{0}{1}{2}", start, range, end - 1);
+  }
 }
 
 std::optional<size_t> OutliningDependenceResults::lookupNode(Value *V) {
@@ -170,11 +197,10 @@ void OutliningDependenceResults::numberNodes() {
   SmallVector<BasicBlock *, 8> Blocks;
   SmallPtrSet<BasicBlock *, 8> VisitedBlocks;
   auto VisitBlock = [&](BasicBlock *BB, auto &Recurse) {
-    if (!BB || !DT[BB] || !PDT[BB])
-      return; // Ignore blocks that are known unreachable.
     if (VisitedBlocks.insert(BB).second) {
-      auto IDom = DT[BB]->getIDom();
-      if (IDom)
+      if (!BB || !DT[BB] || !PDT[BB])
+        return; // Ignore blocks that are known unreachable.
+      if (auto IDom = DT[BB]->getIDom())
         Recurse(IDom->getBlock(), Recurse);
       Blocks.push_back(BB);
     }
@@ -253,7 +279,8 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // The puts() has a control dependence on
   // function_that_sometimes_calls_abort(), but PostDominatorTree ignores the
   // dependence. We use CorrectPostDominatorTree instead, which handles the
-  // dependence properly.
+  // dependence properly by adding an implicit CFG node with edges coming from
+  // every block that can throw or abort.
   //
   // Note that this loop doesn't need to iterate over the new CFG edges added
   // by CorrectPostDominatorTree. (They only affect the dependences of the
@@ -298,16 +325,15 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   }
 
   // If we outline a conditional branch, we must also outline every node that's
-  // control-dependent on the branch (using the standard definition of control
-  // dependence, not the modified one used above). Otherwise we would end up
-  // needing the same conditional branch in both the outlined callee and the
-  // modified caller.
+  // control-dependent on the branch. Otherwise we would end up needing the
+  // same conditional branch in both the outlined callee and the modified
+  // caller.
   //
   // This loop needs to use the standard PostDominatorTree, not
   // CorrectPostDominatorTree, because we only care about explicit control
   // flow. If we outline a call like function_that_sometimes_calls_abort(),
-  // without the other statements that have a control dependence on it, the
-  // program will still work fine.
+  // without the other statements that have an implicit control dependence on
+  // it, the program will still work fine.
   //
   // TODO: Experiment with relaxing this restriction; if the outlined callee
   // returns a value that indicates which path it took, we can duplicate the
@@ -342,8 +368,13 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
 
 void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
   addForcedDepend(MPhi, MPhi->getBlock());
-  for (Value *V2 : MPhi->incoming_values())
-    addDepend(MPhi, V2);
+  for (Value *value : MPhi->incoming_values())
+    addDepend(MPhi, value);
+
+  // This is probably redundant, but let's keep it so we match the handling of
+  // PHINode.
+  for (BasicBlock *block : MPhi->blocks())
+    addDepend(MPhi, block->getTerminator());
 }
 
 void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
@@ -627,8 +658,8 @@ void OutliningDependenceResults::finalizeDepends() {
   // C. DominatingDepends[x] for each x in ForcedDepends[i], excluding nodes
   //    that dominate the outlining point from part A. We need to outline these
   //    nodes in order to use the chosen outlining point.
-  bool changed = true;
-  while (changed) {
+  bool changed;
+  do {
     changed = false;
     for (size_t i = 0; i < Nodes.size(); i++) {
       if (ForcedDepends[i].empty())
@@ -648,6 +679,20 @@ void OutliningDependenceResults::finalizeDepends() {
       if (ForcedDepends[i] != OldForcedDepends)
         changed = true;
     }
+  } while (changed);
+
+  for (size_t i = 0; i < Nodes.size(); ++i) {
+    if (ForcedDepends[i].intersects(PreventsOutlining))
+      PreventsOutlining.set(i);
+    DominatingDepends[i].intersectWithComplement(ForcedDepends[i]);
+  }
+
+  for (auto i : PreventsOutlining) {
+    // Leave DataDepends alone; it's still needed to determine return values
+    // from the outlined callee.
+    ArgDepends[i].clear();
+    ForcedDepends[i].clear();
+    DominatingDepends[i].clear();
   }
 }
 
