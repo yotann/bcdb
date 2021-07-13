@@ -388,7 +388,10 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   case Instruction::PHI:
     // Only outline PHI nodes when also outlining the full basic block head.
     addForcedDepend(I, I->getParent());
-    addForcedDepend(I->getParent(), I);
+    // We can only calculate the PHI value correctly if we know the control
+    // flow leading to it.
+    for (BasicBlock *BB : cast<PHINode>(I)->blocks())
+      addDepend(I, BB->getTerminator());
     break;
   case Instruction::Ret:
     // TODO: if we're returning a value other than void, we could outline the

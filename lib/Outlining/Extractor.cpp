@@ -71,7 +71,6 @@ OutliningExtractor::OutliningExtractor(Function &F,
 
   // Determine which function arguments and other nodes need to be passed as
   // arguments to the new callee.
-  SparseBitVector<> input_phis;
   for (auto i : BV) {
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
       SmallPtrSet<Value *, 8> phi_incoming;
@@ -160,8 +159,23 @@ Function *OutliningExtractor::createNewCallee() {
   auto &NodeIndices = OutDep.NodeIndices;
   Type *ResultType = NewCallee->getFunctionType()->getReturnType();
 
-  if (F.hasPersonalityFn())
-    NewCallee->setPersonalityFn(F.getPersonalityFn());
+  // Add function attributes.
+  //
+  // Note that we don't add the uwtable attribute. If the function never throws
+  // exceptions, that means the unwinding table will be omitted, making the
+  // function smaller but also preventing backtraces from working correctly.
+  NewCallee->addFnAttr(Attribute::MinSize);
+  NewCallee->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  if (F.hasPersonalityFn()) {
+    for (auto i : BV) {
+      if (Instruction *ins = dyn_cast<Instruction>(Nodes[i])) {
+        if (ins->isEHPad()) {
+          NewCallee->setPersonalityFn(F.getPersonalityFn());
+          break;
+        }
+      }
+    }
+  }
 
   // Add entry and exit blocks. We need a new entry block because we might be
   // outlining a loop, and LLVM prohibits the entry block from being part of a
@@ -171,20 +185,10 @@ Function *OutliningExtractor::createNewCallee() {
   BasicBlock *ExitBlock =
       BasicBlock::Create(NewCallee->getContext(), "outline_return", NewCallee);
 
-  // Set up the return instruction and PHI nodes.
-  DenseMap<size_t, PHINode *> OutputPhis;
-  for (auto i : ExternalOutputs)
-    OutputPhis[i] = PHINode::Create(Nodes[i]->getType(), 0, "", ExitBlock);
-  Value *ResultValue = UndefValue::get(ResultType);
-  unsigned ResultI = 0;
-  for (auto i : ExternalOutputs)
-    ResultValue = InsertValueInst::Create(ResultValue, OutputPhis[i],
-                                          {ResultI++}, "", ExitBlock);
-  ReturnInst::Create(NewCallee->getContext(), ResultValue, ExitBlock);
-
   // Create the value map and fill in the input values.
   ValueToValueMapTy VMap;
-  ValueMapper VM(VMap, RF_NoModuleLevelChanges);
+  ValueToValueMapTy input_phi_map;
+  ValueMapper VM(VMap, RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
   Function::arg_iterator ArgI = NewCallee->arg_begin();
   for (auto i : ArgInputs) {
     Argument &Src = *(F.arg_begin() + i);
@@ -195,72 +199,92 @@ Function *OutliningExtractor::createNewCallee() {
   for (auto i : ExternalInputs) {
     Value &Src = *Nodes[i];
     Argument &Dst = *ArgI++;
-    VMap[&Src] = &Dst;
+    if (input_phis.test(i))
+      input_phi_map[&Src] = &Dst;
+    else
+      VMap[&Src] = &Dst;
     Dst.setName(Src.getName());
   }
   assert(ArgI == NewCallee->arg_end());
 
   // Map blocks in the original function to blocks in the outlined function.
   DenseMap<BasicBlock *, BasicBlock *> BBMap;
-  auto mapBlock = [&](BasicBlock *BB) {
-    if (VMap[BB])
-      return;
+  for (BasicBlock &BB : F) {
+    if (!NodeIndices.count(&BB))
+      continue; // unreachable block
     // We may be outlining a branch (either a conditional branch, or an
     // implicit unconditional branch) that goes to block BB even though we
     // aren't outlining any instructions in BB. In that case, use the
     // postdominator tree to skip blocks until we find one that actually is
     // being outlined.
-    BasicBlock *PDom = BB;
-    while (!OutlinedBlocks.test(NodeIndices[PDom])) {
+    BasicBlock *PDom = &BB;
+    while (PDom && !OutlinedBlocks.test(NodeIndices[PDom]))
       PDom = PDT[PDom]->getIDom()->getBlock();
-      if (!PDom) {
-        VMap[BB] = ExitBlock;
-        return;
-      }
+    if (!PDom) {
+      VMap[&BB] = ExitBlock;
+      continue;
     }
     if (!BBMap.count(PDom))
       BBMap[PDom] = BasicBlock::Create(NewCallee->getContext(), PDom->getName(),
                                        NewCallee);
-    VMap[BB] = BBMap[PDom];
-  };
-  for (BasicBlock &BB : F)
-    if (NodeIndices.count(&BB))
-      mapBlock(&BB);
+    VMap[&BB] = BBMap[PDom];
+  }
 
   // Jump from the entry block to the first actual outlined block.
   BasicBlock *FirstBlock = cast<BasicBlock>(Nodes[OutlinedBlocks.find_first()]);
   BranchInst::Create(BBMap[FirstBlock], EntryBlock);
 
-  // Clone the selected instructions into the outlined function. Also remap
-  // their arguments.
-  SmallVector<PHINode *, 16> PHIToResolve;
+  // Clone the selected instructions into the outlined function.
   for (auto i : BV) {
     if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
       BasicBlock *BB = BBMap[I->getParent()];
-      Instruction *NewI;
-      NewI = I->clone();
-      // PHI nodes can't be remapped until the other instructions are done.
-      if (PHINode *PN = dyn_cast<PHINode>(NewI))
-        PHIToResolve.push_back(PN);
-      else
-        VM.remapInstruction(*NewI);
+      Instruction *NewI = I->clone();
       VMap[I] = NewI;
       NewI->setName(I->getName());
       BB->getInstList().push_back(NewI);
     }
   }
 
-  // Remap PHI nodes.
-  for (PHINode *PN : PHIToResolve) {
-    // If the original function had unreachable blocks, we may need to remove
-    // them from PHI nodes.
-    for (int i = PN->getNumIncomingValues() - 1; i >= 0; i--) {
-      BasicBlock *Pred = PN->getIncomingBlock(i);
-      if (!OutDep.DT[Pred] || !OutDep.PDT[Pred])
-        PN->removeIncomingValue(Pred);
+  // Remap arguments.
+  for (auto i : BV) {
+    Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i]);
+    if (!orig_ins)
+      continue;
+    Instruction *new_ins = cast<Instruction>(VMap[orig_ins]);
+
+    if (PHINode *orig_phi = dyn_cast<PHINode>(orig_ins)) {
+      PHINode *new_phi = cast<PHINode>(new_ins);
+      SmallPtrSet<Value *, 8> phi_incoming;
+
+      // Iterate backwards so we don't have to care about removeIncomingValue
+      // renumbering things.
+      for (unsigned j = orig_phi->getNumIncomingValues(); j > 0; --j) {
+        BasicBlock *orig_pred = orig_phi->getIncomingBlock(j - 1);
+        if (!NodeIndices.count(orig_pred)) {
+          // unreachable block
+          new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
+          continue;
+        }
+        if (!BV.test(NodeIndices[orig_pred->getTerminator()])) {
+          // This incoming block is not being outlined. Instead, we will have
+          // EntryBlock as a predecessor.
+          phi_incoming.insert(orig_phi->getIncomingValue(j - 1));
+          new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
+        }
+      }
+
+      if (phi_incoming.empty()) {
+        // nothing to do
+      } else if (input_phis.test(i)) {
+        new_phi->addIncoming(input_phi_map[orig_phi], EntryBlock);
+      } else {
+        assert(phi_incoming.size() == 1);
+        // Will be remapped to the new value by remapInstruction() below.
+        new_phi->addIncoming(*phi_incoming.begin(), EntryBlock);
+      }
     }
 
-    VM.remapInstruction(*PN);
+    VM.remapInstruction(*new_ins);
   }
 
   // Add terminators to blocks that didn't have their terminator selected for
@@ -277,29 +301,30 @@ Function *OutliningExtractor::createNewCallee() {
     }
   }
 
-  // Fill in the PHI nodes in the exit block.
-  for (auto &Item : BBMap) {
-    BasicBlock *BB = Item.first;
-    BasicBlock *NewBB = Item.second;
-
-    // We only need to do this if NewBB branches to the exit block at least
-    // once. NewBB could branch to the exit block multiple times! (E.g.,
-    // multiple cases of a switch instruction).
-    int NumBranchesToExit = 0;
-    for (BasicBlock *Succ : successors(NewBB))
-      if (Succ == ExitBlock)
-        NumBranchesToExit++;
-    if (!NumBranchesToExit)
-      continue;
-
-    for (auto i : ExternalOutputs) {
-      Value *V = UndefValue::get(Nodes[i]->getType());
-      if (OutDep.DT.dominates(cast<Instruction>(Nodes[i]), BB->getTerminator()))
-        V = VMap[Nodes[i]];
-      for (int j = 0; j < NumBranchesToExit; j++)
-        OutputPhis[i]->addIncoming(V, NewBB);
+  // Set up PHI nodes that were not chosen for outlining, but which depend on
+  // control flow in the outlined set.
+  for (auto i : output_phis) {
+    PHINode *orig_phi = cast<PHINode>(Nodes[i]);
+    PHINode *new_phi =
+        PHINode::Create(orig_phi->getType(), 0, orig_phi->getName(), ExitBlock);
+    VMap[orig_phi] = new_phi;
+    for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j) {
+      BasicBlock *orig_pred = orig_phi->getIncomingBlock(j);
+      if (!NodeIndices.count(orig_pred))
+        continue; // unreachable block
+      if (BV.test(NodeIndices[orig_pred->getTerminator()]))
+        new_phi->addIncoming(orig_phi->getIncomingValue(j), orig_pred);
     }
+    VM.remapInstruction(*new_phi);
   }
+
+  // Set up the return instruction.
+  Value *ResultValue = UndefValue::get(ResultType);
+  unsigned ResultI = 0;
+  for (auto i : ExternalOutputs)
+    ResultValue = InsertValueInst::Create(ResultValue, VMap[Nodes[i]],
+                                          {ResultI++}, "", ExitBlock);
+  ReturnInst::Create(NewCallee->getContext(), ResultValue, ExitBlock);
 
   // If we're outlining an infinite loop, we shouldn't have an exit block.
   if (pred_empty(ExitBlock))

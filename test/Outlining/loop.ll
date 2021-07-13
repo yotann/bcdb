@@ -27,7 +27,7 @@ exit:                                             ; preds = %loopentry
   ret i32 %x
 }
 
-; CHECK-LABEL: define fastcc { i32 } @f.outlined.3.callee(i32 %arg) {
+; CHECK-LABEL: define fastcc { i32 } @f.outlined.3.callee(i32 %arg) unnamed_addr #0 {
 ; CHECK: outline_entry:
 ; CHECK-NEXT: br label %loopentry
 ; CHECK: loopentry:

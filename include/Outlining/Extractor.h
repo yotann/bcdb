@@ -43,6 +43,10 @@ private:
   SparseBitVector<> OutlinedBlocks;
   SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
 
+  // PHI nodes that were chosen for outlining, but which depend on control flow
+  // outside the outlined set.
+  SparseBitVector<> input_phis;
+
   // PHI nodes that were not chosen for outlining, but which depend on control
   // flow in the outlined set.
   SparseBitVector<> output_phis;

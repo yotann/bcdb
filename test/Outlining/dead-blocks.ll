@@ -24,7 +24,7 @@ dead1:
   br i1 undef, label %dead0, label %dead1
 }
 
-; EXTRACT-LABEL: define fastcc {} @f.outlined.1.callee() {
+; EXTRACT-LABEL: define fastcc {} @f.outlined.1.callee() unnamed_addr #0 {
 ; EXTRACT: outline_entry:
 ; EXTRACT: br label %0
 ; EXTRACT: outline_return:
