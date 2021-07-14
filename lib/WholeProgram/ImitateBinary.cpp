@@ -111,28 +111,37 @@ static bool AnnotateModuleWithELF(Module &M, const ELFObjectFile<ELFT> &ELFOF) {
   return true;
 }
 
-// Extract a module from an object file created with "clang -fembed-bitcode".
+// Extract a module from an object file created with "clang -fembed-bitcode" or
+// "swiftc -embed-bitcode".
 std::unique_ptr<Module> bcdb::ExtractModuleFromBinary(LLVMContext &Context,
                                                       Binary &B) {
   ExitOnError Err("ExtractModuleFromBinary: ");
   ObjectFile *OF = dyn_cast<ObjectFile>(&B);
   if (!OF)
     return nullptr;
-  MemoryBufferRef MemoryBuffer = Err(IRObjectFile::findBitcodeInObject(*OF));
-  std::unique_ptr<Module> M =
-      std::make_unique<Module>(MemoryBuffer.getBufferIdentifier(), Context);
+
+  auto M = std::make_unique<Module>(OF->getFileName(), Context);
   Linker Linker(*M);
 
-  // When ELF files containing .llvmbc sections are linked, the .llvmbc
-  // sections are concatenated, possibly with padding bytes between them.
-  StringRef Contents = MemoryBuffer.getBuffer();
-  while (!Contents.empty()) {
-    size_t Size = GetBitcodeSize(MemoryBufferRef(Contents, ".llvmbc"));
-    MemoryBufferRef Buffer(Contents.substr(0, Size), ".llvmbc");
-    Contents = Contents.substr(Size).ltrim('\x00');
+  for (const SectionRef &Sec : OF->sections()) {
+    // Clang/Linux/ELF: ".llvmbc", ".llvmcmd"
+    // Swift/Linux/ELF: "__LLVM,__bitcode", "__LLVM,__swift_cmdline"
+    if (!Sec.isBitcode() && Err(Sec.getName()) != ".llvmbc" &&
+        Err(Sec.getName()) != "__LLVM,__bitcode")
+      continue;
 
-    std::unique_ptr<Module> MPart = Err(parseBitcodeFile(Buffer, Context));
-    Linker.linkInModule(std::move(MPart));
+    StringRef Contents = Err(Sec.getContents());
+    // When object files containing bitcode sections are linked, the bitcode
+    // sections are concatenated, possibly with padding bytes between them.
+    while (!Contents.empty()) {
+      size_t Size =
+          GetBitcodeSize(MemoryBufferRef(Contents, OF->getFileName()));
+      MemoryBufferRef Buffer(Contents.substr(0, Size), OF->getFileName());
+      Contents = Contents.substr(Size).ltrim('\x00');
+
+      std::unique_ptr<Module> MPart = Err(parseBitcodeFile(Buffer, Context));
+      Linker.linkInModule(std::move(MPart));
+    }
   }
 
   return M;

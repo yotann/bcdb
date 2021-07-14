@@ -1,0 +1,18 @@
+; RUN: bc-imitate extract %p/Inputs/swift-linux.elf | llvm-dis | FileCheck %s
+
+; CHECK: source_filename = "{{.*}}/Inputs/swift-linux.elf"
+
+; CHECK: module asm
+
+; CHECK: %swift.type = type { i64 }
+
+; CHECK: @0 = private constant [6 x i8] c"Hello\00"
+
+; CHECK: !llvm.module.flags = !{!10, !11, !12, !13, !14, !15, !16, !17, !18, !20, !21}
+; CHECK: !15 = !{i32 1, !"Swift Major Version", i8 5}
+; CHECK: !17 = !{i32 2, !"bcdb.elf.type", i32 3}
+; CHECK: !18 = !{i32 6, !"bcdb.elf.runpath", !19}
+; CHECK: !19 = !{!"/srv/sdb/swift-5.4.2-RELEASE-ubuntu18.04/usr/lib/swift/linux", !"/usr/lib/gcc/x86_64-linux-gnu/7.5.0", !"/usr/lib/x86_64-linux-gnu", !"/nix/store/wvgyhnd3rn6dhxzbr5r71gx2q9mhgshj-glibc-2.32-48/lib"}
+; CHECK: !20 = !{i32 1, !"bcdb.elf.flags_1", i32 134217728}
+; CHECK: !21 = !{i32 6, !"bcdb.elf.needed", !22}
+; CHECK: !22 = !{!"libswiftSwiftOnoneSupport.so", !"libswiftCore.so", !"libc.so.6"}
