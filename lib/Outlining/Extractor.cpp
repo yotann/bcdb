@@ -369,10 +369,16 @@ Function *OutliningExtractor::createNewCaller() {
       if (isa<PHINode>(I) && I->getParent() == OutliningPoint) {
         // PHI node in the first block being outlined. We shouldn't necessarily
         // delete it; if it depends on control flow in the caller, we need to
-        // pass the result of the PHI into the callee. For the PHI values that
-        // depend on control flow in the callee, we don't need to do anything
-        // special; the values will be replaced with "undef" below, and the CFG
-        // edge can be deleted later by the SimplifyCFG pass.
+        // pass the result of the PHI into the callee. We do need to remove the
+        // PHI values that depend on control flow in the callee, because we're
+        // removing the corresponding CFG edges.
+        PHINode *orig_phi = cast<PHINode>(I);
+        PHINode *new_phi = cast<PHINode>(VMap[orig_phi]);
+        // Iterate backwards so we don't have to care about removeIncomingValue
+        // renumbering things.
+        for (unsigned j = orig_phi->getNumIncomingValues(); j > 0; --j)
+          if (BV.test(NodeIndices[orig_phi->getIncomingBlock(j - 1)->getTerminator()]))
+            new_phi->removeIncomingValue(j - 1);
         continue;
       }
       insns_to_delete.push_back(cast<Instruction>(VMap[I]));
