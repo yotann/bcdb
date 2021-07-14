@@ -15,9 +15,6 @@
 using namespace bcdb;
 using namespace llvm;
 
-// FIXME: Canonicalize arguments and return values by reordering them. Also
-// make all pointers opaque.
-
 OutliningExtractor::OutliningExtractor(Function &F,
                                        OutliningDependenceResults &OutDep,
                                        SparseBitVector<> &BV)
@@ -29,15 +26,13 @@ OutliningExtractor::OutliningExtractor(Function &F,
     report_fatal_error("Specified nodes cannot be outlined",
                        /* gen_crash_diag */ false);
 
-  ArgInputs.clear();
-  ExternalInputs.clear();
-  ExternalOutputs.clear();
-
   auto addInputValue = [&](Value *v) {
     if (Argument *arg = dyn_cast<Argument>(v))
       ArgInputs.set(arg->getArgNo());
     else if (NodeIndices.count(v))
       ExternalInputs.set(NodeIndices[v]);
+    else
+      assert(isa<Constant>(v) && "impossible");
   };
 
   // Determine which nodes inside the new callee will need to have their
@@ -46,25 +41,26 @@ OutliningExtractor::OutliningExtractor(Function &F,
     if (BV.test(i))
       continue;
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
-      unsigned num_outlined = 0;
-      SmallVector<Value *, 8> phi_incoming;
-      for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
-        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()])) {
-          phi_incoming.push_back(phi->getIncomingValue(j));
-          num_outlined++;
-        }
-      }
-      if (num_outlined > 1) {
+      SmallPtrSet<Value *, 8> phi_incoming;
+      for (unsigned j = 0; j < phi->getNumIncomingValues(); j++)
+        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()]))
+          phi_incoming.insert(phi->getIncomingValue(j));
+      if (phi_incoming.size() > 1) {
         // The phi value partly depends on control flow within the outlined
         // callee, so we need to outline part or all of the phi. We also need
-        // to make sure the appropriate phi input values are accessible.
+        // to make sure the appropriate phi input values are accessible. We do
+        // not need external outputs for the individual phi values.
         for (Value *v : phi_incoming)
           addInputValue(v);
         output_phis.set(i);
-        continue;
+      } else if (!phi_incoming.empty()) {
+        // Only one phi value is used for all paths within the callee, so we
+        // return that value directly and use it in the phi in the caller.
+        ExternalOutputs.set(NodeIndices[*phi_incoming.begin()]);
       }
+    } else {
+      ExternalOutputs |= OutDep.DataDepends[i];
     }
-    ExternalOutputs |= OutDep.DataDepends[i];
   }
   ExternalOutputs &= BV;
   ExternalOutputs |= output_phis;
@@ -93,40 +89,39 @@ OutliningExtractor::OutliningExtractor(Function &F,
         // callee, but there's one value we need from the caller.
         addInputValue(*phi_incoming.begin());
       }
-      continue;
+    } else {
+      ExternalInputs |= OutDep.DataDepends[i];
+      ArgInputs |= OutDep.ArgDepends[i];
     }
-    ExternalInputs |= OutDep.DataDepends[i];
-    ArgInputs |= OutDep.ArgDepends[i];
   }
-  // The next statement must be execute after all calls to addInputValue().
+  // The next statement must be executed after all calls to addInputValue().
   ExternalInputs.intersectWithComplement(BV);
   ExternalInputs |= input_phis;
 
-  OutlinedBlocks = SparseBitVector();
   for (auto i : BV) {
-    if (isa<BasicBlock>(Nodes[i])) {
+    if (isa<BasicBlock>(Nodes[i]))
       OutlinedBlocks.set(i);
-    } else if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
+    else if (Instruction *I = dyn_cast<Instruction>(Nodes[i]))
       OutlinedBlocks.set(NodeIndices[I->getParent()]);
-    }
   }
 
   // Determine the type of the outlined function.
-  SmallVector<Type *, 8> Types;
+  // FIXME: Canonicalize arguments and return values by reordering them. Also
+  // make all pointers opaque.
+  SmallVector<Type *, 8> result_types, arg_types;
   for (auto i : ExternalOutputs)
-    Types.push_back(Nodes[i]->getType());
-  Type *ResultType = StructType::get(F.getContext(), Types);
-  Types.clear();
+    result_types.push_back(Nodes[i]->getType());
+  Type *result_type = StructType::get(F.getContext(), result_types);
   for (auto i : ArgInputs)
-    Types.push_back((F.arg_begin() + i)->getType());
+    arg_types.push_back((F.arg_begin() + i)->getType());
   for (auto i : ExternalInputs)
-    Types.push_back(Nodes[i]->getType());
-  CalleeType = FunctionType::get(ResultType, Types, /* isVarArg */ false);
+    arg_types.push_back(Nodes[i]->getType());
+  CalleeType = FunctionType::get(result_type, arg_types, /* isVarArg */ false);
 }
 
-void OutliningExtractor::createNewCalleeDeclarationAndName() {
+Function *OutliningExtractor::createNewCallee() {
   if (NewCallee)
-    return;
+    return NewCallee;
 
   raw_string_ostream NewNameOS(NewName);
   NewNameOS << F.getName() << ".outlined.";
@@ -137,15 +132,10 @@ void OutliningExtractor::createNewCalleeDeclarationAndName() {
   // Pass more arguments and return values in registers.
   // TODO: experiment to check whether the code is actually smaller this way.
   NewCallee->setCallingConv(CallingConv::Fast);
-}
-
-Function *OutliningExtractor::createNewCallee() {
-  createNewCalleeDeclarationAndName();
 
   auto &PDT = OutDep.PDT;
   auto &Nodes = OutDep.Nodes;
   auto &NodeIndices = OutDep.NodeIndices;
-  Type *ResultType = NewCallee->getFunctionType()->getReturnType();
 
   // Add function attributes.
   //
@@ -175,25 +165,32 @@ Function *OutliningExtractor::createNewCallee() {
 
   // Create the value map and fill in the input values.
   ValueToValueMapTy VMap;
+  // We need a separate map for phis in the input block that are being split,
+  // because we don't want to rewrite uses within the callee to use the value
+  // passed in as an argument.
   ValueToValueMapTy input_phi_map;
+  // We need RF_IgnoreMissingLocals because we may add new, already-remapped
+  // values and blocks to PHI nodes before calling remapInstruction on them.
   ValueMapper VM(VMap, RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
-  Function::arg_iterator ArgI = NewCallee->arg_begin();
+
+  // Map the callee's arguments to input values.
+  Function::arg_iterator new_arg_iter = NewCallee->arg_begin();
   for (auto i : ArgInputs) {
-    Argument &Src = *(F.arg_begin() + i);
-    Argument &Dst = *ArgI++;
-    VMap[&Src] = &Dst;
-    Dst.setName(Src.getName());
+    Argument &orig_arg = *(F.arg_begin() + i);
+    Argument &new_arg = *new_arg_iter++;
+    VMap[&orig_arg] = &new_arg;
+    new_arg.setName(orig_arg.getName());
   }
   for (auto i : ExternalInputs) {
-    Value &Src = *Nodes[i];
-    Argument &Dst = *ArgI++;
+    Value &orig_value = *Nodes[i];
+    Argument &new_value = *new_arg_iter++;
     if (input_phis.test(i))
-      input_phi_map[&Src] = &Dst;
+      input_phi_map[&orig_value] = &new_value;
     else
-      VMap[&Src] = &Dst;
-    Dst.setName(Src.getName());
+      VMap[&orig_value] = &new_value;
+    new_value.setName(orig_value.getName());
   }
-  assert(ArgI == NewCallee->arg_end());
+  assert(new_arg_iter == NewCallee->arg_end());
 
   // Map blocks in the original function to blocks in the outlined function.
   DenseMap<BasicBlock *, BasicBlock *> BBMap;
@@ -224,16 +221,16 @@ Function *OutliningExtractor::createNewCallee() {
 
   // Clone the selected instructions into the outlined function.
   for (auto i : BV) {
-    if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
-      BasicBlock *BB = BBMap[I->getParent()];
-      Instruction *NewI = I->clone();
-      VMap[I] = NewI;
-      NewI->setName(I->getName());
-      BB->getInstList().push_back(NewI);
+    if (Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i])) {
+      BasicBlock *new_block = BBMap[orig_ins->getParent()];
+      Instruction *new_ins = orig_ins->clone();
+      VMap[orig_ins] = new_ins;
+      new_ins->setName(orig_ins->getName());
+      new_block->getInstList().push_back(new_ins);
     }
   }
 
-  // Remap arguments.
+  // Remap instruction operands.
   for (auto i : BV) {
     Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i]);
     if (!orig_ins)
@@ -264,8 +261,12 @@ Function *OutliningExtractor::createNewCallee() {
       if (phi_incoming.empty()) {
         // nothing to do
       } else if (input_phis.test(i)) {
+        // Some values depend on control flow in the caller, so the caller must
+        // calculate the phi value in those cases and pass it to us.
         new_phi->addIncoming(input_phi_map[orig_phi], EntryBlock);
       } else {
+        // The value is always the same when we first come in from the caller,
+        // so we use that value.
         assert(phi_incoming.size() == 1);
         // Will be remapped to the new value by remapInstruction() below.
         new_phi->addIncoming(*phi_incoming.begin(), EntryBlock);
@@ -278,14 +279,14 @@ Function *OutliningExtractor::createNewCallee() {
   // Add terminators to blocks that didn't have their terminator selected for
   // outlining.
   for (auto &Item : BBMap) {
-    BasicBlock *BB = Item.first;
-    BasicBlock *NewBB = Item.second;
-    if (!NewBB->getTerminator()) {
-      auto PDom = PDT[BB]->getIDom();
-      BasicBlock *Target = ExitBlock;
+    BasicBlock *orig_block = Item.first;
+    BasicBlock *new_block = Item.second;
+    if (!new_block->getTerminator()) {
+      auto PDom = PDT[orig_block]->getIDom();
+      BasicBlock *new_target = ExitBlock;
       if (PDom && PDom->getBlock())
-        Target = cast<BasicBlock>(VMap[PDom->getBlock()]);
-      BranchInst::Create(Target, NewBB);
+        new_target = cast<BasicBlock>(VMap[PDom->getBlock()]);
+      BranchInst::Create(new_target, new_block);
     }
   }
 
@@ -307,7 +308,7 @@ Function *OutliningExtractor::createNewCallee() {
   }
 
   // Set up the return instruction.
-  Value *ResultValue = UndefValue::get(ResultType);
+  Value *ResultValue = UndefValue::get(CalleeType->getReturnType());
   unsigned ResultI = 0;
   for (auto i : ExternalOutputs)
     ResultValue = InsertValueInst::Create(ResultValue, VMap[Nodes[i]],
@@ -322,7 +323,7 @@ Function *OutliningExtractor::createNewCallee() {
 }
 
 Function *OutliningExtractor::createNewCaller() {
-  createNewCalleeDeclarationAndName();
+  createNewCallee();
 
   auto &PDT = OutDep.PDT;
   auto &Nodes = OutDep.Nodes;
@@ -362,34 +363,57 @@ Function *OutliningExtractor::createNewCaller() {
     OutputValues[i] =
         ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
 
-  // Prepare to delete outlined instructions.
+  // Prepare to delete outlined instructions. We don't actually delete any
+  // BasicBlocks, because that would complicate the handling of PHI nodes. Any
+  // unreachable or empty blocks can be deleted later by the SimplifyCFG pass.
   SmallVector<Instruction *, 16> insns_to_delete;
   for (auto i : BV) {
-    if (Instruction *I = dyn_cast<Instruction>(Nodes[i])) {
-      if (isa<PHINode>(I) && I->getParent() == OutliningPoint) {
+    if (Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i])) {
+      if (isa<PHINode>(orig_ins) && orig_ins->getParent() == OutliningPoint) {
         // PHI node in the first block being outlined. We shouldn't necessarily
         // delete it; if it depends on control flow in the caller, we need to
         // pass the result of the PHI into the callee. We do need to remove the
         // PHI values that depend on control flow in the callee, because we're
         // removing the corresponding CFG edges.
-        PHINode *orig_phi = cast<PHINode>(I);
+        PHINode *orig_phi = cast<PHINode>(orig_ins);
         PHINode *new_phi = cast<PHINode>(VMap[orig_phi]);
         // Iterate backwards so we don't have to care about removeIncomingValue
         // renumbering things.
         for (unsigned j = orig_phi->getNumIncomingValues(); j > 0; --j)
-          if (BV.test(NodeIndices[orig_phi->getIncomingBlock(j - 1)->getTerminator()]))
-            new_phi->removeIncomingValue(j - 1);
+          if (BV.test(NodeIndices[orig_phi->getIncomingBlock(j - 1)
+                                      ->getTerminator()]))
+            new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
         continue;
       }
-      insns_to_delete.push_back(cast<Instruction>(VMap[I]));
-      if (I->isTerminator()) {
-        auto PDom = PDT[I->getParent()]->getIDom();
+      insns_to_delete.push_back(cast<Instruction>(VMap[orig_ins]));
+      if (orig_ins->isTerminator()) {
+        // Replace a (possibly conditional) branch or other terminator with an
+        // unconditional branch, skipping over outlined conditional code.
+        auto PDom = PDT[orig_ins->getParent()]->getIDom();
         if (PDom && PDom->getBlock()) {
           BranchInst::Create(cast<BasicBlock>(VMap[PDom->getBlock()]),
-                             cast<BasicBlock>(VMap[I->getParent()]));
+                             cast<BasicBlock>(VMap[orig_ins->getParent()]));
         } else {
-          new UnreachableInst(I->getContext(),
-                              cast<BasicBlock>(VMap[I->getParent()]));
+          // There are a few ways this can happen:
+          //
+          // 1. The terminator is a RetInst or an "unwind to caller" instruction.
+          // 2. The terminator is an UnreachableInst.
+          // 3. The terminator is a ResumeInst.
+          // 4. The terminator is part of an infinite loop.
+          // 5. The terminator is a conditional branch with at least one path
+          //    to one of cases 1-5.
+          //
+          // Case 1 is prohibited by OutliningDependence. In case 5, all
+          // instructions that can be executed after the branch will be
+          // (directly or indirectly) control-dependent on it, and
+          // OutliningDependence requires all such instructions be outlined
+          // whenever the branch is outlined; this is only allowed if all paths
+          // after the branch eventually lead to cases 2-4. And no path leading
+          // to cases 2-4 will ever return normally from the outlined callee.
+          // So regardless of which case we have, this instruction is
+          // unreachable.
+          new UnreachableInst(orig_ins->getContext(),
+                              cast<BasicBlock>(VMap[orig_ins->getParent()]));
         }
       }
     }

@@ -35,8 +35,6 @@ public:
   SparseBitVector<> &BV;
 
 private:
-  void createNewCalleeDeclarationAndName();
-
   FunctionType *CalleeType = nullptr;
   Function *NewCallee = nullptr;
   Function *NewCaller = nullptr;
