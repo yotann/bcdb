@@ -11,7 +11,7 @@ objdump -h result/bin/hello | grep llvmbc
 
 # Use bc-imitate to extract and combine the bitcode,
 # and add some metadata about dynamic linking.
-bc-imitate annotate --binary=result/bin/hello > hello.bc
+bc-imitate extract result/bin/hello > hello.bc
 ```
 
 ## Limitations

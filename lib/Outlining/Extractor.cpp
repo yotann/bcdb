@@ -396,7 +396,8 @@ Function *OutliningExtractor::createNewCaller() {
         } else {
           // There are a few ways this can happen:
           //
-          // 1. The terminator is a RetInst or an "unwind to caller" instruction.
+          // 1. The terminator is a RetInst or an "unwind to caller"
+          // instruction.
           // 2. The terminator is an UnreachableInst.
           // 3. The terminator is a ResumeInst.
           // 4. The terminator is part of an infinite loop.

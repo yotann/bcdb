@@ -26,7 +26,7 @@ let
       find "$path" -type f | while read elf; do
         if hasBC "$elf"; then
           echo "Extracting bitcode from $elf"
-          bc-imitate annotate --binary "$(readlink -e "$elf")" \
+          bc-imitate extract "$(readlink -e "$elf")" \
               | opt -strip-debug \
               | bcdb add -name "$elf" -
         elif isELF "$elf"; then

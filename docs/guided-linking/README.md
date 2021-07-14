@@ -46,7 +46,7 @@ some extra information, like the list of libraries that `lz4` is dynamically
 linked to.
 
 ```sh
-bc-imitate annotate --binary=lz4 > lz4.bc
+bc-imitate extract lz4 > lz4.bc
 ```
 
 ### 3. Initialize the BCDB file

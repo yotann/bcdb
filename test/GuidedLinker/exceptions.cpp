@@ -1,5 +1,5 @@
 // RUN: clang++ %s -fembed-bitcode -O1 -o %t.orig
-// RUN: bc-imitate annotate --binary=%t.orig | llvm-dis > %t.ll
+// RUN: bc-imitate extract %t.orig | llvm-dis > %t.ll
 // RUN: %gltest %t.ll %t
 // RUN: %t.elf/module
 // RUN: %gltest %t.ll %t --noweak

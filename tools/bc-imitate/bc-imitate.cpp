@@ -32,9 +32,18 @@ static cl::SubCommand ClangCommand("clang", "Run Clang to link a module");
 static cl::SubCommand
     ClangArgsCommand("clang-args",
                      "Determine Clang options for linking a module");
+static cl::SubCommand
+    ExtractCommand("extract",
+                   "Extract and annotate a bitcode module from an object file");
+
+static cl::opt<std::string> InputFilenameBinary(cl::Positional, cl::Required,
+                                                cl::desc("<input binary file>"),
+                                                cl::value_desc("filename"),
+                                                cl::sub(ExtractCommand));
 
 static cl::opt<std::string>
-    InputFilenameBitcode(cl::Positional, cl::desc("<input bitcode file>"),
+    InputFilenameBitcode(cl::Positional, cl::Required,
+                         cl::desc("<input bitcode file>"),
                          cl::value_desc("filename"), cl::sub(AnnotateCommand),
                          cl::sub(ClangCommand), cl::sub(ClangArgsCommand));
 
@@ -46,7 +55,7 @@ static cl::opt<std::string> BinaryFilename("binary",
 static cl::opt<std::string>
     OutputFilename("o", cl::desc("Override output filename"), cl::init("-"),
                    cl::value_desc("filename"), cl::sub(AnnotateCommand),
-                   cl::sub(ClangCommand));
+                   cl::sub(ClangCommand), cl::sub(ExtractCommand));
 
 static cl::opt<std::string> OptLevel("O", cl::AlwaysPrefix,
                                      cl::desc("Optimization level"),
@@ -54,7 +63,7 @@ static cl::opt<std::string> OptLevel("O", cl::AlwaysPrefix,
                                      cl::sub(ClangCommand));
 
 static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"),
-                           cl::sub(AnnotateCommand));
+                           cl::sub(AnnotateCommand), cl::sub(ExtractCommand));
 
 static int Annotate() {
   ExitOnError Err("bc-imitate annotate: ");
@@ -62,20 +71,11 @@ static int Annotate() {
   Binary &Binary = *OBinary.getBinary();
 
   LLVMContext Context;
-  std::unique_ptr<Module> M;
-  if (!InputFilenameBitcode.empty()) {
-    SMDiagnostic Diag;
-    M = parseIRFile(InputFilenameBitcode, Diag, Context);
-    if (!M) {
-      Diag.print("bc-imitate", errs());
-      return 1;
-    }
-  } else {
-    M = ExtractModuleFromBinary(Context, Binary);
-    if (!M) {
-      errs() << "can't extract bitcode from " << BinaryFilename << "\n";
-      return 1;
-    }
+  SMDiagnostic Diag;
+  auto M = parseIRFile(InputFilenameBitcode, Diag, Context);
+  if (!M) {
+    Diag.print("bc-imitate", errs());
+    return 1;
   }
 
   if (!AnnotateModuleWithBinary(*M, Binary)) {
@@ -133,6 +133,37 @@ static int ClangArgs() {
   return 0;
 }
 
+static int Extract() {
+  ExitOnError Err("bc-imitate extract: ");
+  OwningBinary<Binary> OBinary = Err(createBinary(InputFilenameBinary));
+  Binary &Binary = *OBinary.getBinary();
+
+  LLVMContext Context;
+  auto M = ExtractModuleFromBinary(Context, Binary);
+  if (!M) {
+    errs() << "can't extract bitcode from " << InputFilenameBinary << "\n";
+    return 1;
+  }
+
+  if (!AnnotateModuleWithBinary(*M, Binary)) {
+    errs() << "unsupported binary file\n";
+    return 1;
+  }
+
+  std::error_code EC;
+  ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
+  Err(errorCodeToError(EC));
+  if (verifyModule(*M, &errs())) {
+    return 1;
+  }
+  if (Force || !CheckBitcodeOutputToConsole(Out.os())) {
+    WriteBitcodeToFile(*M, Out.os());
+    Out.keep();
+  }
+
+  return 0;
+}
+
 int main(int argc, char **argv) {
   InitTool X(argc, argv);
 
@@ -149,6 +180,8 @@ int main(int argc, char **argv) {
     return Clang();
   } else if (ClangArgsCommand) {
     return ClangArgs();
+  } else if (ExtractCommand) {
+    return Extract();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

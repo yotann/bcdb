@@ -1,4 +1,4 @@
-; RUN: bc-imitate annotate --binary %p/Inputs/library.elf | llvm-dis | FileCheck %s
+; RUN: bc-imitate extract %p/Inputs/library.elf | llvm-dis | FileCheck %s
 
 ; CHECK: source_filename = "{{.*}}/Inputs/library.elf"
 
