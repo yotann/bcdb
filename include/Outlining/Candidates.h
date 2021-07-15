@@ -21,25 +21,6 @@ namespace bcdb {
 
 using namespace llvm;
 
-// TODO: delete this.
-struct SparseBitVectorCompare {
-  bool operator()(const SparseBitVector<> &a,
-                  const SparseBitVector<> &b) const {
-    if (a == b)
-      return false;
-    auto ia = a.begin(), ib = b.begin();
-    auto iae = a.end(), ibe = b.end();
-    for (; ia != iae && ib != ibe; ++ia, ++ib) {
-      if (*ia > *ib)
-        return true;
-      if (*ia < *ib)
-        return false;
-    }
-    assert(ia != iae || ib != ibe);
-    return ib != ibe;
-  }
-};
-
 class OutliningCandidates {
 public:
   OutliningCandidates(Function &F, OutliningDependenceResults &OutDep);
@@ -52,12 +33,8 @@ public:
   std::vector<SparseBitVector<>> Candidates;
 
 private:
-  std::vector<SparseBitVector<>> Queue;
-  std::set<SparseBitVector<>, SparseBitVectorCompare> AlreadyVisited;
-
-  void createInitialCandidates();
-  void queueBV(SparseBitVector<> BV);
-  void processCandidate(SparseBitVector<> BV);
+  void generateCandidatesEndingAt(size_t i);
+  void emitCandidate(const SparseBitVector<> &bv);
 };
 
 struct OutliningCandidatesWrapperPass : public FunctionPass {
