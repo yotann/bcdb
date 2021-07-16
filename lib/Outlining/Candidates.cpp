@@ -174,14 +174,26 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
   if (size_model) {
     // TODO: calculate this stuff incrementally (store intermediate results in
     // the Candidate).
+
+    // For the first copy, we need to create a new function and call
+    // instruction.
+    candidate.fixed_overhead = candidate.bv.intersects(OutDep.CompilesToCall)
+                                   ? size_model->function_size_with_callees
+                                   : size_model->function_size_without_callees;
+    candidate.fixed_overhead += size_model->call_instruction_size;
+
+    // For each additional copy, we can delete the outlined instructions, but
+    // we need to add a new call instruction.
     candidate.savings_per_copy = 0;
     for (auto i : candidate.bv)
       if (auto ins = dyn_cast<Instruction>(OutDep.Nodes[i]))
         candidate.savings_per_copy += size_model->instruction_sizes.lookup(ins);
     candidate.savings_per_copy -= size_model->call_instruction_size;
-    candidate.fixed_overhead = candidate.bv.intersects(OutDep.CompilesToCall)
-                                   ? size_model->function_size_with_callees
-                                   : size_model->function_size_without_callees;
+
+    // TODO: Provide options to change the profitability threshold. We might
+    // want a stricter threshold like "must save at least 8 bytes if there are
+    // 4 copies." Or, we might want to allow seemingly unprofitable candidates
+    // just in case the size model is wrong.
     if (candidate.savings_per_copy <= 0)
       return;
 
