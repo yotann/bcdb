@@ -47,6 +47,7 @@
 #include "Outlining/Candidates.h"
 #include "Outlining/Dependence.h"
 #include "Outlining/Extractor.h"
+#include "Outlining/Funcs.h"
 #include "Outlining/LinearProgram.h"
 #include "bcdb/BCDB.h"
 #include "bcdb/LLVMCompat.h"
@@ -324,65 +325,13 @@ static int Alive2() {
 
 // smout candidates
 
-static Node evaluate_candidates(Store &db, const Node &func) {
-  ExitOnError Err("smout candidates evaluator: ");
-  BCDB bcdb(db);
-
-  auto M = Err(
-      parseBitcodeFile(MemoryBufferRef(func.as<StringRef>(byte_string_arg), ""),
-                       bcdb.GetContext()));
-  getSoleDefinition(*M); // check that there's only one definition
-
-  legacy::PassManager PM;
-  PM.add(new OutliningExtractorWrapperPass());
-  PM.run(*M);
-
-  // Make sure all functions are named so we can track them after saving.
-  nameUnamedGlobals(*M);
-
-  SmallVector<Node, 8> NodesValues;
-  SmallVector<std::string, 8> CalleeNames;
-  SmallVector<std::string, 8> CallerNames;
-
-  NamedMDNode *NMD = M->getNamedMetadata("smout.extracted.functions");
-  if (NMD && NMD->getNumOperands()) {
-    for (auto &Candidate :
-         cast<MDNode>(*NMD->getOperand(0)->getOperand(1)).operands()) {
-      // [Nodes, callee, caller]
-      MDNode &MDN = cast<MDNode>(*Candidate);
-      ConstantDataSequential &NodesArray = cast<ConstantDataSequential>(
-          *cast<ConstantAsMetadata>(*MDN.getOperand(0)).getValue());
-      Constant *Callee =
-          cast<ConstantAsMetadata>(*MDN.getOperand(1)).getValue();
-      Constant *Caller =
-          cast<ConstantAsMetadata>(*MDN.getOperand(2)).getValue();
-      if (Callee->isNullValue() || Caller->isNullValue())
-        continue; // ignore unsupported sequences
-
-      CalleeNames.push_back(Callee->getName().str());
-      CallerNames.push_back(Caller->getName().str());
-      Node NodesValue = Node(node_list_arg);
-      for (size_t i = 0; i < NodesArray.getNumElements(); i++)
-        NodesValue.push_back(NodesArray.getElementAsInteger(i));
-      NodesValues.push_back(std::move(NodesValue));
-    }
-  }
-
-  Node Module = db.get(Err(bcdb.AddWithoutHead(std::move(M))));
-  Node Functions = Module["functions"];
-
-  Node Result = Node(node_list_arg);
-  for (size_t i = 0; i < NodesValues.size(); i++) {
-    Result.push_back(Node::Map({
-        {"nodes", std::move(NodesValues[i])},
-        {"callee", std::move(Functions[bytesToUTF8(CalleeNames[i])])},
-        {"caller", std::move(Functions[bytesToUTF8(CallerNames[i])])},
-    }));
-  }
-  return Result;
-}
-
 static int Candidates() {
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
+
   ExitOnError Err("smout candidates: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
   auto OriginalFunctions = Err(db->ListFunctionsInModule(ModuleName));
@@ -413,9 +362,11 @@ static int Candidates() {
     }
 
     Node value = db->get_db().call_or_lookup_value(
-        "smout.candidates", evaluate_candidates, *CID::parse(FuncId));
-    size_t result = value.size();
-    TotalCandidates += value.size();
+        "smout.candidates", smout::candidates, *CID::parse(FuncId));
+    size_t result = 0;
+    for (auto &item : value.map_range())
+      result += item.value().size();
+    TotalCandidates += result;
 
     {
       const std::lock_guard<std::mutex> Lock(PrintMutex);
@@ -426,7 +377,13 @@ static int Candidates() {
     }
   };
 
-  parallel::strategy = heavyweight_hardware_concurrency(Threads);
+  Optional<ThreadPoolStrategy> strategyOrNone =
+      get_threadpool_strategy(Threads);
+  if (!strategyOrNone) {
+    report_fatal_error("invalid number of threads");
+    return 1;
+  }
+  parallel::strategy = *strategyOrNone;
   parallelForEach(OriginalFunctions, Transform);
   errs() << "Total candidates: " << TotalCandidates << "\n";
   return 0;

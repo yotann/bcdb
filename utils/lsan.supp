@@ -2,3 +2,6 @@
 
 # LLVM's RegisterHandlers allocates memory for sigaltstack and never frees it.
 leak:RegisterHandlers
+
+# TODO: figure out whether we can prevent this leak.
+leak:llvm::createX86MCCodeEmitter

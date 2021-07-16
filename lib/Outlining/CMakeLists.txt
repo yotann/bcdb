@@ -1,4 +1,4 @@
-set(LLVM_OPTIONAL_SOURCES OutliningPlugin.cpp)
+set(LLVM_OPTIONAL_SOURCES Funcs.cpp OutliningPlugin.cpp)
 
 add_llvm_library(BCDBOutliningPlugin MODULE
   Candidates.cpp
@@ -20,6 +20,7 @@ add_llvm_library(BCDBOutlining
   Candidates.cpp
   Dependence.cpp
   Extractor.cpp
+  Funcs.cpp
   LinearProgram.cpp
   SizeModel.cpp
 )
