@@ -122,6 +122,18 @@ unsigned OutliningExtractor::getNumCalleeReturnValues() const {
   return ExternalOutputs.count();
 }
 
+void OutliningExtractor::getArgTypes(SmallVectorImpl<Type *> &types) const {
+  for (auto i : ArgInputs)
+    types.push_back((F.arg_begin() + i)->getType());
+  for (auto i : ExternalInputs)
+    types.push_back(OutDep.Nodes[i]->getType());
+}
+
+void OutliningExtractor::getResultTypes(SmallVectorImpl<Type *> &types) const {
+  for (auto i : ExternalOutputs)
+    types.push_back(OutDep.Nodes[i]->getType());
+}
+
 Function *OutliningExtractor::createNewCallee() {
   if (NewCallee)
     return NewCallee;

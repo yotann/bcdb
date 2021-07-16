@@ -2,6 +2,7 @@
 #define BCDB_OUTLINING_CANDIDATES_H
 
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Pass.h>
@@ -28,6 +29,8 @@ public:
     SparseBitVector<> bv;
     int savings_per_copy = 0;
     int fixed_overhead = 0;
+    SmallVector<Type *, 8> arg_types;
+    SmallVector<Type *, 8> result_types;
   };
 
   // size_model may be nullptr to disable profitability checks.

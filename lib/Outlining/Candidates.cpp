@@ -189,6 +189,10 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
     if (extractor.getNumCalleeArgs() + extractor.getNumCalleeReturnValues() >
         OutlineMaxArgs)
       return;
+    candidate.arg_types.clear();
+    candidate.result_types.clear();
+    extractor.getArgTypes(candidate.arg_types);
+    extractor.getResultTypes(candidate.result_types);
   }
 
   Candidates.emplace_back(candidate);
@@ -198,7 +202,14 @@ void OutliningCandidates::print(raw_ostream &OS) const {
   for (const Candidate &candidate : Candidates) {
     OS << "candidate: [";
     OutDep.printSet(OS, candidate.bv);
-    OS << "]\n";
+    OS << "], savings_per_copy " << candidate.savings_per_copy
+       << ", fixed_overhead " << candidate.fixed_overhead << ", type [";
+    for (Type *type : candidate.arg_types)
+      OS << ' ' << *type;
+    OS << " ] => [";
+    for (Type *type : candidate.result_types)
+      OS << ' ' << *type;
+    OS << " ]\n";
   }
 }
 

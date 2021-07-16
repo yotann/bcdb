@@ -2,6 +2,7 @@
 #define BCDB_OUTLINING_EXTRACTOR_H
 
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Pass.h>
 #include <string>
@@ -15,6 +16,7 @@ namespace llvm {
 class AnalysisUsage;
 class Function;
 class Module;
+class Type;
 class raw_ostream;
 } // end namespace llvm
 
@@ -31,6 +33,8 @@ public:
   Function *createNewCaller();
   unsigned getNumCalleeArgs() const;
   unsigned getNumCalleeReturnValues() const;
+  void getArgTypes(SmallVectorImpl<Type *> &types) const;
+  void getResultTypes(SmallVectorImpl<Type *> &types) const;
 
   Function &F;
   OutliningDependenceResults &OutDep;
