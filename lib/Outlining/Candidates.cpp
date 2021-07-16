@@ -5,6 +5,8 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FormatVariadic.h>
 
+#include "Outlining/Dependence.h"
+#include "Outlining/SizeModel.h"
 #include "bcdb/LLVMCompat.h"
 
 using namespace bcdb;
@@ -30,16 +32,17 @@ static cl::opt<bool> OutlineUnprofitable(
         "Outline every possible sequence, even if it seems unprofitable."));
 
 OutliningCandidates::OutliningCandidates(Function &F,
-                                         OutliningDependenceResults &OutDep)
-    : F(F), OutDep(OutDep) {
+                                         OutliningDependenceResults &OutDep,
+                                         const SizeModelResults *size_model)
+    : F(F), OutDep(OutDep), size_model(size_model) {
   if (!OutlineOnly.empty()) {
-    SparseBitVector<> BV;
+    Candidate candidate;
     for (int i : OutlineOnly)
-      BV.set(i);
-    if (!OutDep.isOutlinable(BV))
+      candidate.bv.set(i);
+    if (!OutDep.isOutlinable(candidate.bv))
       report_fatal_error("Specified nodes cannot be outlined",
                          /* gen_crash_diag */ false);
-    Candidates.push_back(std::move(BV));
+    Candidates.emplace_back(std::move(candidate));
     return;
   }
 
@@ -62,17 +65,20 @@ OutliningCandidates::OutliningCandidates(Function &F,
 }
 
 void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
-  // bv is the current candidate. deps is the union of all DominatingDepends of
-  // nodes in bv, minus things that are already in bv.
-  SparseBitVector<> bv, deps;
-  bv.set(i);
-  bv |= OutDep.ForcedDepends[i];
-  for (auto j : bv)
+  // candidate.bv is the current candidate. deps is the union of all
+  // DominatingDepends of nodes in candidate.bv, minus things that are already
+  // in candidate.bv.
+  Candidate candidate;
+  SparseBitVector<> deps;
+  candidate.bv.set(i);
+  candidate.bv |= OutDep.ForcedDepends[i];
+  for (auto j : candidate.bv)
     deps |= OutDep.DominatingDepends[j];
-  deps.intersectWithComplement(bv);
+  deps.intersectWithComplement(candidate.bv);
 
-  while (bv.count() <= OutlineMaxNodes && !OutDep.PreventsOutlining.intersects(bv)) {
-    emitCandidate(bv);
+  while (candidate.bv.count() <= OutlineMaxNodes &&
+         !OutDep.PreventsOutlining.intersects(candidate.bv)) {
+    emitCandidate(candidate);
 
     // Generate the next candidate.
     // TODO: skip over:
@@ -83,7 +89,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
     // - Other boring candidates.
 
     // Find the next node to add.
-    int dom = bv.find_first();
+    int dom = candidate.bv.find_first();
     assert(dom >= 0);
     int next_dep = deps.find_last();
     if (next_dep < 0)
@@ -93,7 +99,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
       report_fatal_error("is this possible?");
 
     // Add the node and its dependences.
-    assert(bv.test_and_set(next_dep));
+    assert(candidate.bv.test_and_set(next_dep));
     deps |= OutDep.DominatingDepends[next_dep];
     bool redundant = false;
     for (auto j : OutDep.ForcedDepends[next_dep]) {
@@ -104,7 +110,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
         redundant = true;
         break;
       }
-      if (bv.test_and_set(j))
+      if (candidate.bv.test_and_set(j))
         deps |= OutDep.DominatingDepends[j];
     }
     if (redundant)
@@ -113,13 +119,13 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
     // Forced depends may cause the outlining point to move before
     // next_dep, in which case we need to add any dominating depends that
     // lie between the outlining point and next_dep.
-    deps.intersectWithComplement(bv);
-    int new_op = bv.find_first();
+    deps.intersectWithComplement(candidate.bv);
+    int new_op = candidate.bv.find_first();
     while (true) {
       int j = deps.find_last();
       if (j < new_op)
         break;
-      bv.set(j);
+      candidate.bv.set(j);
       deps.reset(j);
     }
   }
@@ -131,40 +137,56 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
   //
   // TODO: can we be smarter about this? For instance, we could only use
   // instructions that share at least one operand.
-  SparseBitVector<> contig_bv;
+  Candidate contig_candidate;
   // Stop after OutlineMaxAdjacent nodes, or at the beginning of the block.
   int first_contig =
       static_cast<int>(i) + 1 - static_cast<int>(OutlineMaxAdjacent);
   first_contig = std::max(
       first_contig,
-      static_cast<int>(OutDep.NodeIndices[cast<Instruction>(OutDep.Nodes[i])->getParent()->getFirstNonPHI()]));
-  bool already_in_bv = true; // Skip sequences that already belong to bv.
+      static_cast<int>(OutDep.NodeIndices[cast<Instruction>(OutDep.Nodes[i])
+                                              ->getParent()
+                                              ->getFirstNonPHI()]));
+  bool already_in_main_candidate = true;
   for (int j = i; j >= first_contig; j--) {
-    contig_bv.set(j);
+    contig_candidate.bv.set(j);
     if (OutDep.PreventsOutlining.test(j))
       break;
-    if (!contig_bv.contains(OutDep.ForcedDepends[j]))
+    if (!contig_candidate.bv.contains(OutDep.ForcedDepends[j]))
       break;
-    if (already_in_bv && bv.test(j))
+    if (already_in_main_candidate && candidate.bv.test(j))
       continue;
-    already_in_bv = false;
-    emitCandidate(contig_bv);
+    already_in_main_candidate = false;
+    emitCandidate(contig_candidate);
   }
 }
 
-void OutliningCandidates::emitCandidate(const SparseBitVector<> &bv) {
-  if (!OutDep.isOutlinable(bv)) {
-    OutDep.printSet(errs(), bv);
+void OutliningCandidates::emitCandidate(Candidate &candidate) {
+  if (!OutDep.isOutlinable(candidate.bv)) {
+    OutDep.printSet(errs(), candidate.bv);
     report_fatal_error("invalid outlining candidate");
   }
-  // FIXME: check profitability, and limit number of args/return values.
-  Candidates.emplace_back(bv);
+  if (size_model) {
+    // TODO: calculate this stuff incrementally (store intermediate results in
+    // the Candidate).
+    candidate.savings_per_copy = 0;
+    for (auto i : candidate.bv)
+      if (auto ins = dyn_cast<Instruction>(OutDep.Nodes[i]))
+        candidate.savings_per_copy += size_model->instruction_sizes.lookup(ins);
+    candidate.savings_per_copy -= size_model->call_instruction_size;
+    candidate.fixed_overhead = candidate.bv.intersects(OutDep.CompilesToCall)
+                                   ? size_model->function_size_with_callees
+                                   : size_model->function_size_without_callees;
+    if (candidate.savings_per_copy <= 0)
+      return;
+  }
+  // FIXME: limit number of args/return values.
+  Candidates.emplace_back(candidate);
 }
 
 void OutliningCandidates::print(raw_ostream &OS) const {
-  for (const SparseBitVector<> &BV : Candidates) {
+  for (const Candidate &candidate : Candidates) {
     OS << "candidate: [";
-    OutDep.printSet(OS, BV);
+    OutDep.printSet(OS, candidate.bv);
     OS << "]\n";
   }
 }
@@ -174,7 +196,10 @@ OutliningCandidatesWrapperPass::OutliningCandidatesWrapperPass()
 
 bool OutliningCandidatesWrapperPass::runOnFunction(Function &F) {
   auto &OutDep = getAnalysis<OutliningDependenceWrapperPass>().getOutDep();
-  OutCands.emplace(F, OutDep);
+  const SizeModelResults *size_model = nullptr;
+  if (!OutlineUnprofitable && OutlineOnly.empty())
+    size_model = &getAnalysis<SizeModelWrapperPass>().getSizeModel();
+  OutCands.emplace(F, OutDep, size_model);
   return false;
 }
 
@@ -186,6 +211,8 @@ void OutliningCandidatesWrapperPass::print(raw_ostream &OS,
 void OutliningCandidatesWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
   AU.addRequiredTransitive<OutliningDependenceWrapperPass>();
+  if (!OutlineUnprofitable && OutlineOnly.empty())
+    AU.addRequiredTransitive<SizeModelWrapperPass>();
 }
 
 void OutliningCandidatesWrapperPass::releaseMemory() { OutCands.reset(); }

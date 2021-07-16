@@ -16,9 +16,10 @@ namespace bcdb {
 
 using llvm::AnalysisUsage;
 using llvm::DenseMap;
+using llvm::Function;
+using llvm::FunctionPass;
 using llvm::Instruction;
 using llvm::Module;
-using llvm::ModulePass;
 using llvm::Optional;
 using llvm::raw_ostream;
 
@@ -51,12 +52,12 @@ private:
   Module &m;
 };
 
-struct SizeModelWrapperPass : public ModulePass {
+struct SizeModelWrapperPass : public FunctionPass {
   SizeModelWrapperPass();
 
   static char ID;
 
-  bool runOnModule(Module &m) override;
+  bool runOnFunction(Function &func) override;
   void print(raw_ostream &os, const Module *m = nullptr) const override;
   void getAnalysisUsage(AnalysisUsage &au) const override;
   void releaseMemory() override;

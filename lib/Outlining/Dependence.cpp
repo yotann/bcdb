@@ -493,6 +493,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
 
     case Intrinsic::not_intrinsic:
       // Safe to outline.
+      CompilesToCall.set(NodeIndices[I]);
       break;
 
     case Intrinsic::bitreverse:
@@ -592,19 +593,24 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::vector_reduce_xor:
 #endif
       // Simple computations (may depend on rounding mode). Safe to outline.
+      // TODO: Some of these should have CompilesToCall set.
       break;
 
     case Intrinsic::expect:
     case Intrinsic::lifetime_end:
-    case Intrinsic::memcpy:
-    case Intrinsic::memmove:
-    case Intrinsic::memset:
     case Intrinsic::vacopy:
 #if LLVM_VERSION_MAJOR >= 11
     case Intrinsic::expect_with_probability:
     case Intrinsic::memcpy_inline:
 #endif
       // Should be safe to outline.
+      break;
+
+    case Intrinsic::memcpy:
+    case Intrinsic::memmove:
+    case Intrinsic::memset:
+      // Should be safe to outline.
+      CompilesToCall.set(NodeIndices[I]);
       break;
 
     case Intrinsic::lifetime_start:

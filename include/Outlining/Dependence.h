@@ -59,6 +59,10 @@ public:
   // If PreventsOutlining.test(i) is true, Nodes[i] may never be outlined.
   SparseBitVector<> PreventsOutlining;
 
+  // If CompilesToCall.test(i) is true, Nodes[i] is likely to be compiled into
+  // a call instruction.
+  SparseBitVector<> CompilesToCall;
+
   // If DataDepends[i].test(j) is true, Nodes[i] has a data dependency on
   // Nodes[j].
   std::vector<SparseBitVector<>> DataDepends;

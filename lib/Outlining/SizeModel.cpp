@@ -354,10 +354,16 @@ void SizeModelResults::print(raw_ostream &os) const {
   m.print(os, &writer);
 }
 
-SizeModelWrapperPass::SizeModelWrapperPass() : ModulePass(ID) {}
+SizeModelWrapperPass::SizeModelWrapperPass() : FunctionPass(ID) {}
 
-bool SizeModelWrapperPass::runOnModule(Module &m) {
-  size_model.emplace(m);
+bool SizeModelWrapperPass::runOnFunction(Function &func) {
+  // XXX: SizeModelWrapperPass needs to be a FunctionPass because
+  // OutliningCandidatesWrapperPass depends on it, and the legacy pass manager
+  // doesn't allow a FunctionPass to depend on a ModulePass. But that means we
+  // redundantly create a copy of SizeModelResults for the entire module each
+  // time we process a function. The best solution is probably to switch to the
+  // new pass manager.
+  size_model.emplace(*func.getParent());
   return false;
 }
 

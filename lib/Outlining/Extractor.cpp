@@ -481,8 +481,8 @@ bool OutliningExtractorWrapperPass::runOnFunction(Function &F) {
   OutliningDependenceResults &OutDep =
       getAnalysis<OutliningDependenceWrapperPass>(F).getOutDep();
   auto &OutCands = getAnalysis<OutliningCandidatesWrapperPass>(F).getOutCands();
-  for (SparseBitVector<> &BV : OutCands.Candidates) {
-    OutliningExtractor Extractor(F, OutDep, BV);
+  for (OutliningCandidates::Candidate &candidate : OutCands.Candidates) {
+    OutliningExtractor Extractor(F, OutDep, candidate.bv);
     Function *NewCallee = Extractor.createNewCallee();
     if (NewCallee) {
       Changed = true;
@@ -492,7 +492,7 @@ bool OutliningExtractorWrapperPass::runOnFunction(Function &F) {
         NewCaller = ConstantPointerNull::get(F.getType());
 
       SmallVector<unsigned, 8> Bits;
-      for (auto i : BV)
+      for (auto i : candidate.bv)
         Bits.push_back(i);
       Metadata *BVNode =
           ConstantAsMetadata::get(ConstantDataArray::get(F.getContext(), Bits));

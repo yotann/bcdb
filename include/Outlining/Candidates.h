@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Dependence.h"
+#include "SizeModel.h"
 
 namespace llvm {
 class AnalysisUsage;
@@ -23,18 +24,27 @@ using namespace llvm;
 
 class OutliningCandidates {
 public:
-  OutliningCandidates(Function &F, OutliningDependenceResults &OutDep);
+  struct Candidate {
+    SparseBitVector<> bv;
+    int savings_per_copy = 0;
+    int fixed_overhead = 0;
+  };
+
+  // size_model may be nullptr to disable profitability checks.
+  OutliningCandidates(Function &F, OutliningDependenceResults &OutDep,
+                      const SizeModelResults *size_model);
 
   void print(raw_ostream &OS) const;
 
   Function &F;
   OutliningDependenceResults &OutDep;
+  const SizeModelResults *size_model;
 
-  std::vector<SparseBitVector<>> Candidates;
+  std::vector<Candidate> Candidates;
 
 private:
   void generateCandidatesEndingAt(size_t i);
-  void emitCandidate(const SparseBitVector<> &bv);
+  void emitCandidate(Candidate &candidate);
 };
 
 struct OutliningCandidatesWrapperPass : public FunctionPass {
