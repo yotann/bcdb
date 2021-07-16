@@ -4,7 +4,9 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/SparseBitVector.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -37,6 +39,8 @@ class OutliningDependenceResults {
 public:
   OutliningDependenceResults(Function &F, DominatorTree &DT,
                              PostDominatorTree &PDT, MemorySSA &MSSA);
+
+  OutliningDependenceResults(OutliningDependenceResults &&rhs) = default;
 
   void print(raw_ostream &OS) const;
 
@@ -87,7 +91,8 @@ public:
   Function &F;
   DominatorTree &DT;
   PostDominatorTree &PDT;
-  CorrectPostDominatorTree CPDT;
+  // Wrapped in unique_ptr so OutliningDependenceResults can be moved.
+  std::unique_ptr<CorrectPostDominatorTree> CPDT;
   MemorySSA &MSSA;
 
 private:
@@ -99,6 +104,28 @@ private:
   void analyzeMemoryPhi(MemoryPhi *MPhi);
   void analyzeInstruction(Instruction *I);
   void finalizeDepends();
+};
+
+class OutliningDependenceAnalysis
+    : public AnalysisInfoMixin<OutliningDependenceAnalysis> {
+  friend AnalysisInfoMixin<OutliningDependenceAnalysis>;
+
+  static AnalysisKey Key;
+
+public:
+  using Result = OutliningDependenceResults;
+
+  OutliningDependenceResults run(Function &f, FunctionAnalysisManager &am);
+};
+
+class OutliningDependencePrinterPass
+    : public PassInfoMixin<OutliningDependencePrinterPass> {
+  raw_ostream &os;
+
+public:
+  explicit OutliningDependencePrinterPass(raw_ostream &os) : os(os) {}
+
+  PreservedAnalyses run(Function &f, FunctionAnalysisManager &am);
 };
 
 struct OutliningDependenceWrapperPass : public FunctionPass {

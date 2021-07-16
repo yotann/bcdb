@@ -483,22 +483,8 @@ Function *OutliningExtractor::createNewCaller() {
   return NewCaller;
 }
 
-OutliningExtractorWrapperPass::OutliningExtractorWrapperPass()
-    : ModulePass(ID) {}
-
-bool OutliningExtractorWrapperPass::runOnModule(Module &M) {
-  // Only run on functions that already existed when we began the pass.
-  SmallVector<Function *, 1> Functions;
-  for (Function &F : M)
-    if (!F.isDeclaration())
-      Functions.push_back(&F);
-  bool Changed = false;
-  for (Function *F : Functions)
-    Changed = runOnFunction(*F) || Changed;
-  return Changed;
-}
-
-bool OutliningExtractorWrapperPass::runOnFunction(Function &F) {
+static bool runOnFunction(Function &F, OutliningDependenceResults &OutDep,
+                          OutliningCandidates &OutCands) {
   // We track outlined functions in the output module by adding metadata nodes.
   // We can't add the metadata to the new functions because that would prevent
   // the BCDB from deduplicating them, and it seems silly to modify the
@@ -507,9 +493,6 @@ bool OutliningExtractorWrapperPass::runOnFunction(Function &F) {
   bool Changed = false;
   SmallVector<Metadata *, 8> MDNodes;
 
-  OutliningDependenceResults &OutDep =
-      getAnalysis<OutliningDependenceWrapperPass>(F).getOutDep();
-  auto &OutCands = getAnalysis<OutliningCandidatesWrapperPass>(F).getOutCands();
   for (OutliningCandidates::Candidate &candidate : OutCands.Candidates) {
     OutliningExtractor Extractor(F, OutDep, candidate.bv);
     Function *NewCallee = Extractor.createNewCallee();
@@ -541,6 +524,45 @@ bool OutliningExtractorWrapperPass::runOnFunction(Function &F) {
         ->addOperand(TopNode);
   }
 
+  return Changed;
+}
+
+PreservedAnalyses OutliningExtractorPass::run(Module &m,
+                                              ModuleAnalysisManager &am) {
+  FunctionAnalysisManager &fam =
+      am.getResult<FunctionAnalysisManagerModuleProxy>(m).getManager();
+  // Only run on functions that already existed when we began the pass.
+  SmallVector<Function *, 1> Functions;
+  for (Function &F : m)
+    if (!F.isDeclaration())
+      Functions.push_back(&F);
+  bool Changed = false;
+  for (Function *F : Functions) {
+    OutliningDependenceResults &OutDep =
+        fam.getResult<OutliningDependenceAnalysis>(*F);
+    auto &OutCands = fam.getResult<OutliningCandidatesAnalysis>(*F);
+    Changed = runOnFunction(*F, OutDep, OutCands) || Changed;
+  }
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+OutliningExtractorWrapperPass::OutliningExtractorWrapperPass()
+    : ModulePass(ID) {}
+
+bool OutliningExtractorWrapperPass::runOnModule(Module &M) {
+  // Only run on functions that already existed when we began the pass.
+  SmallVector<Function *, 1> Functions;
+  for (Function &F : M)
+    if (!F.isDeclaration())
+      Functions.push_back(&F);
+  bool Changed = false;
+  for (Function *F : Functions) {
+    OutliningDependenceResults &OutDep =
+        getAnalysis<OutliningDependenceWrapperPass>(*F).getOutDep();
+    auto &OutCands =
+        getAnalysis<OutliningCandidatesWrapperPass>(*F).getOutCands();
+    Changed = runOnFunction(*F, OutDep, OutCands) || Changed;
+  }
   return Changed;
 }
 

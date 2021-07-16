@@ -4,6 +4,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/SparseBitVector.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
 #include <string>
 #include <utility>
@@ -58,6 +59,14 @@ private:
   std::string NewName;
 };
 
+// Needs to be a module pass because it adds new functions.
+class OutliningExtractorPass : public PassInfoMixin<OutliningExtractorPass> {
+public:
+  OutliningExtractorPass() {}
+
+  PreservedAnalyses run(Module &m, ModuleAnalysisManager &am);
+};
+
 // Needs to be a ModulePass because it adds new functions.
 struct OutliningExtractorWrapperPass : public ModulePass {
   OutliningExtractorWrapperPass();
@@ -65,13 +74,8 @@ struct OutliningExtractorWrapperPass : public ModulePass {
   static char ID;
 
   bool runOnModule(Module &M) override;
-  bool runOnFunction(Function &F);
   void print(raw_ostream &OS, const Module *M = nullptr) const override;
   void getAnalysisUsage(AnalysisUsage &AU) const override;
-
-private:
-  DenseMap<Function *, std::vector<std::pair<SparseBitVector<>, Function *>>>
-      NewFunctions;
 };
 
 } // end namespace bcdb

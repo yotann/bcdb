@@ -3,6 +3,7 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
 
 namespace llvm {
@@ -14,23 +15,28 @@ class raw_ostream;
 
 namespace bcdb {
 
+using llvm::AnalysisInfoMixin;
+using llvm::AnalysisKey;
 using llvm::AnalysisUsage;
 using llvm::DenseMap;
 using llvm::Function;
+using llvm::FunctionAnalysisManager;
 using llvm::FunctionPass;
 using llvm::Instruction;
 using llvm::Module;
 using llvm::Optional;
+using llvm::PassInfoMixin;
+using llvm::PreservedAnalyses;
 using llvm::raw_ostream;
 
-// Calculates the estimated compiled size of each instruction in a module.
+// Calculates the estimated compiled size of each instruction in a function.
 class SizeModelResults {
 public:
-  SizeModelResults(Module &m);
+  SizeModelResults(Function &f);
 
   void print(raw_ostream &os) const;
 
-  // The estimated size, in bytes, of each of the Module's instructions after
+  // The estimated size, in bytes, of each of the Function's instructions after
   // compilation. Unusual values are possible; for example, an instruction's
   // size may be 0 if it is merged with another instruction during compilation.
   DenseMap<Instruction *, unsigned> instruction_sizes;
@@ -49,7 +55,27 @@ public:
   unsigned function_size_with_callees;
 
 private:
-  Module &m;
+  Function &f;
+};
+
+class SizeModelAnalysis : public AnalysisInfoMixin<SizeModelAnalysis> {
+  friend AnalysisInfoMixin<SizeModelAnalysis>;
+
+  static AnalysisKey Key;
+
+public:
+  using Result = SizeModelResults;
+
+  SizeModelResults run(Function &f, FunctionAnalysisManager &am);
+};
+
+class SizeModelPrinterPass : public PassInfoMixin<SizeModelPrinterPass> {
+  raw_ostream &os;
+
+public:
+  explicit SizeModelPrinterPass(raw_ostream &os) : os(os) {}
+
+  PreservedAnalyses run(Function &f, FunctionAnalysisManager &am);
 };
 
 struct SizeModelWrapperPass : public FunctionPass {

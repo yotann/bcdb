@@ -84,10 +84,11 @@ OutliningDependenceResults::OutliningDependenceResults(Function &F,
                                                        DominatorTree &DT,
                                                        PostDominatorTree &PDT,
                                                        MemorySSA &MSSA)
-    : F(F), DT(DT), PDT(PDT), CPDT(F), MSSA(MSSA) {
-  DT.updateDFSNumbers();   // Needed for fast queries.
-  PDT.updateDFSNumbers();  // Needed for fast queries.
-  CPDT.updateDFSNumbers(); // Needed for fast queries.
+    : F(F), DT(DT), PDT(PDT), MSSA(MSSA) {
+  CPDT = std::make_unique<CorrectPostDominatorTree>(F);
+  DT.updateDFSNumbers();    // Needed for fast queries.
+  PDT.updateDFSNumbers();   // Needed for fast queries.
+  CPDT->updateDFSNumbers(); // Needed for fast queries.
   numberNodes();
   for (Value *V : Nodes) {
     if (BasicBlock *BB = dyn_cast<BasicBlock>(V))
@@ -287,12 +288,12 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // implicit node, which we don't care about.)
   BasicBlock *a = BB;
   for (BasicBlock *b : successors(a)) {
-    if (CPDT.properlyDominates(b, a))
+    if (CPDT->properlyDominates(b, a))
       continue;
 
-    auto l = CPDT[a]->getIDom();
+    auto l = (*CPDT)[a]->getIDom();
     SmallVector<BasicBlock *, 8> path;
-    for (auto m = CPDT[b]; m != l; m = m->getIDom())
+    for (auto m = (*CPDT)[b]; m != l; m = m->getIDom())
       path.push_back(m->getBlock()->bb);
 
     // Instead of always making every node in the path control-dependent on A,
@@ -700,6 +701,24 @@ void OutliningDependenceResults::finalizeDepends() {
     ForcedDepends[i].clear();
     DominatingDepends[i].clear();
   }
+}
+
+AnalysisKey OutliningDependenceAnalysis::Key;
+
+OutliningDependenceResults
+OutliningDependenceAnalysis::run(Function &f, FunctionAnalysisManager &am) {
+  auto &dt = am.getResult<DominatorTreeAnalysis>(f);
+  auto &pdt = am.getResult<PostDominatorTreeAnalysis>(f);
+  auto &mssa = am.getResult<MemorySSAAnalysis>(f);
+  return OutliningDependenceResults(f, dt, pdt, mssa.getMSSA());
+}
+
+PreservedAnalyses
+OutliningDependencePrinterPass::run(Function &f, FunctionAnalysisManager &am) {
+  auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
+  os << "OutliningDependence for function: " << f.getName() << "\n";
+  deps.print(os);
+  return PreservedAnalyses::all();
 }
 
 OutliningDependenceWrapperPass::OutliningDependenceWrapperPass()

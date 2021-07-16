@@ -5,6 +5,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
 #include <set>
 #include <vector>
@@ -48,6 +49,28 @@ public:
 private:
   void generateCandidatesEndingAt(size_t i);
   void emitCandidate(Candidate &candidate);
+};
+
+class OutliningCandidatesAnalysis
+    : public AnalysisInfoMixin<OutliningCandidatesAnalysis> {
+  friend AnalysisInfoMixin<OutliningCandidatesAnalysis>;
+
+  static AnalysisKey Key;
+
+public:
+  using Result = OutliningCandidates;
+
+  OutliningCandidates run(Function &f, FunctionAnalysisManager &am);
+};
+
+class OutliningCandidatesPrinterPass
+    : public PassInfoMixin<OutliningCandidatesPrinterPass> {
+  raw_ostream &os;
+
+public:
+  explicit OutliningCandidatesPrinterPass(raw_ostream &os) : os(os) {}
+
+  PreservedAnalyses run(Function &f, FunctionAnalysisManager &am);
 };
 
 struct OutliningCandidatesWrapperPass : public FunctionPass {

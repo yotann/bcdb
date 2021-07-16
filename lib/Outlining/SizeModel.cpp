@@ -148,30 +148,13 @@ struct SizingStreamer : public MCStreamer {
 };
 } // end anonymous namespace
 
-SizeModelResults::SizeModelResults(Module &m) : m(m) {
+SizeModelResults::SizeModelResults(Function &f) : f(f) {
   // We need to run transformations on the module in order to compile it and
   // measure sizes, but we shouldn't modify the original module. So we make a
   // clone of it.
-  auto cloned = CloneModule(m);
-  DenseMap<Instruction *, Instruction *> cloned_to_orig;
-
-  // Associate cloned instructions with original instructions.
-  // We need to do this before making any changes to the cloned module.
-  for (auto f_orig = m.begin(), f_cloned = cloned->begin();
-       f_orig != m.end() && f_cloned != cloned->end(); ++f_orig, ++f_cloned) {
-    if (f_orig->hasName() || f_cloned->hasName())
-      assert(f_orig->getName() == f_cloned->getName());
-    for (auto bb_orig = f_orig->begin(), bb_cloned = f_cloned->begin();
-         bb_orig != f_orig->end() && bb_cloned != f_cloned->end();
-         ++bb_orig, ++bb_cloned) {
-      for (auto i_orig = bb_orig->begin(), i_cloned = bb_cloned->begin();
-           i_orig != bb_orig->end() && i_cloned != bb_cloned->end();
-           ++i_orig, ++i_cloned) {
-        assert(i_orig->getOpcode() == i_cloned->getOpcode());
-        cloned_to_orig[&*i_cloned] = &*i_orig;
-      }
-    }
-  }
+  ValueToValueMapTy vmap;
+  auto cloned = CloneModule(*f.getParent(), vmap,
+                            [&](const GlobalValue *gv) { return gv == &f; });
 
   // Debugify doesn't do anything if llvm.dbg.cu already exists.
   auto dbg = cloned->getNamedMetadata("llvm.dbg.cu");
@@ -268,15 +251,13 @@ SizeModelResults::SizeModelResults(Module &m) : m(m) {
   //
   // - On wasm32, the size of the end_function instruction gets added to the
   //   size of the last instruction.
-  for (auto &f : *cloned) {
-    for (auto &bb : f) {
-      for (auto &i : bb) {
-        assert(i.getDebugLoc()); // should be guaranteed by debugify
-        unsigned line = i.getDebugLoc().getLine();
-        unsigned size = line < sizes.size() ? sizes[line] : 0;
-        Instruction *i_orig = cloned_to_orig[&i];
-        instruction_sizes[i_orig] = size;
-      }
+  for (auto &bb : f) {
+    for (auto &i_orig : bb) {
+      Instruction &i = *cast<Instruction>(vmap[&i_orig]);
+      assert(i.getDebugLoc()); // should be guaranteed by debugify
+      unsigned line = i.getDebugLoc().getLine();
+      unsigned size = line < sizes.size() ? sizes[line] : 0;
+      instruction_sizes[&i_orig] = size;
     }
   }
 
@@ -351,19 +332,28 @@ void SizeModelResults::print(raw_ostream &os) const {
      << " bytes\n";
   os << "\n";
   SizeModelWriter writer(this);
-  m.print(os, &writer);
+  f.print(os, &writer);
+}
+
+AnalysisKey SizeModelAnalysis::Key;
+
+SizeModelResults SizeModelAnalysis::run(Function &f,
+                                        FunctionAnalysisManager &am) {
+  return SizeModelResults(f);
+}
+
+PreservedAnalyses SizeModelPrinterPass::run(Function &f,
+                                            FunctionAnalysisManager &am) {
+  auto &size_model = am.getResult<SizeModelAnalysis>(f);
+  os << "SizeModel for function: " << f.getName() << "\n";
+  size_model.print(os);
+  return PreservedAnalyses::all();
 }
 
 SizeModelWrapperPass::SizeModelWrapperPass() : FunctionPass(ID) {}
 
 bool SizeModelWrapperPass::runOnFunction(Function &func) {
-  // XXX: SizeModelWrapperPass needs to be a FunctionPass because
-  // OutliningCandidatesWrapperPass depends on it, and the legacy pass manager
-  // doesn't allow a FunctionPass to depend on a ModulePass. But that means we
-  // redundantly create a copy of SizeModelResults for the entire module each
-  // time we process a function. The best solution is probably to switch to the
-  // new pass manager.
-  size_model.emplace(*func.getParent());
+  size_model.emplace(func);
   return false;
 }
 

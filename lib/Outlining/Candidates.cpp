@@ -225,6 +225,25 @@ void OutliningCandidates::print(raw_ostream &OS) const {
   }
 }
 
+AnalysisKey OutliningCandidatesAnalysis::Key;
+
+OutliningCandidates
+OutliningCandidatesAnalysis::run(Function &f, FunctionAnalysisManager &am) {
+  const SizeModelResults *size_model = nullptr;
+  auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
+  if (!OutlineUnprofitable && OutlineOnly.empty())
+    size_model = &am.getResult<SizeModelAnalysis>(f);
+  return OutliningCandidates(f, deps, size_model);
+}
+
+PreservedAnalyses
+OutliningCandidatesPrinterPass::run(Function &f, FunctionAnalysisManager &am) {
+  auto &candidates = am.getResult<OutliningCandidatesAnalysis>(f);
+  os << "OutliningCandidates for function: " << f.getName() << "\n";
+  candidates.print(os);
+  return PreservedAnalyses::all();
+}
+
 OutliningCandidatesWrapperPass::OutliningCandidatesWrapperPass()
     : FunctionPass(ID) {}
 
