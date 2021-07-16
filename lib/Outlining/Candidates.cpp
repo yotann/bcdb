@@ -6,6 +6,7 @@
 #include <llvm/Support/FormatVariadic.h>
 
 #include "Outlining/Dependence.h"
+#include "Outlining/Extractor.h"
 #include "Outlining/SizeModel.h"
 #include "bcdb/LLVMCompat.h"
 
@@ -21,6 +22,10 @@ static cl::opt<size_t>
     OutlineMaxAdjacent("outline-max-adjacent", cl::init(10),
                        cl::desc("Maximum number of unrelated adjacent "
                                 "instructions to outline together."));
+
+static cl::opt<size_t> OutlineMaxArgs(
+    "outline-max-args", cl::init(10),
+    cl::desc("Maximum number of arguments and return values for the callee."));
 
 static cl::opt<size_t>
     OutlineMaxNodes("outline-max-nodes", cl::init(50),
@@ -165,6 +170,7 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
     OutDep.printSet(errs(), candidate.bv);
     report_fatal_error("invalid outlining candidate");
   }
+
   if (size_model) {
     // TODO: calculate this stuff incrementally (store intermediate results in
     // the Candidate).
@@ -178,8 +184,13 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
                                    : size_model->function_size_without_callees;
     if (candidate.savings_per_copy <= 0)
       return;
+
+    OutliningExtractor extractor(F, OutDep, candidate.bv);
+    if (extractor.getNumCalleeArgs() + extractor.getNumCalleeReturnValues() >
+        OutlineMaxArgs)
+      return;
   }
-  // FIXME: limit number of args/return values.
+
   Candidates.emplace_back(candidate);
 }
 

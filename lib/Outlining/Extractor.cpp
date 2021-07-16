@@ -112,6 +112,23 @@ OutliningExtractor::OutliningExtractor(Function &F,
     else if (Instruction *I = dyn_cast<Instruction>(Nodes[i]))
       OutlinedBlocks.set(NodeIndices[I->getParent()]);
   }
+}
+
+unsigned OutliningExtractor::getNumCalleeArgs() const {
+  return ArgInputs.count() + ExternalInputs.count();
+}
+
+unsigned OutliningExtractor::getNumCalleeReturnValues() const {
+  return ExternalOutputs.count();
+}
+
+Function *OutliningExtractor::createNewCallee() {
+  if (NewCallee)
+    return NewCallee;
+
+  auto &PDT = OutDep.PDT;
+  auto &Nodes = OutDep.Nodes;
+  auto &NodeIndices = OutDep.NodeIndices;
 
   // Determine the type of the outlined function.
   // FIXME: Canonicalize arguments and return values by reordering them. Also
@@ -125,14 +142,10 @@ OutliningExtractor::OutliningExtractor(Function &F,
   for (auto i : ExternalInputs)
     arg_types.push_back(Nodes[i]->getType());
   CalleeType = FunctionType::get(result_type, arg_types, /* isVarArg */ false);
-}
-
-Function *OutliningExtractor::createNewCallee() {
-  if (NewCallee)
-    return NewCallee;
 
   raw_string_ostream NewNameOS(NewName);
   NewNameOS << F.getName() << ".outlined.";
+  // Use assembler-friendly characters "." and "_".
   OutDep.printSet(NewNameOS, BV, ".", "_");
   NewCallee = Function::Create(CalleeType, GlobalValue::ExternalLinkage,
                                NewNameOS.str() + ".callee", F.getParent());
@@ -140,10 +153,6 @@ Function *OutliningExtractor::createNewCallee() {
   // Pass more arguments and return values in registers.
   // TODO: experiment to check whether the code is actually smaller this way.
   NewCallee->setCallingConv(CallingConv::Fast);
-
-  auto &PDT = OutDep.PDT;
-  auto &Nodes = OutDep.Nodes;
-  auto &NodeIndices = OutDep.NodeIndices;
 
   // Add function attributes.
   //

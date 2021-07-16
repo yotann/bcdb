@@ -29,6 +29,8 @@ public:
 
   Function *createNewCallee();
   Function *createNewCaller();
+  unsigned getNumCalleeArgs() const;
+  unsigned getNumCalleeReturnValues() const;
 
   Function &F;
   OutliningDependenceResults &OutDep;
