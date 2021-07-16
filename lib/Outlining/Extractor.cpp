@@ -42,9 +42,17 @@ OutliningExtractor::OutliningExtractor(Function &F,
       continue;
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
       SmallPtrSet<Value *, 8> phi_incoming;
-      for (unsigned j = 0; j < phi->getNumIncomingValues(); j++)
-        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()]))
-          phi_incoming.insert(phi->getIncomingValue(j));
+      for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
+        Value *v = phi->getIncomingValue(j);
+        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()])) {
+          // May depend on control flow in the callee.
+          phi_incoming.insert(v);
+        } else if (NodeIndices.count(v)) {
+          // Only depends on control flow from the caller, but may need a value
+          // from the callee.
+          ExternalOutputs.set(NodeIndices[v]);
+        }
+      }
       if (phi_incoming.size() > 1) {
         // The phi value partly depends on control flow within the outlined
         // callee, so we need to outline part or all of the phi. We also need
