@@ -5,6 +5,7 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stddef.h>
 #include <string>
 #include <type_traits>
@@ -70,6 +71,27 @@ std::ostream &operator<<(std::ostream &os, const Name &name);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Name &name);
 
 using Path = std::pair<Name, std::vector<Node>>;
+
+class Store;
+
+// XXX: NodeRef is not thread-safe, even for const access! We do things this
+// way because Evaluator needs to create std::shared_future<NodeRef> and call
+// std::shared_future::get() from multiple threads, even though only one thread
+// will actually use the NodeRef.
+class NodeRef {
+  Store &store;
+  std::optional<CID> cid = std::nullopt;
+  mutable std::optional<Node> node = std::nullopt;
+
+public:
+  NodeRef(Store &store, const CID &cid) : store(store), cid(cid) {}
+  NodeRef(Store &store, const CID &cid, const Node &node)
+      : store(store), cid(cid), node(node) {}
+
+  const Node &operator*() const;
+
+  const Node *operator->() const { return &operator*(); }
+};
 
 class Store {
 public:
@@ -159,6 +181,12 @@ public:
     return value;
   }
 };
+
+inline const Node &NodeRef::operator*() const {
+  if (!node)
+    node = store.get(*cid);
+  return *node;
+}
 
 } // end namespace memodb
 
