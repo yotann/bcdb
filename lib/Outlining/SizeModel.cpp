@@ -167,6 +167,24 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
   std::unique_ptr<ModulePass> debugify(createDebugifyModulePass());
   debugify->runOnModule(*cloned);
 
+  // Record the line number mapping now, before we start transforming the
+  // cloned module.
+  DenseMap<unsigned, Instruction *> line_to_instruction;
+  for (auto &bb : f) {
+    for (auto &i_orig : bb) {
+      Value *v = vmap[&i_orig];
+      if (!v)
+        continue; // Dead code.
+      Instruction *ins = dyn_cast<Instruction>(v);
+      if (!ins)
+        continue; // PHINode simplified to a constant.
+      assert(ins->getDebugLoc() && "should be guaranteed by debugify");
+      unsigned line = ins->getDebugLoc().getLine();
+      assert(line > 0 && "should be guaranteed by debugify");
+      line_to_instruction[line] = &i_orig;
+    }
+  }
+
   // Now we actually compile the module, using our custom MCStreamer
   // implementation that calculates instruction sizes without actually writing
   // a file. We have to do a lot of steps manually in order to use a custom
@@ -251,14 +269,10 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
   //
   // - On wasm32, the size of the end_function instruction gets added to the
   //   size of the last instruction.
-  for (auto &bb : f) {
-    for (auto &i_orig : bb) {
-      Instruction &i = *cast<Instruction>(vmap[&i_orig]);
-      assert(i.getDebugLoc()); // should be guaranteed by debugify
-      unsigned line = i.getDebugLoc().getLine();
-      unsigned size = line < sizes.size() ? sizes[line] : 0;
-      instruction_sizes[&i_orig] = size;
-    }
+  for (auto &item : line_to_instruction) {
+    unsigned line = item.first;
+    Instruction *ins = item.second;
+    instruction_sizes[ins] = line < sizes.size() ? sizes[line] : 0;
   }
 
   // TODO: take options that affect these sizes, like the code model, into

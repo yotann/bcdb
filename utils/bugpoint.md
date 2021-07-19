@@ -26,3 +26,7 @@ you check whether all the crashes have the same root cause. The
 attributes, which is very slow and not usually important. The final
 `-globalopt` pass removes unused global declarations, which usually aren't
 needed to cause the crash.
+
+If you need to use Bugpoint on individual functions, note that BCDB stores
+anonymous functions (like `@0`), which may cause Bugpoint to crash. You should
+add names to the functions if this happens.
