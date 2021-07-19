@@ -72,10 +72,11 @@ private:
   std::mutex work_mutex;
   std::condition_variable work_cv;
   std::queue<std::shared_future<NodeRef>> work_queue;
-  std::atomic<bool> work_done = false;
+  bool work_done = false;
 
   // These counters only increase, never decrease.
   std::atomic<unsigned> num_queued = 0, num_started = 0, num_finished = 0;
+  std::mutex stderr_mutex;
 
   template <typename... Params, std::size_t... indexes>
   std::function<Node(Evaluator &, const Call &)>
@@ -89,9 +90,10 @@ private:
   }
 
   void workerThreadImpl();
-  void statusThreadImpl();
 
   NodeRef evaluateDeferred(const Call &call);
+
+  void printProgress();
 };
 
 } // end namespace memodb

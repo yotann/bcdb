@@ -168,6 +168,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
 void OutliningCandidates::emitCandidate(Candidate &candidate) {
   if (!OutDep.isOutlinable(candidate.bv)) {
     OutDep.printSet(errs(), candidate.bv);
+    errs() << "\n";
     report_fatal_error("invalid outlining candidate");
   }
 

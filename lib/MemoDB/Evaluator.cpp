@@ -20,8 +20,6 @@ Evaluator::Evaluator(std::unique_ptr<Store> store, unsigned num_threads)
   threads.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i)
     threads.emplace_back(&Evaluator::workerThreadImpl, this);
-  if (num_threads)
-    threads.emplace_back(&Evaluator::statusThreadImpl, this);
 }
 
 Evaluator::~Evaluator() {
@@ -82,29 +80,38 @@ void Evaluator::workerThreadImpl() {
   }
 }
 
-void Evaluator::statusThreadImpl() {
-  using namespace std::chrono_literals;
-  llvm::SmallString<32> last_message;
-  while (!work_done) {
-    // Load atomics in this order to avoid getting negative values.
-    unsigned finished = num_finished;
-    unsigned started = num_started;
-    unsigned queued = num_queued;
-    auto next_message =
-        llvm::formatv("\r\x1b[K{0} -> {1} -> {2} ", queued - started - finished,
-                      started - finished, finished)
-            .sstr<32>();
-    if (last_message != next_message)
-      llvm::errs() << next_message;
-    last_message = std::move(next_message);
-    std::this_thread::sleep_for(100ms);
-  }
-  llvm::errs() << "\n";
-}
-
 NodeRef Evaluator::evaluateDeferred(const Call &call) {
   num_started++;
+
+  // Use try_to_lock so that printing to stderr doesn't become a bottleneck. If
+  // there are multiple threads, messages may be skipped, but if the thread
+  // pool is empty and Evaluator is only used by one thread, all messages will
+  // be printed.
+  if (auto stderr_lock =
+          std::unique_lock<std::mutex>(stderr_mutex, std::try_to_lock)) {
+    printProgress();
+    llvm::errs() << " starting " << call << "\n";
+    stderr_lock.unlock();
+  }
+
   auto result = evaluate(call);
   num_finished++;
+
+  if (auto stderr_lock =
+          std::unique_lock<std::mutex>(stderr_mutex, std::try_to_lock)) {
+    printProgress();
+    llvm::errs() << " finished " << call << "\n";
+    stderr_lock.unlock();
+  }
+
   return result;
+}
+
+void Evaluator::printProgress() {
+  // Load atomics in this order to avoid getting negative values.
+  unsigned finished = num_finished;
+  unsigned started = num_started;
+  unsigned queued = num_queued;
+  llvm::errs() << (queued - started) << " -> " << (started - finished) << " -> "
+               << finished;
 }
