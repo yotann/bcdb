@@ -1,15 +1,15 @@
 #ifndef BCDB_OUTLINING_FUNCS_H
 #define BCDB_OUTLINING_FUNCS_H
 
+#include "memodb/Evaluator.h"
 #include "memodb/Node.h"
-#include "memodb/Store.h"
 
 namespace smout {
 
+using memodb::Evaluator;
 using memodb::Node;
-using memodb::Store;
 
-Node candidates(Store &store, const Node &func);
+Node candidates(Evaluator &evaluator, const Node &func);
 
 } // end namespace smout
 

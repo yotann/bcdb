@@ -17,6 +17,7 @@
 #include "Outlining/Dependence.h"
 #include "Outlining/SizeModel.h"
 #include "bcdb/Split.h"
+#include "memodb/Evaluator.h"
 #include "memodb/Multibase.h"
 #include "memodb/Node.h"
 #include "memodb/Store.h"
@@ -29,6 +30,7 @@ using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 using memodb::byte_string_arg;
 using memodb::bytesToUTF8;
+using memodb::Evaluator;
 using memodb::Multibase;
 using memodb::Node;
 using memodb::node_list_arg;
@@ -136,7 +138,7 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
   return Multibase::base64pad.encodeWithoutPrefix(bytes);
 }
 
-Node smout::candidates(Store &store, const Node &func) {
+Node smout::candidates(Evaluator &evaluator, const Node &func) {
   ExitOnError Err("smout.candidates: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(

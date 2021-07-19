@@ -52,6 +52,7 @@
 #include "bcdb/BCDB.h"
 #include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
+#include "memodb/Evaluator.h"
 #include "memodb/Multibase.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
@@ -326,56 +327,12 @@ static int Alive2() {
 // smout candidates
 
 static int Candidates() {
+  ExitOnError Err("smout candidates: ");
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
-
-  ExitOnError Err("smout candidates: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-  auto OriginalFunctions = Err(db->ListFunctionsInModule(ModuleName));
-
-  size_t TotalInputs = OriginalFunctions.size();
-  std::atomic<size_t> FinishedInputs = 0, TotalCandidates = 0;
-  StringSet ActiveInputs;
-  std::mutex PrintMutex;
-
-  auto PrintJobs = [&] {
-    size_t PrintActiveInputs = ActiveInputs.size(),
-           PrintFinishedInputs = FinishedInputs;
-    size_t PrintUnstartedInputs =
-        TotalInputs - PrintActiveInputs - PrintFinishedInputs;
-    errs() << PrintUnstartedInputs << "->" << PrintActiveInputs << "->"
-           << PrintFinishedInputs << ':';
-    for (const auto &ActiveInput : ActiveInputs)
-      errs() << ' ' << ActiveInput.getKey();
-    errs() << ' ';
-  };
-
-  auto Transform = [&](StringRef FuncId) {
-    {
-      const std::lock_guard<std::mutex> Lock(PrintMutex);
-      ActiveInputs.insert(FuncId);
-      PrintJobs();
-      errs() << "starting " << FuncId << "\n";
-    }
-
-    Node value = db->get_db().call_or_lookup_value(
-        "smout.candidates", smout::candidates, *CID::parse(FuncId));
-    size_t result = 0;
-    for (auto &item : value.map_range())
-      result += item.value().size();
-    TotalCandidates += result;
-
-    {
-      const std::lock_guard<std::mutex> Lock(PrintMutex);
-      PrintJobs();
-      errs() << "finished " << FuncId << ": " << result << " candidates\n";
-      FinishedInputs++;
-      ActiveInputs.erase(FuncId);
-    }
-  };
 
   Optional<ThreadPoolStrategy> strategyOrNone =
       get_threadpool_strategy(Threads);
@@ -383,9 +340,21 @@ static int Candidates() {
     report_fatal_error("invalid number of threads");
     return 1;
   }
-  parallel::strategy = *strategyOrNone;
-  parallelForEach(OriginalFunctions, Transform);
-  errs() << "Total candidates: " << TotalCandidates << "\n";
+  Evaluator evaluator(Store::open(GetStoreUri()),
+                      strategyOrNone->compute_thread_count());
+  Store &store = evaluator.getStore();
+  auto db = std::make_unique<BCDB>(store);
+
+  evaluator.registerFunc("smout.candidates", &smout::candidates);
+
+  auto original_functions = Err(db->ListFunctionsInModule(ModuleName));
+  std::vector<std::shared_future<NodeRef>> futures;
+  for (StringRef func_id : original_functions)
+    futures.emplace_back(
+        evaluator.evaluateAsync("smout.candidates", *CID::parse(func_id)));
+  for (auto &future : futures)
+    future.wait();
+
   return 0;
 }
 
