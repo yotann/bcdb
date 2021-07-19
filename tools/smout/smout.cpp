@@ -119,6 +119,18 @@ static StringRef GetStoreUri() {
   return StoreUriOrEmpty;
 }
 
+static std::unique_ptr<Evaluator> createEvaluator() {
+  Optional<ThreadPoolStrategy> strategy_or_none =
+      get_threadpool_strategy(Threads);
+  if (!strategy_or_none)
+    report_fatal_error("invalid number of threads");
+  auto evaluator = std::make_unique<Evaluator>(
+      Store::open(GetStoreUri()), strategy_or_none->compute_thread_count());
+  evaluator->registerFunc("smout.candidates", &smout::candidates);
+  evaluator->registerFunc("smout.candidates_total", &smout::candidates_total);
+  return evaluator;
+}
+
 // smout alive2
 
 static nng::socket BrokerSocket;
@@ -327,33 +339,16 @@ static int Alive2() {
 // smout candidates
 
 static int Candidates() {
-  ExitOnError Err("smout candidates: ");
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
+  auto evaluator = createEvaluator();
 
-  Optional<ThreadPoolStrategy> strategyOrNone =
-      get_threadpool_strategy(Threads);
-  if (!strategyOrNone) {
-    report_fatal_error("invalid number of threads");
-    return 1;
-  }
-  Evaluator evaluator(Store::open(GetStoreUri()),
-                      strategyOrNone->compute_thread_count());
-  Store &store = evaluator.getStore();
-  auto db = std::make_unique<BCDB>(store);
-
-  evaluator.registerFunc("smout.candidates", &smout::candidates);
-
-  auto original_functions = Err(db->ListFunctionsInModule(ModuleName));
-  std::vector<std::shared_future<NodeRef>> futures;
-  for (StringRef func_id : original_functions)
-    futures.emplace_back(
-        evaluator.evaluateAsync("smout.candidates", *CID::parse(func_id)));
-  for (auto &future : futures)
-    future.wait();
+  CID mod = evaluator->getStore().resolve(Head(ModuleName));
+  NodeRef result = evaluator->evaluate("smout.candidates_total", mod);
+  llvm::outs() << "\nTotal candidates: " << *result << "\n";
 
   return 0;
 }

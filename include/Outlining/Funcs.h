@@ -10,6 +10,7 @@ using memodb::Evaluator;
 using memodb::Node;
 
 Node candidates(Evaluator &evaluator, const Node &func);
+Node candidates_total(Evaluator &evaluator, const Node &mod);
 
 } // end namespace smout
 

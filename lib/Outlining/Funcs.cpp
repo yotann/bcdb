@@ -23,19 +23,12 @@
 #include "memodb/Store.h"
 
 using namespace llvm;
+using namespace memodb;
 using bcdb::getSoleDefinition;
 using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
-using memodb::byte_string_arg;
-using memodb::bytesToUTF8;
-using memodb::Evaluator;
-using memodb::Multibase;
-using memodb::Node;
-using memodb::node_list_arg;
-using memodb::node_map_arg;
-using memodb::Store;
 
 static Node encodeBitVector(const SparseBitVector<> &bv) {
   // TODO: Is it worthwhile to compress this by just encoding the number of 0s
@@ -168,4 +161,18 @@ Node smout::candidates(Evaluator &evaluator, const Node &func) {
                            }));
   }
   return result;
+}
+
+Node smout::candidates_total(Evaluator &evaluator, const Node &mod) {
+  std::vector<std::shared_future<NodeRef>> futures;
+  for (auto &item : mod["functions"].map_range())
+    futures.emplace_back(
+        evaluator.evaluateAsync("smout.candidates", item.value().as<CID>()));
+  std::size_t total = 0;
+  for (auto &future : futures) {
+    const NodeRef &result = future.get();
+    for (auto &item : result->map_range())
+      total += item.value().size();
+  }
+  return total;
 }
