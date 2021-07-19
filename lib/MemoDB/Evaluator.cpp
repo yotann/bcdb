@@ -1,12 +1,17 @@
 #include "memodb/Evaluator.h"
 
 #include <cassert>
+#include <chrono>
 #include <functional>
 #include <future>
+#include <thread>
 #include <utility>
 
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/FormatVariadic.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace memodb;
 
@@ -14,7 +19,9 @@ Evaluator::Evaluator(std::unique_ptr<Store> store, unsigned num_threads)
     : store(std::move(store)) {
   threads.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i)
-    threads.emplace_back(&Evaluator::threadImpl, this);
+    threads.emplace_back(&Evaluator::workerThreadImpl, this);
+  if (num_threads)
+    threads.emplace_back(&Evaluator::statusThreadImpl, this);
 }
 
 Evaluator::~Evaluator() {
@@ -42,10 +49,9 @@ NodeRef Evaluator::evaluate(const Call &call) {
 }
 
 std::shared_future<NodeRef> Evaluator::evaluateAsync(const Call &call) {
-  // Select a specific overload of evaluate().
-  NodeRef (Evaluator::*evaluate)(const Call &) = &Evaluator::evaluate;
-  std::shared_future<NodeRef> future =
-      std::async(std::launch::deferred, evaluate, this, call);
+  num_queued++;
+  std::shared_future<NodeRef> future = std::async(
+      std::launch::deferred, &Evaluator::evaluateDeferred, this, call);
 
   if (!threads.empty()) {
     {
@@ -63,14 +69,42 @@ void Evaluator::registerFunc(
   funcs[name] = std::move(func);
 }
 
-void Evaluator::threadImpl() {
+void Evaluator::workerThreadImpl() {
   while (true) {
     std::unique_lock<std::mutex> lock(work_mutex);
-    work_cv.wait(lock);
+    work_cv.wait(lock, [this] { return work_done || !work_queue.empty(); });
     if (work_done)
       break;
     std::shared_future<NodeRef> future = std::move(work_queue.front());
+    work_queue.pop();
     lock.unlock();
     future.get();
   }
+}
+
+void Evaluator::statusThreadImpl() {
+  using namespace std::chrono_literals;
+  llvm::SmallString<32> last_message;
+  while (!work_done) {
+    // Load atomics in this order to avoid getting negative values.
+    unsigned finished = num_finished;
+    unsigned started = num_started;
+    unsigned queued = num_queued;
+    auto next_message =
+        llvm::formatv("\r\x1b[K{0} -> {1} -> {2} ", queued - started - finished,
+                      started - finished, finished)
+            .sstr<32>();
+    if (last_message != next_message)
+      llvm::errs() << next_message;
+    last_message = std::move(next_message);
+    std::this_thread::sleep_for(100ms);
+  }
+  llvm::errs() << "\n";
+}
+
+NodeRef Evaluator::evaluateDeferred(const Call &call) {
+  num_started++;
+  auto result = evaluate(call);
+  num_finished++;
+  return result;
 }
