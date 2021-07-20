@@ -16,15 +16,16 @@
 #include "memodb/Node.h"
 
 using namespace memodb;
+using llvm::StringRef;
 
 static std::string escapeForHTML(llvm::StringRef str) {
   std::string escaped;
   std::size_t i = 0;
   while (i < str.size()) {
-    std::size_t j = str.find('<', i);
+    std::size_t j = str.find_first_of("<\"", i);
     escaped += str.slice(i, j);
     if (j < str.size()) {
-      escaped += "&lt;";
+      escaped += str[j] == '<' ? "&lt;" : "&quot;";
       j += 1;
     }
     i = j;
@@ -375,6 +376,36 @@ void HTTPRequest::sendContentNode(const Node &node,
     stream << node;
     sendContent(cache_control, etag, "application/json", stream.str());
   }
+}
+
+void HTTPRequest::sendContentURIs(const llvm::ArrayRef<URI> uris,
+                                  CacheControl cache_control) {
+  unsigned json_quality = getAcceptQuality(ContentType::JSON);
+  unsigned cbor_quality = getAcceptQuality(ContentType::CBOR);
+  unsigned html_quality = getAcceptQuality(ContentType::HTML);
+  if (html_quality <= json_quality || html_quality <= cbor_quality)
+    return Request::sendContentURIs(uris, cache_control);
+
+  Node node(node_list_arg);
+  for (const URI &uri : uris)
+    node.emplace_back(utf8_string_arg, uri.encode());
+  std::sort(node.list_range().begin(), node.list_range().end());
+
+  CID cid = node.saveAsIPLD().first;
+  std::string etag = cid.asString(Multibase::base64url);
+
+  auto uri_str = getURI()->encode();
+
+  std::string html = "<!DOCTYPE html>\n<title>" + escapeForHTML(uri_str) +
+                     "</title>\n<h1>" + escapeForHTML(uri_str) +
+                     "</h1>\n<ul>\n";
+  for (const auto &item : node.list_range()) {
+    auto str = escapeForHTML(item.as<StringRef>());
+    html += "<li><a href=\"" + str + "\">" + str + "</a></li>\n";
+  }
+  html += "</ul>\n";
+
+  sendContent(cache_control, "html+" + etag, "text/html", html);
 }
 
 void HTTPRequest::sendCreated(const std::optional<URI> &path) {

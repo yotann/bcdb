@@ -267,7 +267,7 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
       if (!*next)
         break;
       if (in.size() < additional)
-        return createUnsupportedCBORError("missing data from string");
+        return createInvalidCBORError("missing data from string");
       result.insert(result.end(), in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }
@@ -293,7 +293,7 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
       if (!*next)
         break;
       if (in.size() < additional)
-        return createUnsupportedCBORError("missing data from string");
+        return createInvalidCBORError("missing data from string");
       result.append(in.data(), in.data() + additional);
       in = in.drop_front(additional);
     }

@@ -20,6 +20,9 @@ public:
   void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
                        CacheControl cache_control) override;
 
+  void sendContentURIs(const llvm::ArrayRef<URI> uris,
+                       CacheControl cache_control) override;
+
   void sendCreated(const std::optional<URI> &path) override;
 
   void sendDeleted() override;
