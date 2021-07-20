@@ -9,7 +9,6 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Passes/PassBuilder.h>
-#include <llvm/Support/MemoryBufferRef.h>
 #include <string>
 #include <vector>
 
@@ -68,16 +67,20 @@ static Node getTypeName(const Type *type) {
     return 14;
 
     // Target-specific primitive types.
-  case Type::BFloatTyID:
-    return -1;
   case Type::X86_FP80TyID:
-    return -2;
+    return -1;
   case Type::PPC_FP128TyID:
-    return -3;
+    return -2;
   case Type::X86_MMXTyID:
+    return -3;
+#if LLVM_VERSION_MAJOR >= 11
+  case Type::BFloatTyID:
     return -4;
+#endif
+#if LLVM_VERSION_MAJOR >= 12
   case Type::X86_AMXTyID:
     return -5;
+#endif
 
     // Derived types.
   case Type::IntegerTyID:
@@ -91,6 +94,7 @@ static Node getTypeName(const Type *type) {
     return Node(node_list_arg,
                 {2, std::move(subtypes), type->getArrayNumElements()});
 
+#if LLVM_VERSION_MAJOR >= 11
   case Type::FixedVectorTyID:
     return Node(node_list_arg, {3, std::move(subtypes),
                                 cast<FixedVectorType>(type)->getNumElements()});
@@ -99,6 +103,11 @@ static Node getTypeName(const Type *type) {
     return Node(node_list_arg,
                 {4, std::move(subtypes),
                  cast<ScalableVectorType>(type)->getMinNumElements()});
+#else
+  case Type::VectorTyID:
+    return Node(node_list_arg, {3, std::move(subtypes),
+                                cast<VectorType>(type)->getNumElements()});
+#endif
 
   case Type::StructTyID:
     if (cast<StructType>(type)->isOpaque())
