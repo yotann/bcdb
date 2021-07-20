@@ -1,3 +1,6 @@
+; Other architectures have different versions of struct.va_list and va_arg.
+; REQUIRES: x86_64
+
 ; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t - -name x
 ; RUN: bcdb mux -store sqlite:%t x | lli - x

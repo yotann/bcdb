@@ -7,9 +7,11 @@ config.suffixes = [".ll",".test",".js",".cpp"]
 config.test_source_root = "@CMAKE_SOURCE_DIR@/test"
 config.test_exec_root = "@CMAKE_BINARY_DIR@/test"
 config.excludes = [ "Inputs" ]
+config.host_arch = "@HOST_ARCH@"
 
 for i in range(3, 1 + @LLVM_VERSION_MAJOR@):
     config.available_features.add('llvm' + str(i))
+config.available_features.add(config.host_arch)
 
 config.substitutions.append(("%shlibdir", "@LLVM_SHLIB_OUTPUT_INTDIR@"))
 config.substitutions.append(("%shlibext", "@SHLIBEXT@"))
