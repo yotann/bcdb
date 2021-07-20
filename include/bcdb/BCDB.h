@@ -1,6 +1,8 @@
 #ifndef BCDB_BCDB_H
 #define BCDB_BCDB_H
 
+#include <cstdint>
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
@@ -26,6 +28,13 @@ namespace bcdb {
 
 extern llvm::cl::OptionCategory BCDBCategory;
 extern llvm::cl::OptionCategory MergeCategory;
+
+// LLVM symbol names are usually ASCII, but can contain arbitrary bytes. We
+// interpret the bytes as ISO-8859-1 (bytes 0...255 become Unicode codepoints
+// 0...255) and convert them to UTF-8 for use in map keys.
+std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes);
+std::string bytesToUTF8(llvm::StringRef Bytes);
+std::string utf8ToByteString(llvm::StringRef Str);
 
 class BCDB {
   std::unique_ptr<llvm::LLVMContext> Context;

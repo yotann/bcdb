@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include "memodb/URI.h"
+
 using namespace memodb;
 
 /*

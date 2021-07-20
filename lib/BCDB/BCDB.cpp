@@ -1,5 +1,7 @@
 #include "bcdb/BCDB.h"
 
+#include <cstdint>
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/iterator_range.h>
@@ -34,6 +36,42 @@ static cl::opt<bool> RenameGlobals(
     "rename-globals",
     cl::desc("When adding a module, rename referenced globals based on IDs"),
     cl::cat(BCDBCategory));
+
+std::string bcdb::bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes) {
+  std::string Result;
+  for (std::uint8_t Byte : Bytes) {
+    if (Byte < 0x80) {
+      Result.push_back(static_cast<char>(Byte));
+    } else {
+      Result.push_back(static_cast<char>(0xc0 | (Byte >> 6)));
+      Result.push_back(static_cast<char>(0x80 | (Byte & 0x3f)));
+    }
+  }
+  return Result;
+}
+
+std::string bcdb::bytesToUTF8(StringRef Bytes) {
+  return bytesToUTF8(llvm::ArrayRef(
+      reinterpret_cast<const std::uint8_t *>(Bytes.data()), Bytes.size()));
+}
+
+std::string bcdb::utf8ToByteString(StringRef Str) {
+  std::string Result;
+  while (!Str.empty()) {
+    std::uint8_t x = (std::uint8_t)Str[0];
+    if (x < 0x80) {
+      Result.push_back(static_cast<char>(x));
+      Str = Str.drop_front(1);
+    } else {
+      std::uint8_t y = Str.size() >= 2 ? (std::uint8_t)Str[1] : 0;
+      if ((x & 0xfc) != 0xc0 || (y & 0xc0) != 0x80)
+        llvm::report_fatal_error("invalid UTF-8 bytes");
+      Result.push_back(static_cast<char>((x & 3) << 6 | (y & 0x3f)));
+      Str = Str.drop_front(2);
+    }
+  }
+  return Result;
+}
 
 Error BCDB::Init(StringRef store_uri) {
   Expected<std::unique_ptr<Store>> db =

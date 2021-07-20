@@ -1,4 +1,4 @@
-#include "memodb/Support.h"
+#include "memodb/URI.h"
 
 #include <cstdint>
 #include <llvm/ADT/ArrayRef.h>
@@ -9,42 +9,6 @@
 
 using namespace memodb;
 using llvm::StringRef;
-
-std::string memodb::bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes) {
-  std::string Result;
-  for (std::uint8_t Byte : Bytes) {
-    if (Byte < 0x80) {
-      Result.push_back(static_cast<char>(Byte));
-    } else {
-      Result.push_back(static_cast<char>(0xc0 | (Byte >> 6)));
-      Result.push_back(static_cast<char>(0x80 | (Byte & 0x3f)));
-    }
-  }
-  return Result;
-}
-
-std::string memodb::bytesToUTF8(StringRef Bytes) {
-  return bytesToUTF8(llvm::ArrayRef(
-      reinterpret_cast<const std::uint8_t *>(Bytes.data()), Bytes.size()));
-}
-
-std::string memodb::utf8ToByteString(StringRef Str) {
-  std::string Result;
-  while (!Str.empty()) {
-    std::uint8_t x = (std::uint8_t)Str[0];
-    if (x < 0x80) {
-      Result.push_back(static_cast<char>(x));
-      Str = Str.drop_front(1);
-    } else {
-      std::uint8_t y = Str.size() >= 2 ? (std::uint8_t)Str[1] : 0;
-      if ((x & 0xfc) != 0xc0 || (y & 0xc0) != 0x80)
-        llvm::report_fatal_error("invalid UTF-8 bytes");
-      Result.push_back(static_cast<char>((x & 3) << 6 | (y & 0x3f)));
-      Str = Str.drop_front(2);
-    }
-  }
-  return Result;
-}
 
 std::optional<URI> URI::parse(StringRef str, bool allow_dot_segments) {
   URI uri;

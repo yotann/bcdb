@@ -21,6 +21,7 @@
 #include "memodb/CAR.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
+#include "memodb/URI.h"
 
 using namespace llvm;
 using namespace memodb;

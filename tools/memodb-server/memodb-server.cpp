@@ -8,6 +8,7 @@
 #include "memodb/Server.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
+#include "memodb/URI.h"
 
 using namespace memodb;
 namespace cl = llvm::cl;

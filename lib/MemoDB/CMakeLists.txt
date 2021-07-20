@@ -13,7 +13,7 @@ add_llvm_library(MemoDB
   Server.cpp
   SQLite.cpp
   Store.cpp
-  Support.cpp
+  URI.cpp
 )
 target_link_libraries(MemoDB PRIVATE
   Sodium::LibSodium

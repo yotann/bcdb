@@ -8,6 +8,7 @@
 #include "memodb/CID.h"
 #include "memodb/Multibase.h"
 #include "memodb/Node.h"
+#include "memodb/URI.h"
 
 using namespace memodb;
 

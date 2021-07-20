@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "memodb/Multibase.h"
+#include "memodb/URI.h"
 
 using namespace memodb;
 
