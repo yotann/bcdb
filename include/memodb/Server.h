@@ -1,6 +1,7 @@
 #ifndef MEMODB_SERVER_H
 #define MEMODB_SERVER_H
 
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <optional>
@@ -56,7 +57,12 @@ public:
                                const std::optional<CID> &cid_if_known,
                                CacheControl cache_control) = 0;
 
+  virtual void sendContentURIs(const llvm::ArrayRef<URI> uris,
+                               CacheControl cache_control);
+
   virtual void sendCreated(const std::optional<URI> &path) = 0;
+
+  virtual void sendDeleted() = 0;
 
   virtual void sendError(Status status, std::optional<llvm::StringRef> type,
                          llvm::StringRef title,
@@ -75,6 +81,9 @@ private:
                         std::optional<llvm::StringRef> cid_str);
   void handleRequestHead(Request &request,
                          std::optional<llvm::StringRef> head_str);
+  void handleRequestCall(Request &request,
+                         std::optional<llvm::StringRef> func_str,
+                         std::optional<llvm::StringRef> args_str);
 
   Evaluator &evaluator;
   Store &store;

@@ -22,6 +22,8 @@ public:
 
   void sendCreated(const std::optional<URI> &path) override;
 
+  void sendDeleted() override;
+
   void sendError(Status status, std::optional<llvm::StringRef> type,
                  llvm::StringRef title,
                  const std::optional<llvm::Twine> &detail) override;

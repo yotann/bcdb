@@ -391,6 +391,11 @@ void HTTPRequest::sendCreated(const std::optional<URI> &path) {
   sendEmptyBody();
 }
 
+void HTTPRequest::sendDeleted() {
+  startResponse(204, CacheControl::Ephemeral);
+  sendEmptyBody();
+}
+
 std::optional<Request::Method> HTTPRequest::getMethod() const {
   auto str = getMethodString();
   if (str.equals_lower("GET") || str.equals_lower("HEAD"))

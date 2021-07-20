@@ -18,6 +18,7 @@ namespace {
 enum class ResponseType {
   Content,
   Created,
+  Deleted,
   Error,
   MethodNotAllowed,
 };
@@ -49,6 +50,11 @@ public:
     EXPECT_EQ(response_type, std::nullopt);
     response_type = ResponseType::Created;
     response_location = path;
+  }
+
+  void sendDeleted() override {
+    EXPECT_EQ(response_type, std::nullopt);
+    response_type = ResponseType::Deleted;
   }
 
   void sendError(Status status, std::optional<StringRef> type, StringRef title,
@@ -157,7 +163,7 @@ TEST(ServerTest, ListHeadsEmpty) {
   TestRequest request(Request::Method::GET, "/head");
   server.handleRequest(request);
   ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node, Node(node_map_arg));
+  EXPECT_EQ(request.response_content_node, Node(node_list_arg));
   EXPECT_EQ(request.response_content_cid, std::nullopt);
   EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
 }
@@ -171,10 +177,7 @@ TEST(ServerTest, ListHeads) {
   server.handleRequest(request);
   ASSERT_EQ(request.response_type, ResponseType::Content);
   EXPECT_EQ(request.response_content_node,
-            Node(node_map_arg, {
-                                   {"cookie", *CID::parse("uAXEAB2Zjb29raWU")},
-                                   {"empty", *CID::parse("uAXEAAaA")},
-                               }));
+            Node(node_list_arg, {"/head/cookie", "/head/empty"}));
   EXPECT_EQ(request.response_content_cid, std::nullopt);
   EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
 }
@@ -202,6 +205,93 @@ TEST(ServerTest, PutHead) {
   EXPECT_EQ(request.response_location, std::nullopt);
   EXPECT_EQ(evaluator.getStore().resolve(Head("cookie")),
             CID::parse("uAXEAB2Zjb29raWU"));
+}
+
+TEST(ServerTest, ListFuncs) {
+  const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
+  const CID empty_cid = *CID::parse("uAXEAAaA");
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  evaluator.getStore().set(Call("identity", {cookie_cid}), cookie_cid);
+  evaluator.getStore().set(Call("identity", {empty_cid}), empty_cid);
+  evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
+  TestRequest request(Request::Method::GET, "/call");
+  server.handleRequest(request);
+  ASSERT_EQ(request.response_type, ResponseType::Content);
+  EXPECT_EQ(request.response_content_node,
+            Node(node_list_arg, {"/call/const_empty", "/call/identity"}));
+  EXPECT_EQ(request.response_content_cid, std::nullopt);
+  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+}
+
+TEST(ServerTest, InvalidateFunc) {
+  const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
+  const CID empty_cid = *CID::parse("uAXEAAaA");
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  evaluator.getStore().set(Call("identity", {cookie_cid}), cookie_cid);
+  evaluator.getStore().set(Call("identity", {empty_cid}), empty_cid);
+  evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
+  TestRequest request(Request::Method::DELETE, "/call/identity");
+  server.handleRequest(request);
+  ASSERT_EQ(request.response_type, ResponseType::Deleted);
+  EXPECT_TRUE(
+      !evaluator.getStore().resolveOptional(Call("identity", {cookie_cid})));
+  EXPECT_TRUE(
+      !evaluator.getStore().resolveOptional(Call("identity", {empty_cid})));
+  EXPECT_EQ(
+      evaluator.getStore().resolveOptional(Call("const_empty", {cookie_cid})),
+      empty_cid);
+}
+
+TEST(ServerTest, ListCalls) {
+  const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
+  const CID empty_cid = *CID::parse("uAXEAAaA");
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  evaluator.getStore().set(Call("transmute", {empty_cid, empty_cid}),
+                           cookie_cid);
+  evaluator.getStore().set(Call("transmute", {cookie_cid}), empty_cid);
+  evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
+  TestRequest request(Request::Method::GET, "/call/transmute");
+  server.handleRequest(request);
+  ASSERT_EQ(request.response_type, ResponseType::Content);
+  EXPECT_EQ(request.response_content_node,
+            Node(node_list_arg, {"/call/transmute/uAXEAAaA,uAXEAAaA",
+                                 "/call/transmute/uAXEAB2Zjb29raWU"}));
+  EXPECT_EQ(request.response_content_cid, std::nullopt);
+  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+}
+
+TEST(ServerTest, GetCall) {
+  const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
+  const CID empty_cid = *CID::parse("uAXEAAaA");
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  evaluator.getStore().set(Call("transmute", {empty_cid, empty_cid}),
+                           cookie_cid);
+  TestRequest request(Request::Method::GET,
+                      "/call/transmute/uAXEAAaA,uAXEAAaA");
+  server.handleRequest(request);
+  ASSERT_EQ(request.response_type, ResponseType::Content);
+  EXPECT_EQ(request.response_content_node, cookie_cid);
+  EXPECT_EQ(request.response_content_cid, std::nullopt);
+  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+}
+
+TEST(ServerTest, PutCall) {
+  const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
+  const CID empty_cid = *CID::parse("uAXEAAaA");
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  TestRequest request(Request::Method::PUT, "/call/transmute/uAXEAAaA,uAXEAAaA",
+                      cookie_cid);
+  server.handleRequest(request);
+  ASSERT_EQ(request.response_type, ResponseType::Created);
+  EXPECT_EQ(request.response_location, std::nullopt);
+  EXPECT_EQ(
+      evaluator.getStore().resolve(Call("transmute", {empty_cid, empty_cid})),
+      cookie_cid);
 }
 
 } // end anonymous namespace
