@@ -8,6 +8,7 @@
 #include <string>
 
 using namespace memodb;
+using llvm::StringRef;
 
 std::string memodb::bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes) {
   std::string Result;
@@ -22,12 +23,12 @@ std::string memodb::bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes) {
   return Result;
 }
 
-std::string memodb::bytesToUTF8(llvm::StringRef Bytes) {
+std::string memodb::bytesToUTF8(StringRef Bytes) {
   return bytesToUTF8(llvm::ArrayRef(
       reinterpret_cast<const std::uint8_t *>(Bytes.data()), Bytes.size()));
 }
 
-std::string memodb::utf8ToByteString(llvm::StringRef Str) {
+std::string memodb::utf8ToByteString(StringRef Str) {
   std::string Result;
   while (!Str.empty()) {
     std::uint8_t x = (std::uint8_t)Str[0];
@@ -45,29 +46,47 @@ std::string memodb::utf8ToByteString(llvm::StringRef Str) {
   return Result;
 }
 
-std::optional<URI> URI::parse(llvm::StringRef str, bool allow_relative_path) {
+std::optional<URI> URI::parse(StringRef str, bool allow_dot_segments) {
   URI uri;
-  llvm::StringRef authority_ref, path_ref, query_ref, fragment_ref;
+  StringRef scheme_ref, authority_ref, host_ref, port_ref, path_ref, query_ref,
+      fragment_ref;
 
-  if (str.contains(':'))
-    std::tie(uri.scheme, str) = str.split(':');
+  if (str.contains(':')) {
+    std::tie(scheme_ref, str) = str.split(':');
+    uri.scheme = scheme_ref.lower();
+  }
+
   if (str.startswith("//")) {
     size_t i = str.find_first_of("/?#", 2);
-    if (i == llvm::StringRef::npos) {
+    if (i == StringRef::npos) {
       authority_ref = str.substr(2);
       str = "";
     } else {
       authority_ref = str.substr(2, i - 2);
       str = str.substr(i);
     }
+    if (authority_ref.contains('@'))
+      return std::nullopt; // userinfo is not supported
+    if (authority_ref.startswith("[")) {
+      size_t j = authority_ref.find(']');
+      if (j == StringRef::npos)
+        return std::nullopt;
+      host_ref = authority_ref.take_front(j + 1);
+      port_ref = authority_ref.substr(j + 1);
+      if (!port_ref.empty() && !port_ref.startswith(":"))
+        return std::nullopt;
+      port_ref = port_ref.drop_front();
+    } else {
+      std::tie(host_ref, port_ref) = authority_ref.split(':');
+    }
   }
+
   std::tie(str, fragment_ref) = str.split('#');
   std::tie(path_ref, query_ref) = str.split('?');
 
   bool percent_decoding_error = false;
 
-  auto percentDecode =
-      [&percent_decoding_error](llvm::StringRef str) -> std::string {
+  auto percentDecode = [&percent_decoding_error](StringRef str) -> std::string {
     if (!str.contains('%'))
       return str.str();
     std::string result;
@@ -89,26 +108,29 @@ std::optional<URI> URI::parse(llvm::StringRef str, bool allow_relative_path) {
     return result;
   };
 
-  uri.authority = percentDecode(authority_ref);
+  uri.host = StringRef(percentDecode(host_ref)).lower();
+  if (!port_ref.empty() && port_ref.getAsInteger(10, uri.port))
+    return std::nullopt;
   uri.fragment = percentDecode(fragment_ref);
 
+  uri.rootless = true;
   if (!path_ref.empty()) {
-    if (!allow_relative_path) {
-      if (!path_ref.startswith("/"))
-        return std::nullopt;
+    if (path_ref.startswith("/")) {
+      uri.rootless = false;
       path_ref = path_ref.drop_front();
     }
-    llvm::SmallVector<llvm::StringRef, 8> segments;
+    llvm::SmallVector<StringRef, 8> segments;
     path_ref.split(segments, '/');
     for (const auto &segment : segments) {
-      if (segment == "." || segment == "..")
+      auto decoded = percentDecode(segment);
+      if (!allow_dot_segments && (decoded == "." || decoded == ".."))
         return std::nullopt;
-      uri.path_segments.emplace_back(percentDecode(segment));
+      uri.path_segments.emplace_back(std::move(decoded));
     }
   }
 
   if (!query_ref.empty()) {
-    llvm::SmallVector<llvm::StringRef, 8> params;
+    llvm::SmallVector<StringRef, 8> params;
     query_ref.split(params, '&');
     for (const auto &param : params)
       uri.query_params.emplace_back(percentDecode(param));
@@ -122,9 +144,73 @@ std::optional<URI> URI::parse(llvm::StringRef str, bool allow_relative_path) {
 std::optional<std::string> URI::getPathString() const {
   std::string result;
   for (const auto &segment : path_segments) {
-    if (llvm::StringRef(segment).contains('/'))
+    if (StringRef(segment).contains('/'))
       return std::nullopt;
     result += "/" + segment;
+  }
+  return result;
+}
+
+std::string URI::encode() const {
+  static const StringRef hex_digits = "0123456789ABCDEF";
+  static const StringRef host_allowed =
+      "!$&'()*+,-.0123456789:;=ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_"
+      "abcdefghijklmnopqrstuvvwxyz~";
+  static const StringRef path_allowed =
+      "!$&'()*+,-.0123456789:;=@ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+      "abcdefghijklmnopqrstuvwxyz~";
+  static const StringRef query_allowed =
+      "!$'()*+,-./"
+      "0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~";
+  static const StringRef fragment_allowed =
+      "!$&'()*+,-./"
+      "0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~";
+  std::string result;
+  auto percentEncode = [&result](StringRef str, StringRef allowed) {
+    while (!str.empty()) {
+      size_t i = str.find_first_not_of(allowed);
+      result += str.take_front(i);
+      str = str.substr(i);
+      if (str.empty())
+        break;
+      std::uint8_t c = str[0];
+      result.push_back('%');
+      result.push_back(hex_digits[c >> 4]);
+      result.push_back(hex_digits[c & 0xf]);
+      str = str.drop_front();
+    }
+  };
+
+  if (!scheme.empty())
+    result += StringRef(scheme).lower() + ":";
+  if (!host.empty() || port != 0) {
+    result += "//";
+    percentEncode(StringRef(host).lower(), host_allowed);
+    if (port != 0) {
+      result += ":";
+      result += llvm::Twine(port).str();
+    }
+  }
+  if (!rootless)
+    result += "/";
+  if (!path_segments.empty()) {
+    for (const auto &segment : path_segments) {
+      percentEncode(segment, path_allowed);
+      result += "/";
+    }
+    result.pop_back();
+  }
+  if (!query_params.empty()) {
+    result += "?";
+    for (const auto &param : query_params) {
+      percentEncode(param, query_allowed);
+      result += "&";
+    }
+    result.pop_back();
+  }
+  if (!fragment.empty()) {
+    result += "#";
+    percentEncode(fragment, fragment_allowed);
   }
   return result;
 }

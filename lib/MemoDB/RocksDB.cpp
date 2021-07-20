@@ -170,9 +170,10 @@ std::string RocksDBStore::makeKeyForCall(const Call &Call) {
 }
 
 void RocksDBStore::open(llvm::StringRef uri, bool create_if_missing) {
-  auto Parsed = URI::parse(uri);
-  if (!Parsed || Parsed->scheme != "rocksdb" || !Parsed->authority.empty() ||
-      !Parsed->query_params.empty() || !Parsed->fragment.empty())
+  auto Parsed = URI::parse(uri, /*allow_dot_segments*/ true);
+  if (!Parsed || Parsed->scheme != "rocksdb" || !Parsed->host.empty() ||
+      Parsed->port != 0 || !Parsed->query_params.empty() ||
+      !Parsed->fragment.empty())
     llvm::report_fatal_error("Unsupported RocksDB URI");
 
   rocksdb::ColumnFamilyOptions BaseCFOptions;

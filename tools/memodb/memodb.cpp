@@ -99,9 +99,10 @@ static cl::opt<std::string>
              cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
 
 static Name GetNameFromURI(llvm::StringRef URI) {
-  auto Parsed = ::URI::parse(URI, /*allow_relative_path*/ true);
-  if (!Parsed || !Parsed->authority.empty() || !Parsed->query_params.empty() ||
-      !Parsed->fragment.empty())
+  auto Parsed = ::URI::parse(URI);
+  if (!Parsed || !Parsed->host.empty() || Parsed->port != 0 ||
+      !Parsed->query_params.empty() || !Parsed->fragment.empty() ||
+      !Parsed->rootless)
     report_fatal_error("invalid name URI");
   if (Parsed->scheme == "head" && Parsed->path_segments.size() == 1) {
     return Head(Parsed->path_segments[0]);
@@ -133,8 +134,8 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   if (URI == "-") {
     Buffer = Err(errorOrToExpected(MemoryBuffer::getSTDIN()));
   } else if (llvm::StringRef(URI).startswith("file:")) {
-    auto Parsed = ::URI::parse(URI);
-    if (!Parsed || !Parsed->authority.empty() ||
+    auto Parsed = ::URI::parse(URI, /*allow_dot_segments*/ true);
+    if (!Parsed || !Parsed->host.empty() || Parsed->port != 0 ||
         !Parsed->query_params.empty() || !Parsed->fragment.empty())
       report_fatal_error("invalid input URI");
     Buffer =

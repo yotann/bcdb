@@ -19,7 +19,7 @@ void Server::handleRequest(Request &request) {
                              "Not Implemented", std::nullopt);
 
   auto uri_or_null = request.getURI();
-  if (!uri_or_null)
+  if (!uri_or_null || uri_or_null->rootless)
     return request.sendError(Request::Status::BadRequest, std::nullopt,
                              "Bad Request", std::nullopt);
   auto uri = std::move(*uri_or_null);
