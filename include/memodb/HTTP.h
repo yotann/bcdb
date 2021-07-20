@@ -15,13 +15,12 @@ namespace memodb {
 class HTTPRequest : public Request {
 public:
   std::optional<Method> getMethod() const override;
-  unsigned getAcceptQuality(ContentType content_type) const override;
   std::optional<Node> getContentNode() override;
 
   void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
                        CacheControl cache_control) override;
 
-  void sendCreated(const llvm::Twine &path) override;
+  void sendCreated(const std::optional<URI> &path) override;
 
   void sendError(Status status, std::optional<llvm::StringRef> type,
                  llvm::StringRef title,
@@ -52,6 +51,8 @@ protected:
   virtual void sendEmptyBody() = 0;
 
 private:
+  unsigned getAcceptQuality(ContentType content_type) const;
+
   bool hasIfNoneMatch(llvm::StringRef etag);
 
   void startResponse(std::uint16_t status, CacheControl cache_control);

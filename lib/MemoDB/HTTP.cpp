@@ -377,10 +377,17 @@ void HTTPRequest::sendContentNode(const Node &node,
   }
 }
 
-void HTTPRequest::sendCreated(const llvm::Twine &path) {
-  // TODO: sent ETag.
+void HTTPRequest::sendCreated(const std::optional<URI> &path) {
+  // TODO: send ETag.
   startResponse(201, CacheControl::Ephemeral);
-  sendHeader("Location", path);
+  if (path) {
+    assert(path->scheme.empty());
+    assert(path->host.empty());
+    assert(path->fragment.empty());
+    assert(path->port == 0);
+    assert(!path->rootless);
+    sendHeader("Location", path->encode());
+  }
   sendEmptyBody();
 }
 

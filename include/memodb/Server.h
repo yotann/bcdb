@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "CID.h"
+#include "Evaluator.h"
 #include "Node.h"
 #include "Store.h"
 #include "URI.h"
@@ -49,14 +50,13 @@ public:
   virtual ~Request() {}
   virtual std::optional<Method> getMethod() const = 0;
   virtual std::optional<URI> getURI() const = 0;
-  virtual unsigned getAcceptQuality(ContentType content_type) const = 0;
   virtual std::optional<Node> getContentNode() = 0;
 
   virtual void sendContentNode(const Node &node,
                                const std::optional<CID> &cid_if_known,
                                CacheControl cache_control) = 0;
 
-  virtual void sendCreated(const llvm::Twine &path) = 0;
+  virtual void sendCreated(const std::optional<URI> &path) = 0;
 
   virtual void sendError(Status status, std::optional<llvm::StringRef> type,
                          llvm::StringRef title,
@@ -67,13 +67,16 @@ public:
 
 class Server {
 public:
-  Server(Store &store);
+  Server(Evaluator &evaluator);
   void handleRequest(Request &request);
 
 private:
-  void handleRequestCIDWithoutCID(Request &request);
-  void handleRequestCIDWithCID(Request &request, llvm::StringRef cid_str);
+  void handleRequestCID(Request &request,
+                        std::optional<llvm::StringRef> cid_str);
+  void handleRequestHead(Request &request,
+                         std::optional<llvm::StringRef> head_str);
 
+  Evaluator &evaluator;
   Store &store;
 };
 

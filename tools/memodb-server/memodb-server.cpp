@@ -3,6 +3,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <optional>
 
+#include "memodb/Evaluator.h"
 #include "memodb/HTTP.h"
 #include "memodb/NNG.h"
 #include "memodb/Server.h"
@@ -103,8 +104,8 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Server");
 
   llvm::ExitOnError Err("memodb-server: ");
-  auto store = Store::open(GetStoreUri());
-  Server server(*store);
+  auto evaluator = Evaluator(Store::open(GetStoreUri()));
+  Server server(evaluator);
   g_server = &server;
   auto url = Err(nng::URL::parse(listen_url));
   auto http_server = Err(nng::HTTPServer::hold(url));
