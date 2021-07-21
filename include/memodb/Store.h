@@ -77,10 +77,11 @@ class Store;
 // XXX: NodeRef is not thread-safe, even for const access! We do things this
 // way because Evaluator needs to create std::shared_future<NodeRef> and call
 // std::shared_future::get() from multiple threads, even though only one thread
-// will actually use the NodeRef.
+// will actually use the NodeRef. It'd probably be better to make Evaluator
+// return a type that wraps shared_future using const_cast<>.
 class NodeRef {
   Store &store;
-  std::optional<CID> cid = std::nullopt;
+  mutable std::optional<CID> cid = std::nullopt;
   mutable std::optional<Node> node = std::nullopt;
 
 public:
@@ -91,6 +92,8 @@ public:
   const Node &operator*() const;
 
   const Node *operator->() const { return &operator*(); }
+
+  const CID &getCID() const;
 };
 
 class Store {
@@ -186,6 +189,12 @@ inline const Node &NodeRef::operator*() const {
   if (!node)
     node = store.get(*cid);
   return *node;
+}
+
+inline const CID &NodeRef::getCID() const {
+  if (!cid)
+    cid = store.put(*node);
+  return *cid;
 }
 
 } // end namespace memodb

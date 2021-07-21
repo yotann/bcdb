@@ -11,6 +11,9 @@ using memodb::Node;
 
 Node candidates(Evaluator &evaluator, const Node &func);
 Node candidates_total(Evaluator &evaluator, const Node &mod);
+Node extracted_callee(Evaluator &evaluator, const Node &func,
+                      const Node &nodes);
+Node unique_callees(Evaluator &evaluator, const Node &mod);
 
 } // end namespace smout
 

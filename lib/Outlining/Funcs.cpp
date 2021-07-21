@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/LLVMContext.h>
@@ -14,7 +15,9 @@
 
 #include "Outlining/Candidates.h"
 #include "Outlining/Dependence.h"
+#include "Outlining/Extractor.h"
 #include "Outlining/SizeModel.h"
+#include "bcdb/AlignBitcode.h"
 #include "bcdb/Split.h"
 #include "memodb/Evaluator.h"
 #include "memodb/Multibase.h"
@@ -27,6 +30,7 @@ using bcdb::getSoleDefinition;
 using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
+using bcdb::OutliningExtractor;
 using bcdb::SizeModelAnalysis;
 
 static Node encodeBitVector(const SparseBitVector<> &bv) {
@@ -43,6 +47,16 @@ static Node encodeBitVector(const SparseBitVector<> &bv) {
     result.emplace_back(end);
   }
   return result;
+}
+
+static SparseBitVector<> decodeBitVector(const Node &node) {
+  SparseBitVector<> bv;
+  for (size_t i = 0; i < node.size(); i += 2) {
+    size_t start = node[i].as<size_t>(), end = node[i + 1].as<size_t>();
+    for (size_t j = start; j < end; j++)
+      bv.set(j);
+  }
+  return bv;
 }
 
 static Node getTypeName(const Type *type) {
@@ -67,7 +81,7 @@ static Node getTypeName(const Type *type) {
     PPC_FP128 = -2,
     X86_MMX = -3,
     BFloat = -4,
-    AMX = -5,
+    X86_AMX = -5,
   };
 
   enum class Derived : int {
@@ -197,8 +211,7 @@ Node smout::candidates(Evaluator &evaluator, const Node &func) {
   am.registerPass([] { return OutliningCandidatesAnalysis(); });
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   am.registerPass([] { return SizeModelAnalysis(); });
-  OutliningCandidates &candidates =
-      am.getResult<OutliningCandidatesAnalysis>(f);
+  auto &candidates = am.getResult<OutliningCandidatesAnalysis>(f);
 
   Node result(node_map_arg);
   for (const auto &candidate : candidates.Candidates) {
@@ -228,4 +241,59 @@ Node smout::candidates_total(Evaluator &evaluator, const Node &mod) {
       total += item.value().size();
   }
   return total;
+}
+
+Node smout::extracted_callee(Evaluator &evaluator, const Node &func,
+                             const Node &nodes) {
+  ExitOnError Err("smout.extracted.callee: ");
+  LLVMContext context;
+  auto m = Err(parseBitcodeFile(
+      MemoryBufferRef(func.as<StringRef>(byte_string_arg), ""), context));
+  Function &f = getSoleDefinition(*m);
+
+  SparseBitVector<> bv = decodeBitVector(nodes);
+
+  FunctionAnalysisManager am;
+  // TODO: Would it be faster to just register the analyses we need?
+  PassBuilder().registerFunctionAnalyses(am);
+  am.registerPass([] { return OutliningDependenceAnalysis(); });
+  auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
+
+  OutliningExtractor extractor(f, deps, bv);
+  Function *callee = extractor.createNewCallee();
+
+  bcdb::Splitter splitter(*m);
+  auto mpart = splitter.SplitGlobal(callee);
+  SmallVector<char, 0> buffer;
+  bcdb::WriteAlignedModule(*mpart, buffer);
+  return Node(byte_string_arg, buffer);
+}
+
+Node smout::unique_callees(Evaluator &evaluator, const Node &mod) {
+  std::vector<std::pair<CID, std::shared_future<NodeRef>>> func_candidates;
+  for (auto &item : mod["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    func_candidates.emplace_back(
+        func_cid, evaluator.evaluateAsync("smout.candidates", func_cid));
+  }
+  std::vector<std::shared_future<NodeRef>> callees;
+  for (auto &future : func_candidates) {
+    const CID &func_cid = future.first;
+    const NodeRef &result = future.second.get();
+    for (auto &item : result->map_range()) {
+      for (auto &candidate : item.value().list_range()) {
+        const CID nodes_cid = evaluator.getStore().put(candidate["nodes"]);
+        callees.emplace_back(evaluator.evaluateAsync("smout.extracted.callee",
+                                                     func_cid, nodes_cid));
+      }
+    }
+  }
+  StringSet unique;
+  for (auto &future : callees) {
+    const NodeRef &result = future.get();
+    auto bytes = result.getCID().asBytes();
+    unique.insert(
+        StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
+  }
+  return unique.size();
 }

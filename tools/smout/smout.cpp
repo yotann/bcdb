@@ -72,6 +72,10 @@ static cl::SubCommand CollateCommand("collate", "Organize candidates by type");
 static cl::SubCommand EstimateCommand("estimate",
                                       "Estimate benefit of outlining");
 
+static cl::SubCommand
+    ExtractCalleesCommand("extract-callees",
+                          "Extract all outlinable callee functions");
+
 static cl::SubCommand MeasureCommand("measure",
                                      "Measure code size of candidates");
 
@@ -101,7 +105,8 @@ static cl::opt<std::string>
     ModuleName("name", cl::desc("Name of the head to work on"),
                cl::sub(Alive2Command), cl::sub(CandidatesCommand),
                cl::sub(CollateCommand), cl::sub(EstimateCommand),
-               cl::sub(MeasureCommand), cl::sub(ShowGroupsCommand));
+               cl::sub(ExtractCalleesCommand), cl::sub(MeasureCommand),
+               cl::sub(ShowGroupsCommand));
 
 static cl::opt<std::string>
     StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
@@ -120,6 +125,13 @@ static StringRef GetStoreUri() {
 }
 
 static std::unique_ptr<Evaluator> createEvaluator() {
+  // May be needed if smout.candidates is evaluated.
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
+
   Optional<ThreadPoolStrategy> strategy_or_none =
       get_threadpool_strategy(Threads);
   if (!strategy_or_none)
@@ -128,6 +140,8 @@ static std::unique_ptr<Evaluator> createEvaluator() {
       Store::open(GetStoreUri()), strategy_or_none->compute_thread_count());
   evaluator->registerFunc("smout.candidates", &smout::candidates);
   evaluator->registerFunc("smout.candidates_total", &smout::candidates_total);
+  evaluator->registerFunc("smout.extracted.callee", &smout::extracted_callee);
+  evaluator->registerFunc("smout.unique_callees", &smout::unique_callees);
   return evaluator;
 }
 
@@ -339,17 +353,10 @@ static int Alive2() {
 // smout candidates
 
 static int Candidates() {
-  InitializeAllTargetInfos();
-  InitializeAllTargets();
-  InitializeAllTargetMCs();
-  InitializeAllAsmParsers();
-  InitializeAllAsmPrinters();
   auto evaluator = createEvaluator();
-
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
   NodeRef result = evaluator->evaluate("smout.candidates_total", mod);
   llvm::outs() << "\nTotal candidates: " << *result << "\n";
-
   return 0;
 }
 
@@ -842,6 +849,16 @@ static int Estimate() {
   return 0;
 }
 
+// smout extract-callees
+
+static int ExtractCallees() {
+  auto evaluator = createEvaluator();
+  CID mod = evaluator->getStore().resolve(Head(ModuleName));
+  NodeRef result = evaluator->evaluate("smout.unique_callees", mod);
+  llvm::outs() << "\nUnique callee functions: " << *result << "\n";
+  return 0;
+}
+
 // smout measure
 
 static Node evaluate_compiled(Store &db, const Node &func) {
@@ -1015,6 +1032,8 @@ int main(int argc, char **argv) {
     return Collate();
   } else if (EstimateCommand) {
     return Estimate();
+  } else if (ExtractCalleesCommand) {
+    return ExtractCallees();
   } else if (MeasureCommand) {
     return Measure();
   } else if (ShowGroupsCommand) {
