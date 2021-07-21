@@ -16,11 +16,11 @@ using namespace bcdb;
 using namespace llvm;
 
 OutliningExtractor::OutliningExtractor(Function &F,
-                                       OutliningDependenceResults &OutDep,
-                                       SparseBitVector<> &BV)
+                                       const OutliningDependenceResults &OutDep,
+                                       const SparseBitVector<> &BV)
     : F(F), OutDep(OutDep), BV(BV) {
-  auto &Nodes = OutDep.Nodes;
-  auto &NodeIndices = OutDep.NodeIndices;
+  const auto &Nodes = OutDep.Nodes;
+  const auto &NodeIndices = OutDep.NodeIndices;
 
   if (!OutDep.isOutlinable(BV))
     report_fatal_error("Specified nodes cannot be outlined",
@@ -30,7 +30,7 @@ OutliningExtractor::OutliningExtractor(Function &F,
     if (Argument *arg = dyn_cast<Argument>(v))
       ArgInputs.set(arg->getArgNo());
     else if (NodeIndices.count(v))
-      ExternalInputs.set(NodeIndices[v]);
+      ExternalInputs.set(NodeIndices.lookup(v));
     else
       assert(isa<Constant>(v) && "impossible");
   };
@@ -44,13 +44,14 @@ OutliningExtractor::OutliningExtractor(Function &F,
       SmallPtrSet<Value *, 8> phi_incoming;
       for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
         Value *v = phi->getIncomingValue(j);
-        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()])) {
+        if (BV.test(NodeIndices.lookup(
+                phi->getIncomingBlock(j)->getTerminator()))) {
           // May depend on control flow in the callee.
           phi_incoming.insert(v);
         } else if (NodeIndices.count(v)) {
           // Only depends on control flow from the caller, but may need a value
           // from the callee.
-          ExternalOutputs.set(NodeIndices[v]);
+          ExternalOutputs.set(NodeIndices.lookup(v));
         }
       }
       if (phi_incoming.size() > 1) {
@@ -64,7 +65,7 @@ OutliningExtractor::OutliningExtractor(Function &F,
       } else if (!phi_incoming.empty()) {
         // Only one phi value is used for all paths within the callee, so we
         // return that value directly and use it in the phi in the caller.
-        ExternalOutputs.set(NodeIndices[*phi_incoming.begin()]);
+        ExternalOutputs.set(NodeIndices.lookup(*phi_incoming.begin()));
       }
     } else {
       ExternalOutputs |= OutDep.DataDepends[i];
@@ -79,7 +80,8 @@ OutliningExtractor::OutliningExtractor(Function &F,
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
       SmallPtrSet<Value *, 8> phi_incoming;
       for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
-        if (BV.test(NodeIndices[phi->getIncomingBlock(j)->getTerminator()])) {
+        if (BV.test(NodeIndices.lookup(
+                phi->getIncomingBlock(j)->getTerminator()))) {
           // This part of the phi will be outlined, so we need to make sure the
           // appropriate phi input values are accessible.
           addInputValue(phi->getIncomingValue(j));
@@ -110,7 +112,7 @@ OutliningExtractor::OutliningExtractor(Function &F,
     if (isa<BasicBlock>(Nodes[i]))
       OutlinedBlocks.set(i);
     else if (Instruction *I = dyn_cast<Instruction>(Nodes[i]))
-      OutlinedBlocks.set(NodeIndices[I->getParent()]);
+      OutlinedBlocks.set(NodeIndices.lookup(I->getParent()));
   }
 }
 
@@ -138,9 +140,9 @@ Function *OutliningExtractor::createNewCallee() {
   if (NewCallee)
     return NewCallee;
 
-  auto &PDT = OutDep.PDT;
-  auto &Nodes = OutDep.Nodes;
-  auto &NodeIndices = OutDep.NodeIndices;
+  const auto &PDT = OutDep.PDT;
+  const auto &Nodes = OutDep.Nodes;
+  const auto &NodeIndices = OutDep.NodeIndices;
 
   // Determine the type of the outlined function.
   // FIXME: Canonicalize arguments and return values by reordering them. Also
@@ -232,7 +234,7 @@ Function *OutliningExtractor::createNewCallee() {
     // postdominator tree to skip blocks until we find one that actually is
     // being outlined.
     BasicBlock *PDom = &BB;
-    while (PDom && !OutlinedBlocks.test(NodeIndices[PDom]))
+    while (PDom && !OutlinedBlocks.test(NodeIndices.lookup(PDom)))
       PDom = PDT[PDom]->getIDom()->getBlock();
     if (!PDom) {
       VMap[&BB] = ExitBlock;
@@ -279,7 +281,7 @@ Function *OutliningExtractor::createNewCallee() {
           new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
           continue;
         }
-        if (!BV.test(NodeIndices[orig_pred->getTerminator()])) {
+        if (!BV.test(NodeIndices.lookup(orig_pred->getTerminator()))) {
           // This incoming block is not being outlined. Instead, we will have
           // EntryBlock as a predecessor.
           phi_incoming.insert(orig_phi->getIncomingValue(j - 1));
@@ -330,7 +332,7 @@ Function *OutliningExtractor::createNewCallee() {
       BasicBlock *orig_pred = orig_phi->getIncomingBlock(j);
       if (!NodeIndices.count(orig_pred))
         continue; // unreachable block
-      if (BV.test(NodeIndices[orig_pred->getTerminator()]))
+      if (BV.test(NodeIndices.lookup(orig_pred->getTerminator())))
         new_phi->addIncoming(orig_phi->getIncomingValue(j), orig_pred);
     }
     VM.remapInstruction(*new_phi);
@@ -354,9 +356,9 @@ Function *OutliningExtractor::createNewCallee() {
 Function *OutliningExtractor::createNewCaller() {
   createNewCallee();
 
-  auto &PDT = OutDep.PDT;
-  auto &Nodes = OutDep.Nodes;
-  auto &NodeIndices = OutDep.NodeIndices;
+  const auto &PDT = OutDep.PDT;
+  const auto &Nodes = OutDep.Nodes;
+  const auto &NodeIndices = OutDep.NodeIndices;
 
   ValueToValueMapTy VMap;
   NewCaller = CloneFunction(&F, VMap, nullptr);
@@ -409,8 +411,8 @@ Function *OutliningExtractor::createNewCaller() {
         // Iterate backwards so we don't have to care about removeIncomingValue
         // renumbering things.
         for (unsigned j = orig_phi->getNumIncomingValues(); j > 0; --j)
-          if (BV.test(NodeIndices[orig_phi->getIncomingBlock(j - 1)
-                                      ->getTerminator()]))
+          if (BV.test(NodeIndices.lookup(
+                  orig_phi->getIncomingBlock(j - 1)->getTerminator())))
             new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
         continue;
       }
@@ -455,7 +457,8 @@ Function *OutliningExtractor::createNewCaller() {
     PHINode *orig_phi = cast<PHINode>(Nodes[i]);
     PHINode *new_phi = cast<PHINode>(VMap[orig_phi]);
     for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j)
-      if (BV.test(NodeIndices[orig_phi->getIncomingBlock(j)->getTerminator()]))
+      if (BV.test(NodeIndices.lookup(
+              orig_phi->getIncomingBlock(j)->getTerminator())))
         new_phi->setIncomingValue(j, OutputValues[i]);
   }
 

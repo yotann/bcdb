@@ -27,8 +27,8 @@ using namespace llvm;
 
 class OutliningExtractor {
 public:
-  OutliningExtractor(Function &F, OutliningDependenceResults &OutDep,
-                     SparseBitVector<> &BV);
+  OutliningExtractor(Function &F, const OutliningDependenceResults &OutDep,
+                     const SparseBitVector<> &BV);
 
   Function *createNewCallee();
   Function *createNewCaller();
@@ -38,8 +38,8 @@ public:
   void getResultTypes(SmallVectorImpl<Type *> &types) const;
 
   Function &F;
-  OutliningDependenceResults &OutDep;
-  SparseBitVector<> &BV;
+  const OutliningDependenceResults &OutDep;
+  const SparseBitVector<> &BV;
 
 private:
   FunctionType *CalleeType = nullptr;
