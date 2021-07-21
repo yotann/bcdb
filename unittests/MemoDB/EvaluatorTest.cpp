@@ -53,28 +53,24 @@ TEST(EvaluatorTest, Async) {
   CID five = evaluator.getStore().put(5);
   CID three = evaluator.getStore().put(3);
   Call call("binary", {three, five});
-  auto result = evaluator.evaluateAsync(call);
+  auto future = evaluator.evaluateAsync(call);
   // Make sure the Evaluator stores a copy of the Call, not a reference to it.
   call.Name = "invalid";
-  EXPECT_EQ(Node(-2), *result.get());
+  EXPECT_EQ(Node(-2), *future.get());
 }
 
 TEST(EvaluatorTest, ThreadPool) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true), 1);
   evaluator.registerFunc("binary", binary);
   CID four = evaluator.getStore().put(4);
-  auto result = evaluator.evaluateAsync("binary", four, four);
+  auto future = evaluator.evaluateAsync("binary", four, four);
   for (unsigned i = 0; i < 100; i++) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    // Note: std::shared_future::wait_for doesn't actually wait if there's a
-    // deferred function; it just returns std::future_status::deferred.
-    if (result.wait_for(std::chrono::seconds(0)) !=
-        std::future_status::deferred)
+    if (future.checkForResult())
       break;
   }
-  EXPECT_EQ(std::future_status::ready,
-            result.wait_for(std::chrono::seconds(0)));
-  EXPECT_EQ(Node(0), *result.get());
+  EXPECT_TRUE(future.checkForResult());
+  EXPECT_EQ(Node(0), *future.get());
 }
 
 } // end anonymous namespace

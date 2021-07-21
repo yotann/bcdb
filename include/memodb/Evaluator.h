@@ -33,6 +33,7 @@ public:
   const Node &operator*();
   const Node *operator->();
   const CID &getCID();
+  bool checkForResult() const;
 
 private:
   friend class Evaluator;

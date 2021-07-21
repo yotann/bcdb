@@ -26,6 +26,10 @@ NodeRef &Future::get() {
 
 void Future::wait() { future.wait(); }
 
+bool Future::checkForResult() const {
+  return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+}
+
 const Node &Future::operator*() { return *get(); }
 
 const Node *Future::operator->() { return &operator*(); }
