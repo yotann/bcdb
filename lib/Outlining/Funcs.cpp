@@ -30,96 +30,140 @@ using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 
 static Node encodeBitVector(const SparseBitVector<> &bv) {
-  // TODO: Is it worthwhile to compress this by just encoding the number of 0s
-  // between each set bit?
+  // Most bitvectors just have one contiguous range of set bits. So we encode
+  // just the indices where we change between set and clear.
   Node result(node_list_arg);
-  for (auto i : bv)
-    result.emplace_back(i);
+  size_t end = 0;
+  for (auto start : bv) {
+    if (start < end)
+      continue;
+    for (end = start + 1; bv.test(end); ++end) {
+    }
+    result.emplace_back(start);
+    result.emplace_back(end);
+  }
   return result;
 }
 
 static Node getTypeName(const Type *type) {
   // TODO: cache results.
+
+  enum class Primitive : int {
+    // General primitive types.
+    Void = 0,
+    Label = 1,
+    Metadata = 2,
+    Token = 3,
+    OpaqueStruct = 4,
+
+    // IEEE floats.
+    Half = 11,
+    Float = 12,
+    Double = 13,
+    FP128 = 14,
+
+    // Target-specific primitive types.
+    X86_FP80 = -1,
+    PPC_FP128 = -2,
+    X86_MMX = -3,
+    BFloat = -4,
+    AMX = -5,
+  };
+
+  enum class Derived : int {
+    // Without subtypes (we ignore pointer element types).
+    Integer = 0,
+    Pointer = 1,
+
+    // With subtypes.
+    Array = -1,
+    FixedVector = -2,
+    ScalableVector = -3,
+    Struct = -4,
+    Function = -5,
+  };
+
   Node subtypes(node_list_arg);
   if (!type->isPointerTy())
     for (const Type *subtype : type->subtypes())
       subtypes.push_back(getTypeName(subtype));
 
   switch (type->getTypeID()) {
-    // General primitive types.
   case Type::VoidTyID:
-    return 0;
+    return static_cast<int>(Primitive::Void);
   case Type::LabelTyID:
-    return 1;
+    return static_cast<int>(Primitive::Label);
   case Type::MetadataTyID:
-    return 2;
+    return static_cast<int>(Primitive::Metadata);
   case Type::TokenTyID:
-    return 3;
-
-    // IEEE floats.
+    return static_cast<int>(Primitive::Token);
   case Type::HalfTyID:
-    return 11;
+    return static_cast<int>(Primitive::Half);
   case Type::FloatTyID:
-    return 12;
+    return static_cast<int>(Primitive::Float);
   case Type::DoubleTyID:
-    return 13;
+    return static_cast<int>(Primitive::Double);
   case Type::FP128TyID:
-    return 14;
-
-    // Target-specific primitive types.
+    return static_cast<int>(Primitive::FP128);
   case Type::X86_FP80TyID:
-    return -1;
+    return static_cast<int>(Primitive::X86_FP80);
   case Type::PPC_FP128TyID:
-    return -2;
+    return static_cast<int>(Primitive::PPC_FP128);
   case Type::X86_MMXTyID:
-    return -3;
+    return static_cast<int>(Primitive::X86_MMX);
 #if LLVM_VERSION_MAJOR >= 11
   case Type::BFloatTyID:
-    return -4;
+    return static_cast<int>(Primitive::BFloat);
 #endif
 #if LLVM_VERSION_MAJOR >= 12
   case Type::X86_AMXTyID:
-    return -5;
+    return static_cast<int>(Primitive::X86_AMX);
 #endif
 
-    // Derived types.
   case Type::IntegerTyID:
-    return Node(node_list_arg, {0, type->getIntegerBitWidth()});
+    return Node(node_list_arg, {static_cast<int>(Derived::Integer),
+                                type->getIntegerBitWidth()});
 
   case Type::PointerTyID:
-    return Node(node_list_arg,
-                {1, std::move(subtypes), type->getPointerAddressSpace()});
+    return Node(node_list_arg, {static_cast<int>(Derived::Pointer),
+                                type->getPointerAddressSpace()});
 
   case Type::ArrayTyID:
     return Node(node_list_arg,
-                {2, std::move(subtypes), type->getArrayNumElements()});
+                {static_cast<int>(Derived::Array), std::move(subtypes),
+                 type->getArrayNumElements()});
 
 #if LLVM_VERSION_MAJOR >= 11
   case Type::FixedVectorTyID:
-    return Node(node_list_arg, {3, std::move(subtypes),
-                                cast<FixedVectorType>(type)->getNumElements()});
+    return Node(node_list_arg,
+                {static_cast<int>(Derived::FixedVector), std::move(subtypes),
+                 cast<FixedVectorType>(type)->getNumElements()});
 
   case Type::ScalableVectorTyID:
     return Node(node_list_arg,
-                {4, std::move(subtypes),
+                {static_cast<int>(Derived::ScalableVector), std::move(subtypes),
                  cast<ScalableVectorType>(type)->getMinNumElements()});
 #else
   case Type::VectorTyID:
-    return Node(node_list_arg, {3, std::move(subtypes),
-                                cast<VectorType>(type)->getNumElements()});
+    return Node(node_list_arg,
+                {static_cast<int>(Derived::FixedVector), std::move(subtypes),
+                 cast<VectorType>(type)->getNumElements()});
 #endif
 
   case Type::StructTyID:
     if (cast<StructType>(type)->isOpaque())
-      return 4;
+      return static_cast<int>(Primitive::OpaqueStruct);
     // We don't care about isLiteral().
     return Node(node_list_arg,
-                {5, std::move(subtypes), cast<StructType>(type)->isPacked()});
+                {static_cast<int>(Derived::Struct), std::move(subtypes),
+                 cast<StructType>(type)->isPacked()});
 
   case Type::FunctionTyID:
     return Node(node_list_arg,
-                {6, std::move(subtypes), cast<FunctionType>(type)->isVarArg()});
+                {static_cast<int>(Derived::Function), std::move(subtypes),
+                 cast<FunctionType>(type)->isVarArg()});
   }
+
   report_fatal_error("unsupported Type");
 }
 

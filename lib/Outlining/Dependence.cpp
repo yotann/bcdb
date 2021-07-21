@@ -133,16 +133,14 @@ void OutliningDependenceResults::printSet(raw_ostream &os,
                                           const SparseBitVector<> &bv,
                                           llvm::StringRef sep,
                                           llvm::StringRef range) const {
-  size_t last_end = 0;
+  size_t end = 0;
   for (auto start : bv) {
-    if (start < last_end)
+    if (start < end)
       continue;
-    auto end = start + 1;
-    while (bv.test(end))
-      end++;
-    if (last_end != 0)
+    if (end != 0)
       os << sep;
-    last_end = end;
+    for (end = start + 1; bv.test(end); ++end) {
+    }
     if (start + 1 == end)
       os << formatv("{0}", start);
     else
