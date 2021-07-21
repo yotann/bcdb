@@ -104,6 +104,9 @@ OutliningDependenceResults::OutliningDependenceResults(Function &F,
 }
 
 void OutliningDependenceResults::print(raw_ostream &OS) const {
+  // FIXME: update test cases so this is no longer necessary.
+  const_cast<OutliningDependenceResults &>(*this).computeTransitiveClosures();
+
   OutliningDependenceWriter Writer(this);
   F.print(OS, &Writer);
 }
@@ -644,7 +647,12 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   }
 }
 
-void OutliningDependenceResults::finalizeDepends() {
+void OutliningDependenceResults::finalizeDepends() {}
+
+void OutliningDependenceResults::computeTransitiveClosures() {
+  // TODO: Make this function faster. It's so slow that we have to avoid
+  // calling it when running the extractor.
+
   // Make DominatingDepends transitive.
   for (size_t i = 0; i < Nodes.size(); i++)
     for (auto x : DominatingDepends[i])

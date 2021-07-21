@@ -51,6 +51,10 @@ public:
   void printSet(llvm::raw_ostream &os, const SparseBitVector<> &bv,
                 llvm::StringRef sep = ", ", llvm::StringRef range = "-") const;
 
+  // Fill out the ForcedDepends and DominatingDepends with additional necessary
+  // dependences. May be slow.
+  void computeTransitiveClosures();
+
   // Each node must be one of the following types:
   // - Instruction
   // - BasicBlock, used before instructions to represent control dependencies

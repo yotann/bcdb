@@ -51,6 +51,8 @@ OutliningCandidates::OutliningCandidates(Function &F,
     return;
   }
 
+  OutDep.computeTransitiveClosures();
+
   for (BasicBlock &block : F) {
     if (!OutDep.NodeIndices.count(&block))
       continue; // unreachable
