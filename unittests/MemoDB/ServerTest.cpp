@@ -274,7 +274,7 @@ TEST(ServerTest, GetCall) {
                       "/call/transmute/uAXEAAaA,uAXEAAaA");
   server.handleRequest(request);
   ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node, cookie_cid);
+  EXPECT_EQ(request.response_content_node, Node(cookie_cid));
   EXPECT_EQ(request.response_content_cid, std::nullopt);
   EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
 }
@@ -285,7 +285,7 @@ TEST(ServerTest, PutCall) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
   TestRequest request(Request::Method::PUT, "/call/transmute/uAXEAAaA,uAXEAAaA",
-                      cookie_cid);
+                      Node(cookie_cid));
   server.handleRequest(request);
   ASSERT_EQ(request.response_type, ResponseType::Created);
   EXPECT_EQ(request.response_location, std::nullopt);

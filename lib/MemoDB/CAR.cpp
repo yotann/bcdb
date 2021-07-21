@@ -328,7 +328,7 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
       exportRef(*Ref);
       IDs.emplace_back(*Ref);
     } else if (const Head *head = std::get_if<Head>(&Name)) {
-      Heads[head->Name] = store.resolve(Name);
+      Heads[head->Name] = Node(store.resolve(Name));
       exportRef(Heads[head->Name].as<CID>());
     } else if (const Call *call = std::get_if<Call>(&Name)) {
       Node &FuncCalls = Calls[call->Name];
@@ -343,7 +343,7 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
       }
       Key.pop_back();
       auto Result = store.resolve(Name);
-      FuncCalls[Key] = Node::Map({{"args", Args}, {"result", Result}});
+      FuncCalls[Key] = Node::Map({{"args", Args}, {"result", Node(Result)}});
       exportRef(Result);
     } else {
       llvm_unreachable("impossible Name type");
@@ -367,8 +367,8 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
 
   CID RootRef = exportValue(Root);
 
-  Node Header =
-      Node::Map({{"roots", Node(node_list_arg, {RootRef})}, {"version", 1}});
+  Node Header = Node::Map(
+      {{"roots", Node(node_list_arg, {Node(RootRef)})}, {"version", 1}});
   std::vector<std::uint8_t> Buffer;
   Header.save_cbor(Buffer);
   os.seek(0);

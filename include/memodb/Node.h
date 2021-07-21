@@ -312,8 +312,10 @@ public:
   Node(const Map &map);
   Node(Map &&map);
 
-  Node(const CID &val);
-  Node(CID &&val);
+  // Explicit so we don't confuse Node values with links when setting up e.g.
+  // call arguments.
+  explicit Node(const CID &val);
+  explicit Node(CID &&val);
 
   ~Node() noexcept {}
 

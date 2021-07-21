@@ -116,7 +116,7 @@ void Server::handleRequestHead(Request &request,
         return request.sendError(
             Request::Status::NotFound, std::nullopt, "Not Found",
             "Head \"" + *head_str + "\" not found in store.");
-      return request.sendContentNode(*cid, std::nullopt,
+      return request.sendContentNode(Node(*cid), std::nullopt,
                                      Request::CacheControl::Mutable);
     } else if (request.getMethod() == Request::Method::PUT) {
       // PUT /head/...
@@ -183,7 +183,7 @@ void Server::handleRequestCall(Request &request,
       if (!cid)
         return request.sendError(Request::Status::NotFound, std::nullopt,
                                  "Not Found", "Call not found in store.");
-      return request.sendContentNode(*cid, std::nullopt,
+      return request.sendContentNode(Node(*cid), std::nullopt,
                                      Request::CacheControl::Mutable);
     } else {
       // PUT /call/.../...

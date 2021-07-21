@@ -489,7 +489,7 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
           CID::fromBytes(llvm::ArrayRef<std::uint8_t>(result).drop_front(1));
       if (!CID)
         return createUnsupportedCBORError("unsupported or invalid CID");
-      return *CID;
+      return Node(*CID);
     }
     Node node;
     node.variant_ = result;

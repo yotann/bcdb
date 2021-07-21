@@ -197,7 +197,7 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
     for (auto &Item : Map) {
       GlobalObject *GO = Item.first;
       CID &Ref = Item.second;
-      function_map[bytesToUTF8(GO->getName())] = Ref;
+      function_map[bytesToUTF8(GO->getName())] = Node(Ref);
       if (RenameGlobals) {
         GlobalAlias *GA = GlobalAlias::create(
             GlobalValue::InternalLinkage, "__bcdb_alias_" + StringRef(Ref), GO);
@@ -210,8 +210,8 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   Splitter.Finish();
   CID remainder_value = SaveModule(*M);
 
-  auto result =
-      Node::Map({{"functions", function_map}, {"remainder", remainder_value}});
+  auto result = Node::Map(
+      {{"functions", function_map}, {"remainder", Node(remainder_value)}});
   return db->put(result);
 }
 
