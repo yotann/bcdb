@@ -9,6 +9,11 @@
 
 using namespace memodb;
 
+NodeRef::NodeRef(Store &store, const CID &cid) : store(store), cid(cid) {}
+
+NodeRef::NodeRef(Store &store, const CID &cid, const Node &node)
+    : store(store), cid(cid), node(node) {}
+
 const Node &NodeRef::operator*() {
   if (!node)
     node = store.get(*cid);
@@ -74,6 +79,36 @@ llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Name &name) {
     name.visit([&](auto X) { os << X; });
   }
   return os;
+}
+
+bool Store::has(const CID &CID) { return getOptional(CID).hasValue(); }
+
+bool Store::has(const Name &Name) {
+  if (const CID *cid = std::get_if<CID>(&Name))
+    return has(*cid);
+  return resolveOptional(Name).hasValue();
+}
+
+Node Store::get(const CID &CID) { return *getOptional(CID); }
+
+CID Store::resolve(const Name &Name) { return *resolveOptional(Name); }
+
+std::vector<Head> Store::list_heads() {
+  std::vector<Head> Result;
+  eachHead([&](const Head &Head) {
+    Result.emplace_back(Head);
+    return false;
+  });
+  return Result;
+}
+
+std::vector<Call> Store::list_calls(llvm::StringRef Func) {
+  std::vector<Call> Result;
+  eachCall(Func, [&](const Call &Call) {
+    Result.emplace_back(Call);
+    return false;
+  });
+  return Result;
 }
 
 std::vector<Path> Store::list_paths_to(const CID &ref) {

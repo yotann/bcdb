@@ -80,9 +80,8 @@ class NodeRef {
   std::optional<Node> node = std::nullopt;
 
 public:
-  NodeRef(Store &store, const CID &cid) : store(store), cid(cid) {}
-  NodeRef(Store &store, const CID &cid, const Node &node)
-      : store(store), cid(cid), node(node) {}
+  NodeRef(Store &store, const CID &cid);
+  NodeRef(Store &store, const CID &cid, const Node &node);
 
   const Node &operator*();
   const Node *operator->();
@@ -109,73 +108,15 @@ public:
   virtual void head_delete(const Head &Head) = 0;
   virtual void call_invalidate(llvm::StringRef name) = 0;
 
-  virtual bool has(const CID &CID) { return getOptional(CID).hasValue(); }
-  virtual bool has(const Name &Name) {
-    if (const CID *cid = std::get_if<CID>(&Name))
-      return has(*cid);
-    return resolveOptional(Name).hasValue();
-  }
+  virtual bool has(const CID &CID);
+  virtual bool has(const Name &Name);
 
-  Node get(const CID &CID) { return *getOptional(CID); }
-  llvm::Optional<Node> getOptional(const Name &Name) {
-    auto CID = resolveOptional(Name);
-    return CID ? getOptional(*CID) : llvm::None;
-  }
-  Node get(const Name &Name) { return get(resolve(Name)); }
-  CID resolve(const Name &Name) { return *resolveOptional(Name); }
+  Node get(const CID &CID);
+  CID resolve(const Name &Name);
 
-  CID head_get(llvm::StringRef name) { return resolve(Head(name)); }
-
-  void head_set(llvm::StringRef name, const CID &ref) { set(Head(name), ref); }
-
-  void call_set(llvm::StringRef name, llvm::ArrayRef<CID> args,
-                const CID &result) {
-    set(Call(name, args), result);
-  }
-
-  std::vector<Head> list_heads() {
-    std::vector<Head> Result;
-    eachHead([&](const Head &Head) {
-      Result.emplace_back(Head);
-      return false;
-    });
-    return Result;
-  }
-
-  std::vector<Call> list_calls(llvm::StringRef Func) {
-    std::vector<Call> Result;
-    eachCall(Func, [&](const Call &Call) {
-      Result.emplace_back(Call);
-      return false;
-    });
-    return Result;
-  }
-
-  virtual std::vector<Path> list_paths_to(const CID &ref);
-
-  template <typename F, typename... Targs>
-  CID call_or_lookup_ref(llvm::StringRef name, F func, Targs... Fargs) {
-    Call Call(name, {Fargs...});
-    auto ref = resolveOptional(Call);
-    if (!ref) {
-      ref = put(func(*this, get(Fargs)...));
-      call_set(name, {Fargs...}, ref);
-    }
-    return *ref;
-  }
-
-  template <typename F, typename... Targs>
-  Node call_or_lookup_value(llvm::StringRef name, F func, Targs... Fargs) {
-    Call Call(name, {Fargs...});
-    Node value;
-    if (auto ref = resolveOptional(Call)) {
-      value = get(*ref);
-    } else {
-      value = func(*this, get(Fargs)...);
-      call_set(name, {Fargs...}, put(value));
-    }
-    return value;
-  }
+  std::vector<Head> list_heads();
+  std::vector<Call> list_calls(llvm::StringRef Func);
+  std::vector<Path> list_paths_to(const CID &ref);
 };
 
 } // end namespace memodb

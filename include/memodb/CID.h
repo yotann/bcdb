@@ -48,9 +48,7 @@ public:
   Multicodec getContentType() const { return ContentType; }
 
   // Get a reference to the bytes of the hash only.
-  llvm::ArrayRef<std::uint8_t> getHashBytes() const {
-    return llvm::ArrayRef<std::uint8_t>(Bytes).take_back(HashSize);
-  }
+  llvm::ArrayRef<std::uint8_t> getHashBytes() const;
 
   // Calculate a CID for some data. If HashType is not provided, the hash will
   // be Blake2b_256 or Identity depending on the size of the data.

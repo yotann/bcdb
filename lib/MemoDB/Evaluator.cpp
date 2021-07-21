@@ -66,7 +66,7 @@ NodeRef Evaluator::evaluate(const Call &call) {
                              " available");
   auto result = func_iter->getValue()(*this, call);
   auto cid = getStore().put(result);
-  getStore().call_set(call.Name, call.Args, cid);
+  getStore().set(call, cid);
   return NodeRef(getStore(), std::move(cid), std::move(result));
 }
 

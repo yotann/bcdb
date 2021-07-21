@@ -230,15 +230,15 @@ public:
   // Constructors and assignment.
 
   // NOTE: default is null (jsoncons default is empty map).
-  Node() : variant_() {}
+  Node();
   Node(const Node &Other) = default;
   Node(Node &&Other) noexcept = default;
   Node &operator=(const Node &Other) = default;
   Node &operator=(Node &&Other) noexcept = default;
 
-  Node(std::nullptr_t) : variant_() {}
+  Node(std::nullptr_t);
 
-  Node(bool val) : variant_(val) {}
+  Node(bool val);
 
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
@@ -265,31 +265,19 @@ public:
                              int> = 0>
   Node(IntegerType val) : variant_(std::int64_t(val)) {}
 
-  Node(double Float) : variant_(Float) {}
+  Node(double Float);
 
-  Node(const char *Str) : variant_(StringStorage(Str)) { validateUTF8(); }
-
-  Node(const char *Str, std::size_t Length)
-      : variant_(StringStorage(Str, Str + Length)) {
-    validateUTF8();
-  }
-
-  Node &operator=(const char *Str) { return *this = Node(Str); }
+  Node(const char *Str);
+  Node(const char *Str, std::size_t Length);
+  Node &operator=(const char *Str);
 
   // We require an explicit utf8_string_arg argument because strings are often
   // not valid UTF-8.
-  Node(UTF8StringArg, const llvm::StringRef &sr) : variant_(StringStorage(sr)) {
-    validateUTF8();
-  }
-  Node(UTF8StringArg, const std::string_view &sv)
-      : variant_(StringStorage(sv.begin(), sv.end())) {
-    validateUTF8();
-  }
-  Node(UTF8StringArg, const std::string &str) : variant_(StringStorage(str)) {
-    validateUTF8();
-  }
+  Node(UTF8StringArg, const llvm::StringRef &sr);
+  Node(UTF8StringArg, const std::string_view &sv);
+  Node(UTF8StringArg, const std::string &str);
 
-  Node(ByteStringArg) : variant_(BytesStorage()) {}
+  Node(ByteStringArg);
 
   // FIXME: Check whether Source really is a byte/char sequence.
   template <class Source>
@@ -299,63 +287,47 @@ public:
                          reinterpret_cast<const std::uint8_t *>(source.data()) +
                              source.size())) {}
 
-  Node(BytesRef bytes) : Node(byte_string_arg, bytes) {}
+  Node(BytesRef bytes);
 
-  explicit Node(NodeListArg) : Node(List()) {}
+  explicit Node(NodeListArg);
 
   template <class InputIt>
   Node(NodeListArg, InputIt first, InputIt last) : Node(List(first, last)) {}
 
-  Node(NodeListArg, std::initializer_list<Node> init) : Node(List(init)) {}
+  Node(NodeListArg, std::initializer_list<Node> init);
 
-  Node(const List &list) : variant_(list) {}
-  Node(List &&list) : variant_(std::forward<List>(list)) {}
+  Node(const List &list);
+  Node(List &&list);
 
-  explicit Node(NodeMapArg) : Node(Map()) {}
+  explicit Node(NodeMapArg);
 
   template <class InputIt>
   Node(NodeMapArg, InputIt first, InputIt last) : Node(Map(first, last)) {
     validateKeysUTF8();
   }
 
-  Node(NodeMapArg, std::initializer_list<std::pair<llvm::StringRef, Node>> init)
-      : Node(Map(init)) {
-    validateKeysUTF8();
-  }
+  Node(NodeMapArg,
+       std::initializer_list<std::pair<llvm::StringRef, Node>> init);
 
-  Node(const Map &map) : variant_(map) { validateKeysUTF8(); }
-  Node(Map &&map) : variant_(std::forward<Map>(map)) { validateKeysUTF8(); }
+  Node(const Map &map);
+  Node(Map &&map);
 
-  Node(const CID &val) : variant_(val) {}
-  Node(CID &&val) : variant_(std::forward<CID>(val)) {}
+  Node(const CID &val);
+  Node(CID &&val);
 
   ~Node() noexcept {}
 
   // Comparison operators.
 
-  bool operator==(const Node &other) const {
-    return variant_ == other.variant_;
-  }
-
-  bool operator!=(const Node &other) const {
-    return variant_ != other.variant_;
-  }
-
-  bool operator<(const Node &other) const { return variant_ < other.variant_; }
+  bool operator==(const Node &other) const;
+  bool operator!=(const Node &other) const;
+  bool operator<(const Node &other) const;
 
   // Saving and loading.
 
   // Load a Node from DAG-CBOR bytes:
   // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
-  static llvm::Expected<Node> loadFromCBOR(BytesRef in) {
-    auto result = loadFromCBORSequence(in);
-    if (!result)
-      return result.takeError();
-    if (!in.empty())
-      return llvm::createStringError(std::errc::invalid_argument,
-                                     "Extra bytes after CBOR node");
-    return *result;
-  }
+  static llvm::Expected<Node> loadFromCBOR(BytesRef in);
 
   // Load a Node from DAG-CBOR bytes at the beginning of a sequence. When this
   // returns, "in" will refer to the rest of the bytes after the DAG-CBOR
@@ -383,20 +355,7 @@ public:
 
   // Checking the kind of Node.
 
-  Kind kind() const {
-    return std::visit(Overloaded{
-                          [](const std::monostate &) { return Kind::Null; },
-                          [](const bool &) { return Kind::Boolean; },
-                          [](const std::int64_t &) { return Kind::Integer; },
-                          [](const double &) { return Kind::Float; },
-                          [](const StringStorage &) { return Kind::String; },
-                          [](const BytesStorage &) { return Kind::Bytes; },
-                          [](const List &) { return Kind::List; },
-                          [](const Map &) { return Kind::Map; },
-                          [](const CID &) { return Kind::Link; },
-                      },
-                      variant_);
-  }
+  Kind kind() const;
 
   constexpr bool is_null() const noexcept {
     return std::holds_alternative<std::monostate>(variant_);
@@ -457,97 +416,38 @@ public:
   // Convenience functions for Lists and Maps.
 
   // NOTE: works on strings and bytes, unlike jsoncons.
-  std::size_t size() const {
-    return std::visit(
-        Overloaded{
-            [](const StringStorage &val) -> std::size_t { return val.size(); },
-            [](const BytesStorage &val) -> std::size_t { return val.size(); },
-            [](const List &List) -> std::size_t { return List.size(); },
-            [](const Map &Map) -> std::size_t { return Map.size(); },
-            [](const auto &X) -> std::size_t { return 0; },
-        },
-        variant_);
-  }
+  std::size_t size() const;
 
-  Node &operator[](std::size_t i) { return at(i); }
+  Node &operator[](std::size_t i);
+  const Node &operator[](std::size_t i) const;
+  Node &operator[](const llvm::StringRef &name);
+  const Node &operator[](const llvm::StringRef &name) const;
 
-  const Node &operator[](std::size_t i) const { return at(i); }
+  bool contains(const llvm::StringRef &key) const noexcept;
 
-  Node &operator[](const llvm::StringRef &name) {
-    return std::get<Map>(variant_).try_emplace(name).first->value();
-  }
+  std::size_t count(const llvm::StringRef &key) const;
 
-  const Node &operator[](const llvm::StringRef &name) const { return at(name); }
+  bool empty() const noexcept;
 
-  bool contains(const llvm::StringRef &key) const noexcept {
-    return count(key) != 0;
-  }
-
-  std::size_t count(const llvm::StringRef &key) const {
-    if (const Map *value = std::get_if<Map>(&variant_))
-      return value->find(std::string(key)) != value->end() ? 1 : 0;
-    return 0;
-  }
-
-  bool empty() const noexcept {
-    return std::visit(Overloaded{
-                          [](const StringStorage &str) { return str.empty(); },
-                          [](const std::vector<std::uint8_t> &bytes) {
-                            return bytes.empty();
-                          },
-                          [](const List &list) { return list.empty(); },
-                          [](const Map &map) { return map.empty(); },
-                          [](const auto &) { return false; },
-                      },
-                      variant_);
-  }
-
-  void resize(std::size_t n) {
-    if (List *value = std::get_if<List>(&variant_))
-      value->resize(n);
-  }
+  void resize(std::size_t n);
 
   template <class T> void resize(std::size_t n, T val) {
     if (List *value = std::get_if<List>(&variant_))
       value->resize(n, val);
   }
 
-  Node &at(const llvm::StringRef &name) {
-    auto &value = std::get<Map>(variant_);
-    auto iter = value.find(name);
-    if (iter == value.end())
-      llvm::report_fatal_error("Key \"" + std::string(name) + "\" not found");
-    return iter->value();
-  }
-
-  const Node &at(const llvm::StringRef &name) const {
-    const auto &value = std::get<Map>(variant_);
-    auto iter = value.find(name);
-    if (iter == value.end())
-      llvm::report_fatal_error("Key \"" + std::string(name) + "\" not found");
-    return iter->value();
-  }
+  Node &at(const llvm::StringRef &name);
+  const Node &at(const llvm::StringRef &name) const;
 
   // Stricter than jsoncons (maps don't work).
-  Node &at(std::size_t i) { return std::get<List>(variant_).at(i); }
+  Node &at(std::size_t i);
 
   // Stricter than jsoncons (maps don't work).
-  const Node &at(std::size_t i) const { return std::get<List>(variant_).at(i); }
+  const Node &at(std::size_t i) const;
 
-  Map::iterator find(const llvm::StringRef &name) {
-    return std::get<Map>(variant_).find(name);
-  }
-
-  Map::const_iterator find(const llvm::StringRef &name) const {
-    return std::get<Map>(variant_).find(name);
-  }
-
-  const Node &at_or_null(const llvm::StringRef &name) const {
-    static const Node null_node = nullptr;
-    const Map &value = std::get<Map>(variant_);
-    auto iter = value.find(name);
-    return iter == value.end() ? null_node : iter->value();
-  }
+  Map::iterator find(const llvm::StringRef &name);
+  Map::const_iterator find(const llvm::StringRef &name) const;
+  const Node &at_or_null(const llvm::StringRef &name) const;
 
   template <class T, class U>
   T get_value_or(const llvm::StringRef &name, U &&default_value) const {
@@ -559,14 +459,7 @@ public:
                                : iter->value();
   }
 
-  void clear() {
-    std::visit(Overloaded{
-                   [](List &val) { val.clear(); },
-                   [](Map &val) { val.clear(); },
-                   [](auto &) {},
-               },
-               variant_);
-  }
+  void clear();
 
   template <class T>
   std::pair<Map::iterator, bool> insert_or_assign(const llvm::StringRef &name,
@@ -589,25 +482,10 @@ public:
     std::get<List>(variant_).push_back(std::forward<T>(val));
   }
 
-  Range<Map::iterator> map_range() {
-    auto &value = std::get<Map>(variant_);
-    return Range(value.begin(), value.end());
-  }
-
-  Range<Map::const_iterator> map_range() const {
-    const auto &value = std::get<Map>(variant_);
-    return Range(value.begin(), value.end());
-  }
-
-  Range<List::iterator> list_range() {
-    auto &value = std::get<List>(variant_);
-    return Range(value.begin(), value.end());
-  }
-
-  Range<List::const_iterator> list_range() const {
-    const auto &value = std::get<List>(variant_);
-    return Range(value.begin(), value.end());
-  }
+  Range<Map::iterator> map_range();
+  Range<Map::const_iterator> map_range() const;
+  Range<List::iterator> list_range();
+  Range<List::const_iterator> list_range() const;
 
   // Extra functions (DAG-CBOR specific).
 

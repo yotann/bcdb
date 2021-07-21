@@ -22,6 +22,10 @@ static void writeVarInt(llvm::SmallVectorImpl<std::uint8_t> &Bytes,
   Bytes.push_back(Value);
 }
 
+llvm::ArrayRef<std::uint8_t> CID::getHashBytes() const {
+  return llvm::ArrayRef<std::uint8_t>(Bytes).take_back(HashSize);
+}
+
 CID CID::calculate(Multicodec ContentType, llvm::ArrayRef<std::uint8_t> Content,
                    std::optional<Multicodec> HashType) {
   if (!HashType) {

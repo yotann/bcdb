@@ -26,6 +26,217 @@ void Node::validateKeysUTF8() const {
   }
 }
 
+Node::Node() : variant_() {}
+
+Node::Node(std::nullptr_t) : variant_() {}
+
+Node::Node(bool val) : variant_(val) {}
+
+Node::Node(double Float) : variant_(Float) {}
+
+Node::Node(const char *Str) : variant_(StringStorage(Str)) { validateUTF8(); }
+
+Node::Node(const char *Str, std::size_t Length)
+    : variant_(StringStorage(Str, Str + Length)) {
+  validateUTF8();
+}
+
+Node &Node::operator=(const char *Str) { return *this = Node(Str); }
+
+Node::Node(UTF8StringArg, const llvm::StringRef &sr)
+    : variant_(StringStorage(sr)) {
+  validateUTF8();
+}
+
+Node::Node(UTF8StringArg, const std::string_view &sv)
+    : variant_(StringStorage(sv.begin(), sv.end())) {
+  validateUTF8();
+}
+
+Node::Node(UTF8StringArg, const std::string &str)
+    : variant_(StringStorage(str)) {
+  validateUTF8();
+}
+
+Node::Node(ByteStringArg) : variant_(BytesStorage()) {}
+
+Node::Node(BytesRef bytes) : Node(byte_string_arg, bytes) {}
+
+Node::Node(NodeListArg) : Node(List()) {}
+
+Node::Node(NodeListArg, std::initializer_list<Node> init) : Node(List(init)) {}
+
+Node::Node(const List &list) : variant_(list) {}
+Node::Node(List &&list) : variant_(std::forward<List>(list)) {}
+
+Node::Node(NodeMapArg) : Node(Map()) {}
+
+Node::Node(NodeMapArg,
+           std::initializer_list<std::pair<llvm::StringRef, Node>> init)
+    : Node(Map(init)) {
+  validateKeysUTF8();
+}
+
+Node::Node(const Map &map) : variant_(map) { validateKeysUTF8(); }
+Node::Node(Map &&map) : variant_(std::forward<Map>(map)) { validateKeysUTF8(); }
+
+Node::Node(const CID &val) : variant_(val) {}
+Node::Node(CID &&val) : variant_(std::forward<CID>(val)) {}
+
+bool Node::operator==(const Node &other) const {
+  return variant_ == other.variant_;
+}
+
+bool Node::operator!=(const Node &other) const {
+  return variant_ != other.variant_;
+}
+
+bool Node::operator<(const Node &other) const {
+  return variant_ < other.variant_;
+}
+
+llvm::Expected<Node> Node::loadFromCBOR(BytesRef in) {
+  auto result = loadFromCBORSequence(in);
+  if (!result)
+    return result.takeError();
+  if (!in.empty())
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "Extra bytes after CBOR node");
+  return *result;
+}
+
+Kind Node::kind() const {
+  return std::visit(Overloaded{
+                        [](const std::monostate &) { return Kind::Null; },
+                        [](const bool &) { return Kind::Boolean; },
+                        [](const std::int64_t &) { return Kind::Integer; },
+                        [](const double &) { return Kind::Float; },
+                        [](const StringStorage &) { return Kind::String; },
+                        [](const BytesStorage &) { return Kind::Bytes; },
+                        [](const List &) { return Kind::List; },
+                        [](const Map &) { return Kind::Map; },
+                        [](const CID &) { return Kind::Link; },
+                    },
+                    variant_);
+}
+
+std::size_t Node::size() const {
+  return std::visit(
+      Overloaded{
+          [](const StringStorage &val) -> std::size_t { return val.size(); },
+          [](const BytesStorage &val) -> std::size_t { return val.size(); },
+          [](const List &List) -> std::size_t { return List.size(); },
+          [](const Map &Map) -> std::size_t { return Map.size(); },
+          [](const auto &X) -> std::size_t { return 0; },
+      },
+      variant_);
+}
+
+Node &Node::operator[](std::size_t i) { return at(i); }
+
+const Node &Node::operator[](std::size_t i) const { return at(i); }
+
+Node &Node::operator[](const llvm::StringRef &name) {
+  return std::get<Map>(variant_).try_emplace(name).first->value();
+}
+
+const Node &Node::operator[](const llvm::StringRef &name) const {
+  return at(name);
+}
+
+bool Node::contains(const llvm::StringRef &key) const noexcept {
+  return count(key) != 0;
+}
+
+std::size_t Node::count(const llvm::StringRef &key) const {
+  if (const Map *value = std::get_if<Map>(&variant_))
+    return value->find(std::string(key)) != value->end() ? 1 : 0;
+  return 0;
+}
+
+bool Node::empty() const noexcept {
+  return std::visit(
+      Overloaded{
+          [](const StringStorage &str) { return str.empty(); },
+          [](const std::vector<std::uint8_t> &bytes) { return bytes.empty(); },
+          [](const List &list) { return list.empty(); },
+          [](const Map &map) { return map.empty(); },
+          [](const auto &) { return false; },
+      },
+      variant_);
+}
+
+void Node::resize(std::size_t n) {
+  if (List *value = std::get_if<List>(&variant_))
+    value->resize(n);
+}
+
+Node &Node::at(const llvm::StringRef &name) {
+  auto &value = std::get<Map>(variant_);
+  auto iter = value.find(name);
+  if (iter == value.end())
+    llvm::report_fatal_error("Key \"" + std::string(name) + "\" not found");
+  return iter->value();
+}
+
+const Node &Node::at(const llvm::StringRef &name) const {
+  const auto &value = std::get<Map>(variant_);
+  auto iter = value.find(name);
+  if (iter == value.end())
+    llvm::report_fatal_error("Key \"" + std::string(name) + "\" not found");
+  return iter->value();
+}
+
+Node &Node::at(std::size_t i) { return std::get<List>(variant_).at(i); }
+
+const Node &Node::at(std::size_t i) const {
+  return std::get<List>(variant_).at(i);
+}
+
+Node::Map::iterator Node::find(const llvm::StringRef &name) {
+  return std::get<Map>(variant_).find(name);
+}
+
+Node::Map::const_iterator Node::find(const llvm::StringRef &name) const {
+  return std::get<Map>(variant_).find(name);
+}
+
+const Node &Node::at_or_null(const llvm::StringRef &name) const {
+  static const Node null_node = nullptr;
+  const Map &value = std::get<Map>(variant_);
+  auto iter = value.find(name);
+  return iter == value.end() ? null_node : iter->value();
+}
+
+void Node::clear() {
+  std::visit(Overloaded{
+                 [](List &val) { val.clear(); },
+                 [](Map &val) { val.clear(); },
+                 [](auto &) {},
+             },
+             variant_);
+}
+
+Range<Node::Map::iterator> Node::map_range() {
+  auto &value = std::get<Map>(variant_);
+  return Range(value.begin(), value.end());
+}
+
+Range<Node::Map::const_iterator> Node::map_range() const {
+  const auto &value = std::get<Map>(variant_);
+  return Range(value.begin(), value.end());
+}
+
+Range<Node::List::iterator> Node::list_range() {
+  auto &value = std::get<List>(variant_);
+  return Range(value.begin(), value.end());
+}
+
+Range<Node::List::const_iterator> Node::list_range() const {
+  const auto &value = std::get<List>(variant_);
+  return Range(value.begin(), value.end());
+}
+
 static void writeJSON(llvm::json::OStream &os, const Node &value) {
   switch (value.kind()) {
   case Kind::Null:

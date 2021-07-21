@@ -102,7 +102,7 @@ Expected<std::vector<std::string>> BCDB::ListModules() {
 }
 
 Expected<std::vector<std::string>> BCDB::ListFunctionsInModule(StringRef Name) {
-  CID ref = db->head_get(Name);
+  CID ref = db->resolve(Head(Name));
   Node head = db->get(ref);
   std::vector<std::string> result;
   for (auto &item : head["functions"].map_range()) {
@@ -219,7 +219,7 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
   Expected<CID> refOrErr = AddWithoutHead(std::move(M));
   if (!refOrErr)
     return refOrErr.takeError();
-  db->head_set(Name, *refOrErr);
+  db->set(Head(Name), *refOrErr);
   return Error::success();
 }
 
@@ -234,7 +234,7 @@ static std::unique_ptr<Module> LoadModuleFromValue(Store *db, const CID &ref,
 
 Expected<std::unique_ptr<Module>>
 BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
-  CID head_ref = db->head_get(Name);
+  CID head_ref = db->resolve(Head(Name));
   Node head = db->get(head_ref);
   auto Remainder =
       LoadModuleFromValue(db, head["remainder"].as<CID>(), Name, *Context);
@@ -253,7 +253,7 @@ Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
 }
 
 Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
-  CID head_ref = db->head_get(Name);
+  CID head_ref = db->resolve(Head(Name));
   Node head = db->get(head_ref);
 
   auto M = LoadModuleFromValue(db, head["remainder"].as<CID>(), "remainder",
