@@ -20,6 +20,27 @@
 
 namespace memodb {
 
+// A future returned by Evaluator.
+class Future {
+public:
+  Future(const Future &) = delete;
+  Future(Future &&) = default;
+  Future &operator=(const Future &) = delete;
+  Future &operator=(Future &&) = default;
+
+  NodeRef &get();
+  void wait();
+  const Node &operator*();
+  const Node *operator->();
+  const CID &getCID();
+
+private:
+  friend class Evaluator;
+  explicit Future(std::shared_future<NodeRef> &&future);
+
+  std::shared_future<NodeRef> future;
+};
+
 // Used to register and call MemoDB functions, with an optional thread pool.
 class Evaluator {
 public:
@@ -38,18 +59,13 @@ public:
     return evaluate(Call(name, {args...}));
   }
 
-  // Evaluate a call, potentially using the thread pool. Returns a
-  // std::shared_future containing a deferred function, so it will be evaluated
-  // either by a thread in the thread pool or by the thread that calls
-  // std::shared_future::wait() or std::shared_future::get(), whichever happens
-  // first. Note that if something calls std::shared_future::wait_for() or
-  // std::shared_future::wait_until() they won't actually wait; they'll just
-  // return std::future_status::deferred.
-  std::shared_future<NodeRef> evaluateAsync(const Call &call);
+  // Evaluate a call, potentially using the thread pool. Returns a Future, so
+  // the call will be evaluated either by a thread in the thread pool or by the
+  // thread that access fields in the Future, whichever happens first.
+  Future evaluateAsync(const Call &call);
 
   template <typename... Params>
-  std::shared_future<NodeRef> evaluateAsync(llvm::StringRef name,
-                                            Params... args) {
+  Future evaluateAsync(llvm::StringRef name, Params... args) {
     return evaluateAsync(Call(name, {args...}));
   }
 

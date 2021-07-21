@@ -15,6 +15,26 @@
 
 using namespace memodb;
 
+NodeRef &Future::get() {
+  // We need to return a non-const reference so NodeRef::operator*() and
+  // NodeRef::getCID() will work. The const_cast is safe because the
+  // shared_future's state is only used in two places (this Future, and
+  // Evaluator::workerThreadImpl) and only this Future will actually access the
+  // NodeRef.
+  return const_cast<NodeRef &>(future.get());
+}
+
+void Future::wait() { future.wait(); }
+
+const Node &Future::operator*() { return *get(); }
+
+const Node *Future::operator->() { return &operator*(); }
+
+const CID &Future::getCID() { return get().getCID(); }
+
+Future::Future(std::shared_future<NodeRef> &&future)
+    : future(std::move(future)) {}
+
 Evaluator::Evaluator(std::unique_ptr<Store> store, unsigned num_threads)
     : store(std::move(store)) {
   threads.reserve(num_threads);
@@ -46,7 +66,7 @@ NodeRef Evaluator::evaluate(const Call &call) {
   return NodeRef(getStore(), std::move(cid), std::move(result));
 }
 
-std::shared_future<NodeRef> Evaluator::evaluateAsync(const Call &call) {
+Future Evaluator::evaluateAsync(const Call &call) {
   num_queued++;
   std::shared_future<NodeRef> future = std::async(
       std::launch::deferred, &Evaluator::evaluateDeferred, this, call);
@@ -58,7 +78,7 @@ std::shared_future<NodeRef> Evaluator::evaluateAsync(const Call &call) {
     }
     work_cv.notify_one();
   }
-  return future;
+  return Future(std::move(future));
 }
 
 void Evaluator::registerFunc(

@@ -9,6 +9,20 @@
 
 using namespace memodb;
 
+const Node &NodeRef::operator*() {
+  if (!node)
+    node = store.get(*cid);
+  return *node;
+}
+
+const Node *NodeRef::operator->() { return &operator*(); }
+
+const CID &NodeRef::getCID() {
+  if (!cid)
+    cid = store.put(*node);
+  return *cid;
+}
+
 std::unique_ptr<Store> Store::open(llvm::StringRef uri,
                                    bool create_if_missing) {
   if (uri.startswith("sqlite:")) {

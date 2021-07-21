@@ -230,14 +230,13 @@ Node smout::candidates(Evaluator &evaluator, const Node &func) {
 }
 
 Node smout::candidates_total(Evaluator &evaluator, const Node &mod) {
-  std::vector<std::shared_future<NodeRef>> futures;
+  std::vector<Future> func_candidates;
   for (auto &item : mod["functions"].map_range())
-    futures.emplace_back(
+    func_candidates.emplace_back(
         evaluator.evaluateAsync("smout.candidates", item.value().as<CID>()));
   std::size_t total = 0;
-  for (auto &future : futures) {
-    const NodeRef &result = future.get();
-    for (auto &item : result->map_range())
+  for (auto &future : func_candidates) {
+    for (auto &item : future->map_range())
       total += item.value().size();
   }
   return total;
@@ -270,16 +269,16 @@ Node smout::extracted_callee(Evaluator &evaluator, const Node &func,
 }
 
 Node smout::unique_callees(Evaluator &evaluator, const Node &mod) {
-  std::vector<std::pair<CID, std::shared_future<NodeRef>>> func_candidates;
+  std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : mod["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
         func_cid, evaluator.evaluateAsync("smout.candidates", func_cid));
   }
-  std::vector<std::shared_future<NodeRef>> callees;
+  std::vector<Future> callees;
   for (auto &future : func_candidates) {
     const CID &func_cid = future.first;
-    const NodeRef &result = future.second.get();
+    Future &result = future.second;
     for (auto &item : result->map_range()) {
       for (auto &candidate : item.value().list_range()) {
         const CID nodes_cid = evaluator.getStore().put(candidate["nodes"]);
@@ -289,8 +288,7 @@ Node smout::unique_callees(Evaluator &evaluator, const Node &mod) {
     }
   }
   StringSet unique;
-  for (auto &future : callees) {
-    const NodeRef &result = future.get();
+  for (auto &result : callees) {
     auto bytes = result.getCID().asBytes();
     unique.insert(
         StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
