@@ -31,25 +31,12 @@ lines of code. For more details, see
 
 These instructions assume you have built the BCDB and installed it in `PATH`.
 
-### 1. Build with bitcode
+### 1. Obtain bitcode for the desired package
 
-```sh
-git clone https://github.com/lz4/lz4
-cd lz4
-CC=clang make CFLAGS=-fembed-bitcode
-```
+See [nix/bitcode-overlay](../../nix/bitcode-overlay/README.md) for
+instructions.
 
-### 2. Extract the bitcode
-
-This extracts the bitcode that was saved with `-fembed-bitcode`, and also adds
-some extra information, like the list of libraries that `lz4` is dynamically
-linked to.
-
-```sh
-bc-imitate extract lz4 > lz4.bc
-```
-
-### 3. Initialize the BCDB file
+### 2. Initialize the BCDB file
 
 ```sh
 export MEMODB_STORE=sqlite:lz4.bcdb
@@ -60,7 +47,7 @@ bcdb add -name lz4 lz4.bc
 Behind the scenes, the `lz4.bc` bitcode module is split into separate
 functions, and syntactically identical functions are deduplicated.
 
-### 4. Explore the BCDB file (optional)
+### 3. Explore the BCDB file (optional)
 
 ```sh
 bcdb list-modules
@@ -69,7 +56,7 @@ memodb paths-to id:99
 bcdb get-function --id=99 | llvm-dis
 ```
 
-### 5. Perform guided linking
+### 4. Perform guided linking
 
 ```sh
 bcdb gl --noplugin --nouse lz4 --merged-name merged -o out
@@ -77,7 +64,7 @@ llvm-dis < out/lz4
 llvm-dis < out/muxed
 ```
 
-### 6. Compile to machine code
+### 5. Compile to machine code
 
 We use `bc-imitate` to figure out any extra linker options we need to add;
 for instance, if the original `lz4` file linked against a library `libfoo.so`,

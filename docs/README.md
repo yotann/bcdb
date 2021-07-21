@@ -8,7 +8,7 @@ The BCDB project has the following subprojects:
   deduplicate and store them.
 - [Guided Linking]: A technique for optimizing dynamically linked code as if it
   were statically linked.
-- Outlining: An optimization to reduce code size with a more general
+- [Outlining]: An optimization to reduce code size with a more general
   implementation of code outlining.
 - [Nix bitcode overlay]: Nix expressions to automatically build lots of Linux
   packages in the form of LLVM bitcode.
@@ -17,3 +17,4 @@ The BCDB project has the following subprojects:
 [Guided Linking]: ./guided-linking/README.md
 [MemoDB]: ./memodb/README.md
 [Nix bitcode overlay]: ../nix/bitcode-overlay/README.md
+[Outlining]: ./Outlining/README.md
