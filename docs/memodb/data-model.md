@@ -81,17 +81,16 @@ restrictions on it:
   hand, the more tags we support, the fewer CBOR implementations will be
   compatible with MemoDB Nodes.
 - Map keys may only be text strings. It would be nice to support byte strings
-  and integers as well; for example, LLVM symbol names are arbitrary sequences
-  of bytes, and are used as keys. On the other hand, some highly useful CBOR
-  libraries like [jsoncons] have limited support for keys other than text
-  strings. For now, byte strings are converted to text strings by treating them
-  as ISO-8859-1 and decoding them into Unicode, but this decision should be
-  revisited in the future.
+  and integers as well; for example, the outliner represents candidate groups
+  using byte strings and uses them as keys. On the other hand, some highly
+  useful CBOR libraries like [jsoncons] have limited support for keys other
+  than text strings. For now, byte strings are encoded in base64 before being
+  used as keys, but this decision should be revisited in the future.
 
-Note that arbitrary CBOR values, ignoring the above restrictions, can be
-encoded as byte strings and then stored in a MemoDB Node. However, such values
-may not use links or CIDs to refer to other Nodes, because MemoDB will not
-recognize such links or CIDs, and might delete the other Nodes linked to.
+Note that arbitrary CBOR values, ignoring the above restrictions, can be stored
+in a MemoDB Node if they are first encoded as byte strings. However, such
+values may not use links or CIDs to refer to other Nodes, because MemoDB will
+not recognize such links or CIDs, and might delete the other Nodes linked to.
 
 ## CID
 
