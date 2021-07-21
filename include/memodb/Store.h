@@ -74,12 +74,26 @@ using Path = std::pair<Name, std::vector<Node>>;
 
 class Store;
 
+class NodeOrCID : private std::variant<CID, Node> {
+public:
+  constexpr NodeOrCID(const CID &cid) : variant(cid) {}
+  constexpr NodeOrCID(const Node &node) : variant(node) {}
+  constexpr NodeOrCID(CID &&cid) : variant(std::move(cid)) {}
+  constexpr NodeOrCID(Node &&node) : variant(std::move(node)) {}
+
+private:
+  friend class NodeRef;
+  typedef std::variant<CID, Node> BaseType;
+};
+
 class NodeRef {
   Store &store;
   std::optional<CID> cid = std::nullopt;
   std::optional<Node> node = std::nullopt;
 
 public:
+  NodeRef(Store &store, const NodeRef &other);
+  NodeRef(Store &store, const NodeOrCID &node_or_cid);
   NodeRef(Store &store, const CID &cid);
   NodeRef(Store &store, const CID &cid, const Node &node);
 

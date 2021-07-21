@@ -64,10 +64,9 @@ NodeRef Evaluator::evaluate(const Call &call) {
   if (func_iter == funcs.end())
     llvm::report_fatal_error("No implementation of " + call.Name +
                              " available");
-  auto result = func_iter->getValue()(*this, call);
-  auto cid = getStore().put(result);
-  getStore().set(call, cid);
-  return NodeRef(getStore(), std::move(cid), std::move(result));
+  auto result = NodeRef(getStore(), func_iter->getValue()(*this, call));
+  getStore().set(call, result.getCID());
+  return result;
 }
 
 Future Evaluator::evaluateAsync(const Call &call) {
@@ -86,7 +85,8 @@ Future Evaluator::evaluateAsync(const Call &call) {
 }
 
 void Evaluator::registerFunc(
-    llvm::StringRef name, std::function<Node(Evaluator &, const Call &)> func) {
+    llvm::StringRef name,
+    std::function<NodeOrCID(Evaluator &, const Call &)> func) {
   assert(!funcs.count(name) && "duplicate func");
   funcs[name] = std::move(func);
 }

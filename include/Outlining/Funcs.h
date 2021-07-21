@@ -8,12 +8,14 @@ namespace smout {
 
 using memodb::Evaluator;
 using memodb::Node;
+using memodb::NodeOrCID;
+using memodb::NodeRef;
 
-Node candidates(Evaluator &evaluator, const Node &func);
-Node candidates_total(Evaluator &evaluator, const Node &mod);
-Node extracted_callee(Evaluator &evaluator, const Node &func,
-                      const Node &nodes);
-Node unique_callees(Evaluator &evaluator, const Node &mod);
+NodeOrCID candidates(Evaluator &evaluator, NodeRef options, NodeRef func);
+NodeOrCID candidates_total(Evaluator &evaluator, NodeRef options, NodeRef mod);
+NodeOrCID extracted_callee(Evaluator &evaluator, NodeRef func, NodeRef nodes);
+NodeOrCID unique_callees(Evaluator &evaluator, NodeRef candidates_options,
+                         NodeRef mod);
 
 } // end namespace smout
 

@@ -74,12 +74,15 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   return evaluator;
 }
 
+static Node getCandidatesOptions() { return Node(node_map_arg); }
+
 // smout candidates
 
 static int Candidates() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate("smout.candidates_total", mod);
+  NodeRef result = evaluator->evaluate("smout.candidates_total",
+                                       getCandidatesOptions(), mod);
   llvm::outs() << "\nTotal candidates: " << *result << "\n";
   return 0;
 }
@@ -89,7 +92,8 @@ static int Candidates() {
 static int ExtractCallees() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate("smout.unique_callees", mod);
+  NodeRef result =
+      evaluator->evaluate("smout.unique_callees", getCandidatesOptions(), mod);
   llvm::outs() << "\nUnique callee functions: " << *result << "\n";
   return 0;
 }

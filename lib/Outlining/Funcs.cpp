@@ -198,11 +198,12 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
   return Multibase::base64pad.encodeWithoutPrefix(bytes);
 }
 
-Node smout::candidates(Evaluator &evaluator, const Node &func) {
+NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
+                            NodeRef func) {
   ExitOnError Err("smout.candidates: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(
-      MemoryBufferRef(func.as<StringRef>(byte_string_arg), ""), context));
+      MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
 
   FunctionAnalysisManager am;
@@ -229,28 +230,29 @@ Node smout::candidates(Evaluator &evaluator, const Node &func) {
   return result;
 }
 
-Node smout::candidates_total(Evaluator &evaluator, const Node &mod) {
+NodeOrCID smout::candidates_total(Evaluator &evaluator, NodeRef options,
+                                  NodeRef mod) {
   std::vector<Future> func_candidates;
-  for (auto &item : mod["functions"].map_range())
-    func_candidates.emplace_back(
-        evaluator.evaluateAsync("smout.candidates", item.value().as<CID>()));
+  for (auto &item : (*mod)["functions"].map_range())
+    func_candidates.emplace_back(evaluator.evaluateAsync(
+        "smout.candidates", options, item.value().as<CID>()));
   std::size_t total = 0;
   for (auto &future : func_candidates) {
     for (auto &item : future->map_range())
       total += item.value().size();
   }
-  return total;
+  return Node(total);
 }
 
-Node smout::extracted_callee(Evaluator &evaluator, const Node &func,
-                             const Node &nodes) {
+NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
+                                  NodeRef nodes) {
   ExitOnError Err("smout.extracted.callee: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(
-      MemoryBufferRef(func.as<StringRef>(byte_string_arg), ""), context));
+      MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
 
-  SparseBitVector<> bv = decodeBitVector(nodes);
+  SparseBitVector<> bv = decodeBitVector(*nodes);
 
   FunctionAnalysisManager am;
   // TODO: Would it be faster to just register the analyses we need?
@@ -268,24 +270,23 @@ Node smout::extracted_callee(Evaluator &evaluator, const Node &func,
   return Node(byte_string_arg, buffer);
 }
 
-Node smout::unique_callees(Evaluator &evaluator, const Node &mod) {
+NodeOrCID smout::unique_callees(Evaluator &evaluator,
+                                NodeRef candidates_options, NodeRef mod) {
   std::vector<std::pair<CID, Future>> func_candidates;
-  for (auto &item : mod["functions"].map_range()) {
+  for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
-        func_cid, evaluator.evaluateAsync("smout.candidates", func_cid));
+        func_cid, evaluator.evaluateAsync("smout.candidates",
+                                          candidates_options, func_cid));
   }
   std::vector<Future> callees;
   for (auto &future : func_candidates) {
     const CID &func_cid = future.first;
     Future &result = future.second;
-    for (auto &item : result->map_range()) {
-      for (auto &candidate : item.value().list_range()) {
-        const CID nodes_cid = evaluator.getStore().put(candidate["nodes"]);
-        callees.emplace_back(evaluator.evaluateAsync("smout.extracted.callee",
-                                                     func_cid, nodes_cid));
-      }
-    }
+    for (auto &item : result->map_range())
+      for (auto &candidate : item.value().list_range())
+        callees.emplace_back(evaluator.evaluateAsync(
+            "smout.extracted.callee", func_cid, candidate["nodes"]));
   }
   StringSet unique;
   for (auto &result : callees) {
@@ -293,5 +294,5 @@ Node smout::unique_callees(Evaluator &evaluator, const Node &mod) {
     unique.insert(
         StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
   }
-  return unique.size();
+  return Node(unique.size());
 }

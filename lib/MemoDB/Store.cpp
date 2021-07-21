@@ -9,6 +9,18 @@
 
 using namespace memodb;
 
+NodeRef::NodeRef(Store &store, const NodeRef &other)
+    : store(store), cid(other.cid), node(other.node) {}
+
+NodeRef::NodeRef(Store &store, const NodeOrCID &node_or_cid) : store(store) {
+  const NodeOrCID::BaseType &base = node_or_cid;
+  std::visit(Overloaded{
+                 [&](const CID &cid) { this->cid = cid; },
+                 [&](const Node &node) { this->node = node; },
+             },
+             base);
+}
+
 NodeRef::NodeRef(Store &store, const CID &cid) : store(store), cid(cid) {}
 
 NodeRef::NodeRef(Store &store, const CID &cid, const Node &node)

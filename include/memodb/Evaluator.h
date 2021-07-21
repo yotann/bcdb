@@ -57,7 +57,7 @@ public:
 
   template <typename... Params>
   NodeRef evaluate(llvm::StringRef name, Params... args) {
-    return evaluate(Call(name, {args...}));
+    return evaluate(Call(name, {NodeRef(getStore(), args).getCID()...}));
   }
 
   // Evaluate a call, potentially using the thread pool. Returns a Future, so
@@ -67,23 +67,23 @@ public:
 
   template <typename... Params>
   Future evaluateAsync(llvm::StringRef name, Params... args) {
-    return evaluateAsync(Call(name, {args...}));
+    return evaluateAsync(Call(name, {NodeRef(getStore(), args).getCID()...}));
   }
 
   // Register a function that can be evaluated and cached.
   void registerFunc(llvm::StringRef name,
-                    std::function<Node(Evaluator &, const Call &)> func);
+                    std::function<NodeOrCID(Evaluator &, const Call &)> func);
 
   template <typename... Params>
   void registerFunc(llvm::StringRef name,
-                    Node (*func)(Evaluator &, Params...)) {
+                    NodeOrCID (*func)(Evaluator &, Params...)) {
     registerFunc(name,
                  funcImpl(name, func, std::index_sequence_for<Params...>{}));
   }
 
 private:
   std::unique_ptr<Store> store;
-  llvm::StringMap<std::function<Node(Evaluator &, const Call &)>> funcs;
+  llvm::StringMap<std::function<NodeOrCID(Evaluator &, const Call &)>> funcs;
 
   std::vector<std::thread> threads;
   std::mutex work_mutex;
@@ -96,13 +96,14 @@ private:
   std::mutex stderr_mutex;
 
   template <typename... Params, std::size_t... indexes>
-  std::function<Node(Evaluator &, const Call &)>
-  funcImpl(llvm::StringRef name, Node (*func)(Evaluator &, Params...),
+  std::function<NodeOrCID(Evaluator &, const Call &)>
+  funcImpl(llvm::StringRef name, NodeOrCID (*func)(Evaluator &, Params...),
            std::index_sequence<indexes...>) {
-    return [=](Evaluator &evaluator, const Call &call) -> Node {
+    return [=](Evaluator &evaluator, const Call &call) -> NodeOrCID {
       if (call.Args.size() != sizeof...(Params))
         llvm::report_fatal_error("Incorrect number of arguments for " + name);
-      return func(evaluator, evaluator.getStore().get(call.Args[indexes])...);
+      return func(evaluator,
+                  NodeRef(evaluator.getStore(), call.Args[indexes])...);
     };
   }
 

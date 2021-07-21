@@ -12,14 +12,14 @@ using namespace memodb;
 
 namespace {
 
-Node nullary(Evaluator &) { return "nullary"; }
+NodeOrCID nullary(Evaluator &) { return Node("nullary"); }
 
-Node unary(Evaluator &, const Node &arg) {
-  return Node(node_map_arg, {{"unary", arg}});
+NodeOrCID unary(Evaluator &, NodeRef arg) {
+  return Node(node_map_arg, {{"unary", *arg}});
 }
 
-Node binary(Evaluator &, const Node &arg0, const Node &arg1) {
-  return arg0.as<int>() - arg1.as<int>();
+NodeOrCID binary(Evaluator &, NodeRef arg0, NodeRef arg1) {
+  return Node(arg0->as<int>() - arg1->as<int>());
 }
 
 TEST(EvaluatorTest, Nullary) {
