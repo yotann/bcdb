@@ -102,17 +102,21 @@ static cl::opt<std::string>
 static Name GetNameFromURI(llvm::StringRef URI) {
   auto Parsed = ::URI::parse(URI);
   if (!Parsed || !Parsed->host.empty() || Parsed->port != 0 ||
-      !Parsed->query_params.empty() || !Parsed->fragment.empty() ||
-      !Parsed->rootless)
+      !Parsed->query_params.empty() || !Parsed->fragment.empty())
     report_fatal_error("invalid name URI");
-  if (Parsed->scheme == "head" && Parsed->path_segments.size() == 1) {
-    return Head(Parsed->path_segments[0]);
+  if (Parsed->scheme == "head") {
+    auto head_str = Parsed->getPathString();
+    if (!head_str)
+      report_fatal_error("invalid head URI");
+    return Head(*head_str);
   } else if (Parsed->scheme == "id" && Parsed->path_segments.size() == 1) {
+    if (!Parsed->rootless)
+      report_fatal_error("invalid id URI");
     return *CID::parse(Parsed->path_segments[0]);
   } else if (Parsed->scheme == "call") {
     std::vector<CID> Args;
-    if (Parsed->path_segments.empty())
-      report_fatal_error("invalid name URI");
+    if (!Parsed->rootless || Parsed->path_segments.empty())
+      report_fatal_error("invalid call URI");
     auto FuncName = Parsed->path_segments.front();
     for (const auto &Arg : llvm::ArrayRef(Parsed->path_segments).drop_front())
       Args.emplace_back(*CID::parse(Arg));

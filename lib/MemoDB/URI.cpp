@@ -107,11 +107,15 @@ std::optional<URI> URI::parse(StringRef str, bool allow_dot_segments) {
 
 std::optional<std::string> URI::getPathString() const {
   std::string result;
+  if (!rootless)
+    result += "/";
   for (const auto &segment : path_segments) {
     if (StringRef(segment).contains('/'))
       return std::nullopt;
-    result += "/" + segment;
+    result += segment + "/";
   }
+  if (!path_segments.empty())
+    result.pop_back();
   return result;
 }
 
