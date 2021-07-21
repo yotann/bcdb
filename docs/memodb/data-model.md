@@ -30,7 +30,7 @@ can hold one of the following kinds of data:
 - A byte string, containing arbitrary bytes.
 - A link, which consists of a single CID representing a reference to another
   Node that is stored separately.
-- A lists containing an arbitrary ordered sequence of other Nodes. Nodes in the
+- A list, containing an arbitrary ordered sequence of other Nodes. Nodes in the
   same list may have different kinds.
 - A map, containing a mapping from text string keys to arbitrary other values.
   Duplicate keys are prohibited, and ordering of map elements is insignificant.
@@ -208,11 +208,14 @@ A Head is simply a user-friendly way of assigning an arbitrary textual name to
 a Node. A single Node may have an arbitrary number of names assigned to it; a
 single name may be assigned to at most one Node.
 
+A head name must be a valid Unicode string, and it must not be the empty
+string.
+
 ## Call
 
 A Call caches the result of applying a function (identified by a textual name)
-to zero or more Nodes as arguments. When the same function is called on the
-same arguments in the future, MemoDB can look up the cached result instead of
+to one or more Nodes as arguments. When the same function is called on the same
+arguments in the future, MemoDB can look up the cached result instead of
 recalculating it.
 
 For best results, the function should be a pure, deterministic function of its
@@ -228,11 +231,16 @@ MemoDB store implementations are optimized for Calls with a small number of
 arguments (up to 4 or so). If more arguments are desired, consider combining
 multiple arguments into a single map or list Node.
 
+A function name must be a valid Unicode string, and it must not be the empty
+string. Calls must have at least one argument, but this requirement is not yet
+enforced.
+
 ## References and garbage collection
 
 MemoDB stores can keep track of which Nodes link to which other Nodes. This is
-useful for debugging; the `memodb refs-to` command can be used recursively to
-find which Heads and Calls refer (directly or indirectly) to a given Node.
+useful for debugging; the `memodb refs-to` and `memodb paths-to` commands can
+be used to find which Heads and Calls refer (directly or indirectly) to a given
+Node.
 
 Note that store implementations do not necessarily track every link. As of this
 writing, the `car` store doesn't track links at all, and the `rocksdb` store

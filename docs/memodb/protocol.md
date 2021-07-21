@@ -1,5 +1,8 @@
 # MemoDB Protocol
 
+**OBSOLETE:** This protocol is being replaced with the REST API (which will use
+a similar design).
+
 This protocol is used by both clients and workers to connect to a MemoDB
 broker. The broker accepts jobs from clients that need to be processed, and
 forwards them to workers; when a worker has finished a job and produced a

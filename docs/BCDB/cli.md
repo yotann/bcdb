@@ -95,4 +95,15 @@ linking (using `clang`).
 Usage:
 
 1. `bc-imitate annotate input.bc -binary input.elf -o annotated.bc`
-2. `bc-imitate clang -O2 annotated.bc -o output.elf`
+2. Perform arbitrary optimizations on `annotated.bc`
+3. `bc-imitate clang -O2 annotated.bc -o output.elf`
+
+Alternatively, if you have an ELF binary with embedded LLVM bitcode (via `clang
+-fembed-bitcode` or `swiftc -embed-bitcode`), you can use `bc-imitate extract`
+to extract and annotate the bitcode in a single step.
+
+Usage:
+
+1. `bc-imitate extract input.elf -o annotated.bc`
+2. Perform arbitrary optimizations on `annotated.bc`
+3. `bc-imitate clang -O2 annotated.bc -o output.elf`

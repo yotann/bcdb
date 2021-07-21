@@ -168,7 +168,7 @@ refers to this encoding as `base64pad`.
 #### Rationale
 
 Base64 is probably the most widely supported binary-to-text encoding, and the
-base variant (not base64url) is the most widely support variant.
+base variant (not base64url) is the most widely supported variant.
 
 Padding could be made optional. However, padding is required by some useful
 implementations like Python's `base64` module and the Busybox/Coreutils
@@ -231,15 +231,10 @@ between a MemoDB map like `{float: 1}` and a MemoDB float like `1.0`. The
 former will be represented as `{"map":{"float":1}}`, and the latter will be
 represented as `{"float":1}`.
 
-The format could enforce determinism, specifying element order and other
-details so a given MemoDB Node would always be encoded as the same JSON string.
-However, this would create too much extra work for clients. When determinism is
-important, CBOR should be used instead.
-
 ## Determinism
 
 Clients need not produce deterministic JSON for a given Node. They may use
-arbitrary whitespace, put object elements in arbitrary orders, and make other
+arbitrary whitespace, put object elements in an arbitrary order, and make other
 decisions nondeterministically as long as the result is valid JSON.
 
 The MemoDB server will produce deterministic JSON for a given Node, using the
@@ -249,7 +244,10 @@ following rules:
 - Object elements will be in the same order that would be used for
   deterministically encoded CBOR. That is, shorter names come before longer
   ones, and names with the same length are ordered lexicographically.
-- Escape codes in strings will only be used when necessary.
+- String characters that MUST be escaped will always be escaped. Aside from
+  those, printable ASCII characters will never be escaped. The decision of
+  whether to escape other characters will be made in an unspecified but
+  deterministic manner.
 - The choice between escape codes like `\u000a`, `\u000A`, and `\n` will be
   made in an unspecified but deterministic manner.
 - Floats will be formatted in an unspecified but deterministic manner.
@@ -257,7 +255,7 @@ following rules:
 #### Rationale
 
 Requiring clients to be deterministic would demand too much extra effort of
-them.
+them. Clients that prefer to be deterministic can use CBOR instead.
 
 The server needs to produce deterministic JSON in order for the HTTP ETag
 header to be valid, allowing cached JSON responses to be validated.

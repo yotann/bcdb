@@ -1,22 +1,26 @@
 # MemoDB REST API
 
 MemoDB comes with its own REST server that can be used to access all contents
-of the Store, following the [MemoDB data model]. To start the server, run:
+of the Store, following the [MemoDB data model]. In the future, the REST server
+will also support clients to submit tasks, and distribute those tasks to
+distributed workers for processing.
+
+To start the server, run:
 
 `memodb-server --store=sqlite:/tmp/memodb.db http://127.0.0.1:7683/`
 
 **WARNING:** The server code has not been inspected for security, and it may
-well have arbitrary code execution vulnerabilities. If nothing else, it
-certainly has lots of DoS vulnerabilities. Do not expose the server to the
-Internet, unless you put it behind an encrypted, authenticating proxy.
+well have severe security vulnerabilities. If nothing else, it certainly has
+lots of DoS vulnerabilities. Do not expose the server to the Internet, unless
+you put it behind an encrypting, authenticating proxy.
 
 ## Overview
 
 ### Data formats and content negotiation
 
-All successful requests and responses that include body data can be represented
-using Nodes in the [MemoDB data model]. The server supports several different
-formats for these requests and responses:
+For successful requests and responses that include body data, the body data can
+always be represented using Nodes in the [MemoDB data model]. The server
+supports several different formats for these requests and responses:
 
 - `application/cbor`: [CBOR] binary data, supports all Nodes.
 - `application/json`: [MemoDB JSON] textual data, supports all Nodes. Please
@@ -26,8 +30,8 @@ formats for these requests and responses:
 - `text/html`: for responses only, a web page displaying the Node for debugging
   purposes.
 
-Error responses are not represented using Nodes. They also support multiple
-formats:
+Unlike successful responses, error responses are not represented using Nodes.
+They support multiple formats of their own:
 
 - `application/problem+json`: a problem detail in the format specified by
   [RFC 7807].
@@ -64,7 +68,7 @@ between client and server. Otherwise, things may not work properly.
 
 ## CID endpoints
 
-### Get a Node from its CID
+### Get a Node by looking up its CID
 
 ```http
 GET /cid/:cid HTTP/1.1
@@ -126,9 +130,6 @@ Content-Type: application/json
 
 The full path for a call looks like this: `/call/add/uAXEAAQI,uAXEAAQI`. The
 arguments are comma-separated.
-
-**FIXME:** This syntax makes it impossible to handle nullary funcs (which have
-no arguments). I should probably prohibit those anyway.
 
 ### Get a list of all func URIs
 

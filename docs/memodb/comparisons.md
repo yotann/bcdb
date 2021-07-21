@@ -1,4 +1,4 @@
-# Comparisons of libraries
+# Comparisons of protocols and libraries
 
 ## Database libraries
 
@@ -62,7 +62,7 @@ API is designed to use a CoAP-compatible subset of HTTP, in case we ever want
 to implement it in the future. (For instance, redirects are never used.)
 
 - ✔️ Lightweight and efficient.
-- ✔️ Removes unnecessary featuers from HTTP.
+- ✔️ Removes unnecessary features from HTTP.
 - ✔️ Proxies can add caching, authentication, encryption, etc.
 - ✔️ Content type negotiation.
 - ✔️ Optional compression.
@@ -70,7 +70,7 @@ to implement it in the future. (For instance, redirects are never used.)
 - ✔️ Optional authentication.
 - ✔️ Range requests.
 - ✔️ Supports UDP, TCP, and WebSockets.
-- :x: Limited support.
+- :x: Not widely supported.
 
 ### MQTT
 
@@ -85,7 +85,7 @@ to implement it in the future. (For instance, redirects are never used.)
   - MQTT 5 adds some support for request/reply, but many client libraries don't
     support it yet.
 
-### Minimalist request reply (NNG, ZeroMQ, custom)
+### Minimalist request/reply (NNG, ZeroMQ, or custom)
 
 - ✔️ Lightweight and efficient.
 - :x: No standardized support for caching proxies, encryption, or
@@ -99,6 +99,11 @@ One point of difficulty is that MemoDB needs to work even with exceptions and RT
 That's because some official LLVM builds have them disabled, which means
 in order to use templates like `llvm::cl::opt` we need to have them disabled too.
 This rules out a lot of interesting libraries like Boost.Beast.
+
+We also need the ability to respond asynchronously to requests, in case a
+client requests a func evaluation and we're waiting for a distributed worker to
+perform it. We also need to set per-request timeouts so can give up at the
+appropriate time.
 
 ### NNG
 

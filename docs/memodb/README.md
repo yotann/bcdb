@@ -27,7 +27,7 @@ See the [MemoDB data model].
 
 See the [MemoDB data model] and [comparisons of protocols and libraries].
 
-[class list]: ./classes.md
+[C++ class list]: ./classes.md
 [comparisons of protocols and libraries]: ./comparisons.md
 [MemoDB data model]: ./data-model.md
 [REST API documentation]: ./rest-api.md
