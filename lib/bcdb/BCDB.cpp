@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "bcdb/AlignBitcode.h"
+#include "bcdb/GlobalReferenceGraph.h"
 #include "bcdb/Split.h"
-#include "bcdb/Util.h"
 #include "memodb/Store.h"
 
 using namespace bcdb;

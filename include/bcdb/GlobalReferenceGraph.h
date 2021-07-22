@@ -1,5 +1,5 @@
-#ifndef BCDB_UTIL_H
-#define BCDB_UTIL_H
+#ifndef BCDB_GLOBALREFERENCEGRAPH_H
+#define BCDB_GLOBALREFERENCEGRAPH_H
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/GraphTraits.h>
@@ -54,13 +54,4 @@ template <> struct GraphTraits<bcdb::GlobalReferenceGraph *> {
 };
 } // end namespace llvm
 
-namespace bcdb {
-std::unique_ptr<llvm::Module> CloneModuleCorrectly(const llvm::Module &M);
-std::unique_ptr<llvm::Module>
-CloneModuleCorrectly(const llvm::Module &M, llvm::ValueToValueMapTy &VMap);
-std::unique_ptr<llvm::Module> CloneModuleCorrectly(
-    const llvm::Module &M, llvm::ValueToValueMapTy &VMap,
-    llvm::function_ref<bool(const llvm::GlobalValue *)> ShouldCloneDefinition);
-} // end namespace bcdb
-
-#endif // BCDB_UTIL_H
+#endif // BCDB_GLOBALREFERENCEGRAPH_H

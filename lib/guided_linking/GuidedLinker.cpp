@@ -26,7 +26,7 @@
 #include <set>
 
 #include "Merge.h"
-#include "Util.h"
+#include "bcdb/GlobalReferenceGraph.h"
 #include "bcdb/LLVMCompat.h"
 
 namespace {
@@ -223,10 +223,10 @@ void GLMerger::PrepareToRename() {
   for (auto &Item : ModRemainders) {
     Item.second->setModuleIdentifier(Item.first());
 
-    // In theory we could just call CloneModuleCorrectly(*Item.second) to get
-    // the wrapper module. But it seems like that might cause problems with
-    // IRMover and type completion, because CloneModuleCorrectly doesn't create
-    // copies of opaque types:
+    // In theory we could just call CloneModule(*Item.second) to get the
+    // wrapper module. But CloneModule can't handle blockaddresses in global
+    // variable initializers, and it might also cause problems with IRMover and
+    // type completion, because it doesn't create copies of opaque types:
     // https://lists.llvm.org/pipermail/llvm-dev/2018-March/122151.html
     ExitOnError Err("GLMerger::PrepareToRename: ");
     std::map<std::string, std::string> PartIDs;

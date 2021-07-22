@@ -21,8 +21,8 @@
 #include <set>
 #include <vector>
 
-#include "Util.h"
 #include "bcdb/BCDB.h"
+#include "bcdb/GlobalReferenceGraph.h"
 #include "bcdb/Split.h"
 
 using namespace bcdb;

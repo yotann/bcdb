@@ -10,10 +10,10 @@ add_llvm_library(libbcdb
   AlignBitcode.cpp
   BCDB.cpp
   BitstreamReader.cpp
+  GlobalReferenceGraph.cpp
   ImitateBinary.cpp
   Join.cpp
   Split.cpp
-  Util.cpp
 )
 target_link_libraries(libbcdb PRIVATE
   libmemodb
