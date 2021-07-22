@@ -101,26 +101,24 @@ static cl::opt<std::string>
 
 static Name GetNameFromURI(llvm::StringRef URI) {
   auto Parsed = ::URI::parse(URI);
-  if (!Parsed || !Parsed->host.empty() || Parsed->port != 0 ||
+  if (!Parsed || !Parsed->scheme.empty() || !Parsed->host.empty() ||
+      Parsed->port != 0 || Parsed->path_segments.empty() || Parsed->rootless ||
       !Parsed->query_params.empty() || !Parsed->fragment.empty())
     report_fatal_error("invalid name URI");
-  if (Parsed->scheme == "head") {
-    auto head_str = Parsed->getPathString();
-    if (!head_str)
-      report_fatal_error("invalid head URI");
-    return Head(*head_str);
-  } else if (Parsed->scheme == "id" && Parsed->path_segments.size() == 1) {
-    if (!Parsed->rootless)
-      report_fatal_error("invalid id URI");
-    return *CID::parse(Parsed->path_segments[0]);
-  } else if (Parsed->scheme == "call") {
-    std::vector<CID> Args;
-    if (!Parsed->rootless || Parsed->path_segments.empty())
-      report_fatal_error("invalid call URI");
-    auto FuncName = Parsed->path_segments.front();
-    for (const auto &Arg : llvm::ArrayRef(Parsed->path_segments).drop_front())
-      Args.emplace_back(*CID::parse(Arg));
-    return Call(FuncName, Args);
+  if (Parsed->path_segments[0] == "head" && Parsed->path_segments.size() >= 2) {
+    return Head(Parsed->getPathString(1));
+  } else if (Parsed->path_segments[0] == "cid" &&
+             Parsed->path_segments.size() == 2) {
+    return *CID::parse(Parsed->path_segments[1]);
+  } else if (Parsed->path_segments[0] == "call" &&
+             Parsed->path_segments.size() == 3) {
+    std::vector<CID> args;
+    SmallVector<StringRef, 8> arg_strs;
+    const auto &func_name = Parsed->path_segments[1];
+    StringRef(Parsed->path_segments[2]).split(arg_strs, ',');
+    for (StringRef arg_str : arg_strs)
+      args.emplace_back(*CID::parse(arg_str));
+    return Call(func_name, args);
   } else {
     report_fatal_error("invalid name URI");
   }
@@ -144,7 +142,7 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
         !Parsed->query_params.empty() || !Parsed->fragment.empty())
       report_fatal_error("invalid input URI");
     Buffer =
-        Err(errorOrToExpected(MemoryBuffer::getFile(*Parsed->getPathString())));
+        Err(errorOrToExpected(MemoryBuffer::getFile(Parsed->getPathString())));
   } else {
     Name Name = GetNameFromURI(URI);
     return Db.resolveOptional(Name);
@@ -273,12 +271,8 @@ static int Invalidate() {
 
 static int ListCalls() {
   auto Db = Store::open(GetStoreUri());
-  for (const Call &call : Db->list_calls(FuncName)) {
-    outs() << "call:" << call.Name;
-    for (const auto &Arg : call.Args)
-      outs() << "/" << Arg;
-    outs() << "\n";
-  }
+  for (const Call &call : Db->list_calls(FuncName))
+    outs() << call << "\n";
   return 0;
 }
 
@@ -286,8 +280,11 @@ static int ListCalls() {
 
 static int ListFuncs() {
   auto Db = Store::open(GetStoreUri());
-  for (llvm::StringRef Func : Db->list_funcs())
-    outs() << Func << "\n";
+  for (llvm::StringRef Func : Db->list_funcs()) {
+    URI uri;
+    uri.path_segments = {"call", Func.str()};
+    outs() << uri.encode() << "\n";
+  }
   return 0;
 }
 
@@ -296,7 +293,7 @@ static int ListFuncs() {
 static int ListHeads() {
   auto Db = Store::open(GetStoreUri());
   for (const Head &head : Db->list_heads())
-    outs() << "head:" << head.Name << "\n";
+    outs() << head << "\n";
   return 0;
 }
 
@@ -327,7 +324,7 @@ static int Put() {
     errs() << "not found\n";
     return 1;
   }
-  outs() << "id:" << *Ref << "\n";
+  outs() << Name(*Ref) << "\n";
   return 0;
 }
 
@@ -340,20 +337,8 @@ static int RefsTo() {
     errs() << "not found\n";
     return 1;
   }
-  for (const Name &Name : Db->list_names_using(*Ref)) {
-    if (auto head = std::get_if<Head>(&Name)) {
-      outs() << "head:" << head->Name << "\n";
-    } else if (auto ParentRef = std::get_if<CID>(&Name)) {
-      outs() << "id:" << *ParentRef << "\n";
-    } else if (auto call = std::get_if<Call>(&Name)) {
-      outs() << "call:" << call->Name;
-      for (const auto &Arg : call->Args)
-        outs() << "/" << Arg;
-      outs() << "\n";
-    } else {
-      llvm_unreachable("impossible value for Name");
-    }
-  }
+  for (const Name &Name : Db->list_names_using(*Ref))
+    outs() << Name << "\n";
   return 0;
 }
 

@@ -5,14 +5,17 @@ This Nixpkgs overlay can automatically build many Linux packages with LLVM bitco
 ```shell
 # Build the "hello" program with embedded bitcode.
 cd bcdb/nix/bitcode-overlay
-nix-build -A pkgsBitcode.hello
+nix-build -A pkgsBitcode.lz4
+
+# Find the executables or shared libraries you want.
+ls result*/bin/lz4
 
 # The embedded bitcode is stored in the ".llvmbc" section.
-objdump -h result/bin/hello | grep llvmbc
+objdump -h result*/bin/lz4 | grep llvmbc
 
 # Use bc-imitate to extract and combine the bitcode,
 # and add some metadata about dynamic linking.
-bc-imitate extract result/bin/hello > hello.bc
+bc-imitate extract result*/bin/lz4 > lz4.bc
 ```
 
 ## Limitations
@@ -30,7 +33,10 @@ git clone https://github.com/lz4/lz4
 cd lz4
 
 # The exact options you need will vary from package to package.
-make CC=clang CFLAGS=-fembed-bitcode
+make lz4 CC=clang CFLAGS=-fembed-bitcode
+
+# The embedded bitcode is stored in the ".llvmbc" section.
+objdump -h lz4 | grep llvmbc
 
 # Extract the compiled bitcode.
 bc-imitate extract lz4 > lz4.bc

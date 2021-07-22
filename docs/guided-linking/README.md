@@ -52,7 +52,7 @@ functions, and syntactically identical functions are deduplicated.
 ```sh
 bcdb list-modules
 bcdb list-function-ids
-memodb paths-to id:99
+memodb paths-to /cid/99
 bcdb get-function --id=99 | llvm-dis
 ```
 

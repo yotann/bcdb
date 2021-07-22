@@ -21,7 +21,7 @@ bcdb add -name lz4 lz4.bc
 Behind the scenes, the `lz4.bc` bitcode module is split into separate
 functions, and syntactically identical functions are deduplicated.
 
-### 3. Perform outlining
+### 3. Perform outlining analysis
 
 ```sh
 smout extract-callees --name=lz4
@@ -30,10 +30,10 @@ smout extract-callees --name=lz4
 ### 4. Explore the outlining information
 
 ```sh
-# In the first window:
+# In one window:
 memodb-server http://127.0.0.1:51230/
 
-# In the second window:
+# In another window:
 curl http://127.0.0.1:51230/call
 ```
 

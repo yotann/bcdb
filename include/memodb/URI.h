@@ -17,9 +17,11 @@ public:
   static std::optional<URI> parse(llvm::StringRef str,
                                   bool allow_dot_segments = false);
 
-  // Returns path_segments joined by "/", with an extra "/" in front.
-  // Return std::nullopt if any path segment contains a "/".
-  std::optional<std::string> getPathString() const;
+  // Returns path_segments[first_index:] joined by "/". If first_index == 0 and
+  // rootless == false, there will be an extra "/" in front.
+  // WARNING: this function can return paths with dot segments, even if
+  // allow_dot_segments was false!
+  std::string getPathString(unsigned first_index = 0) const;
 
   // Encode the URI using normal form.
   std::string encode() const;

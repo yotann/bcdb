@@ -5,7 +5,7 @@
 ; RUN: llvm-as < %s | bcdb add -store rocksdb:%t -name b -
 ; RUN: bcdb get -store rocksdb:%t -name a | opt -verify -S | FileCheck %s
 ; RUN: bcdb get -store rocksdb:%t -name b | opt -verify -S | FileCheck %s
-; RUN: memodb paths-to -store rocksdb:%t id:$(bcdb list-function-ids -store rocksdb:%t) | FileCheck --check-prefix=REFS %s
+; RUN: memodb paths-to -store rocksdb:%t /cid/$(bcdb list-function-ids -store rocksdb:%t) | FileCheck --check-prefix=REFS %s
 
 ; CHECK: define i32 @func(i32 %x, i32 %y)
 define i32 @func(i32 %x, i32 %y) {
@@ -15,5 +15,5 @@ define i32 @func(i32 %x, i32 %y) {
   ret i32 %z
 }
 
-; REFS: heads["a"]["functions"]["func"]
-; REFS: heads["b"]["functions"]["func"]
+; REFS: /head/a["functions"]["func"]
+; REFS: /head/b["functions"]["func"]

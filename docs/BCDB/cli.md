@@ -48,7 +48,7 @@ bcdb list-function-ids -store sqlite:example.bcdb -name /tmp/x.bc
 # Retrieve a single function as an LLVM bitcode module.
 bcdb get-function -store sqlite:example.bcdb -id 0 -o /tmp/function0.bc
 # Find out where a particular function came from.
-memodb paths-to -store sqlite:example.bcdb id:0
+memodb paths-to -store sqlite:example.bcdb /cid/0
 ```
 
 ## Other subcommands

@@ -44,7 +44,7 @@ let
         if hasBC "$link"; then
           elf=$(readlink -e "$link")
           echo "Copying symlink $link -> $elf"
-          memodb set head:"$link" head:"$elf"
+          memodb set /head"$link" head:"$elf"
         fi
       done
     done < ${referencesFile packages}
@@ -112,7 +112,7 @@ let
 
         # If we already processed this module under a different name, just make
         # a symlink.
-        vid=$(memodb put head:"$mod")
+        vid=$(memodb put /head"$mod")
         if [ ''${ALREADY_HANDLED[$vid]+_} ]; then
           ln -s "''${ALREADY_HANDLED[$vid]}" "$elf"
           continue
@@ -169,7 +169,7 @@ let
     declare -a MODS
 
     while read mod; do
-      vid=$(memodb put head:"$mod")
+      vid=$(memodb put /head"$mod")
       mkdir -p "$(dirname "$out/$mod")"
 
       # If we already processed this module under a different name, just make

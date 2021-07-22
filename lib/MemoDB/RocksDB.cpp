@@ -265,7 +265,7 @@ void RocksDBStore::open(llvm::StringRef uri, bool create_if_missing) {
   std::vector<rocksdb::ColumnFamilyHandle *> FamilyHandles;
   rocksdb::OptimisticTransactionDB *TmpDB;
   checkStatus(rocksdb::OptimisticTransactionDB::Open(
-      DBOptions, {}, *Parsed->getPathString(), FamilyDescs, &FamilyHandles,
+      DBOptions, {}, Parsed->getPathString(), FamilyDescs, &FamilyHandles,
       &TmpDB));
   DB.reset(TmpDB);
 

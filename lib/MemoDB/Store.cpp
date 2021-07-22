@@ -7,6 +7,9 @@
 #include <llvm/Support/raw_os_ostream.h>
 #include <sstream>
 
+#include "memodb/Multibase.h"
+#include "memodb/URI.h"
+
 using namespace memodb;
 
 NodeRef::NodeRef(Store &store, const NodeRef &other)
@@ -54,30 +57,42 @@ std::unique_ptr<Store> Store::open(llvm::StringRef uri,
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Head &head) {
-  return os << head.Name;
+  URI uri;
+  uri.path_segments = {"head", head.Name};
+  return os << uri.encode();
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Head &head) {
-  return os << head.Name;
+  URI uri;
+  uri.path_segments = {"head", head.Name};
+  return os << uri.encode();
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Call &call) {
-  os << "call:" << call.Name;
-  for (const CID &Arg : call.Args)
-    os << "/" << Arg;
-  return os;
+  std::string args;
+  for (const CID &arg : call.Args)
+    args += arg.asString(Multibase::base64url) + ",";
+  args.pop_back();
+  URI uri;
+  uri.path_segments = {"call", call.Name, std::move(args)};
+  return os << uri.encode();
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Call &call) {
-  os << "call:" << call.Name;
-  for (const CID &Arg : call.Args)
-    os << "/" << Arg;
-  return os;
+  std::string args;
+  for (const CID &arg : call.Args)
+    args += arg.asString(Multibase::base64url) + ",";
+  args.pop_back();
+  URI uri;
+  uri.path_segments = {"call", call.Name, std::move(args)};
+  return os << uri.encode();
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Name &name) {
-  if (const Head *head = std::get_if<Head>(&name)) {
-    os << "heads[" << Node(utf8_string_arg, head->Name) << "]";
+  if (const CID *cid = std::get_if<CID>(&name)) {
+    URI uri;
+    uri.path_segments = {"cid", cid->asString(Multibase::base64url)};
+    os << uri.encode();
   } else {
     name.visit([&](auto X) { os << X; });
   }
@@ -85,8 +100,10 @@ std::ostream &memodb::operator<<(std::ostream &os, const Name &name) {
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Name &name) {
-  if (const Head *head = std::get_if<Head>(&name)) {
-    os << "heads[" << Node(utf8_string_arg, head->Name) << "]";
+  if (const CID *cid = std::get_if<CID>(&name)) {
+    URI uri;
+    uri.path_segments = {"cid", cid->asString(Multibase::base64url)};
+    os << uri.encode();
   } else {
     name.visit([&](auto X) { os << X; });
   }
