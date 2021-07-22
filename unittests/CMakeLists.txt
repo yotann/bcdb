@@ -9,5 +9,5 @@ function(add_llvm_unittest test_dirname)
     ${PROJECT_SOURCE_DIR}/third_party/googletest/googlemock/include)
 endfunction()
 
-add_subdirectory(MemoDB)
-add_subdirectory(Outlining)
+add_subdirectory(memodb)
+add_subdirectory(outlining)

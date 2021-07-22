@@ -1,9 +1,0 @@
-set(LLVM_LINK_COMPONENTS
-  LTO
-  Support
-  TransformUtils
-)
-add_llvm_library(BCDBSplit
-  Join.cpp
-  Split.cpp
-)

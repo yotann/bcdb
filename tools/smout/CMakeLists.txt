@@ -7,8 +7,8 @@ if(ENABLE_SMOUT)
     smout.cpp
   )
   target_link_libraries(smout PRIVATE
-    BCDB
-    BCDBOutlining
+    libbcdb
+    liboutlining
     nng::nng
   )
 endif(ENABLE_SMOUT)

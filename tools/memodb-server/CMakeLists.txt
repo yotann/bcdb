@@ -6,7 +6,7 @@ if(WITH_NNG)
     memodb-server.cpp
   )
   target_link_libraries(memodb-server PRIVATE
-    MemoDB
+    libmemodb
     nng::nng
   )
 endif(WITH_NNG)

@@ -13,8 +13,8 @@ The BCDB project has the following subprojects:
 - [Nix bitcode overlay]: Nix expressions to automatically build lots of Linux
   packages in the form of LLVM bitcode.
 
-[BCDB]: ./BCDB/README.md
-[Guided Linking]: ./guided-linking/README.md
+[BCDB]: ./bcdb/README.md
+[Guided Linking]: ./guided_linking/README.md
 [MemoDB]: ./memodb/README.md
 [Nix bitcode overlay]: ../nix/bitcode-overlay/README.md
-[Outlining]: ./Outlining/README.md
+[Outlining]: ./outlining/README.md

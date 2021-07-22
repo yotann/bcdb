@@ -6,5 +6,6 @@ add_llvm_tool(bcdb
   bcdb.cpp
 )
 target_link_libraries(bcdb PRIVATE
-  BCDB
+  libbcdb
+  libguided_linking
 )

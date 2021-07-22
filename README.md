@@ -13,7 +13,7 @@ The Bitcode Database (BCDB) is a research tool being developed as part of the
 - Stores huge amounts of LLVM bitcode in an SQLite or RocksDB database.
 - Automatically deduplicates bitcode at the function level.
 - Performs Guided Linking, which can optimize dynamically linked code as though
-  it were statically linked. See [`docs/guided-linking`](docs/guided-linking/)
+  it were statically linked. See [`docs/guided_linking`](docs/guided_linking/)
   for details and instructions.
 - Caches the results of analyses and optimizations.
 - Supports distributed computing for a code outlining optimization.
@@ -107,7 +107,7 @@ cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
 
 ## Usage
 
-- The BCDB proper: see [BCDB CLI](docs/BCDB/cli.md).
+- The BCDB proper: see [BCDB CLI](docs/bcdb/cli.md).
 - The Nixpkgs bitcode overlay: see [nix/bitcode-overlay](nix/bitcode-overlay/).
 - The guided linking experiments: see [nix/gl-experiments](nix/gl-experiments/).
 - Other subprojects: start from [docs/README.md](docs/README.md).

@@ -10,10 +10,10 @@
 #include <llvm/Support/Threading.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "Outlining/Funcs.h"
 #include "memodb/Evaluator.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
+#include "outlining/Funcs.h"
 
 using namespace llvm;
 using namespace memodb;

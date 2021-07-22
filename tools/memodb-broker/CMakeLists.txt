@@ -6,7 +6,7 @@ if(WITH_NNG)
     memodb-broker.cpp
   )
   target_link_libraries(memodb-broker PRIVATE
-    MemoDB
+    libmemodb
     nng::nng
   )
 endif(WITH_NNG)

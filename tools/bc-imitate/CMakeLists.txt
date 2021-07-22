@@ -8,5 +8,5 @@ add_llvm_tool(bc-imitate
   bc-imitate.cpp
 )
 target_link_libraries(bc-imitate PRIVATE
-  BCDBWholeProgram
+  libbcdb
 )

@@ -6,5 +6,5 @@ add_llvm_tool(bc-join
   bc-join.cpp
 )
 target_link_libraries(bc-join PRIVATE
-  BCDBSplit
+  libbcdb
 )

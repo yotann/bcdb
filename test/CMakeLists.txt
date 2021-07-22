@@ -3,8 +3,8 @@ configure_lit_site_cfg(
   ${CMAKE_CURRENT_BINARY_DIR}/lit.cfg.py
 )
 configure_lit_site_cfg(
-  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.cfg.py.in
-  ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.cfg.py
+  ${CMAKE_CURRENT_SOURCE_DIR}/unit/lit.cfg.py.in
+  ${CMAKE_CURRENT_BINARY_DIR}/unit/lit.cfg.py
 )
 
 set(LLVM_EXTERNAL_LIT ${CMAKE_SOURCE_DIR}/third_party/lit/lit.py CACHE STRING "Command used to spawn lit")
@@ -21,17 +21,12 @@ else()
   message(STATUS "Found FileCheck: ${FILECHECK_PATH}")
 endif()
 
-add_subdirectory(Align)
-add_subdirectory(BCDB)
-add_subdirectory(GuidedLinker)
-add_subdirectory(Merge)
-add_subdirectory(Mux)
-add_subdirectory(Outlining)
-add_subdirectory(Split)
-add_subdirectory(WholeProgram)
+add_subdirectory(bcdb)
+add_subdirectory(guided_linking)
+add_subdirectory(outlining)
 
 add_lit_testsuite(check-unit "Running unit tests"
-  ${CMAKE_CURRENT_BINARY_DIR}/Unit
+  ${CMAKE_CURRENT_BINARY_DIR}/unit
   DEPENDS UnitTests
 )
 

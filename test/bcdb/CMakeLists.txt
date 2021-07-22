@@ -1,0 +1,6 @@
+add_subdirectory(AlignBitcode)
+add_subdirectory(CAR)
+add_subdirectory(ImitateBinary)
+add_subdirectory(RocksDB)
+add_subdirectory(Split)
+add_subdirectory(SQLite)

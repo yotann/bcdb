@@ -17,7 +17,7 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "bcdb/WholeProgram.h"
+#include "bcdb/ImitateBinary.h"
 #include "memodb/ToolSupport.h"
 
 using namespace bcdb;
