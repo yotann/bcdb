@@ -1,5 +1,7 @@
 #include <cstdlib>
+#include <ctime>
 #include <memory>
+#include <mutex>
 #include <optional>
 
 #include <llvm/ADT/SmallVector.h>
@@ -51,6 +53,8 @@ static void checkErr(int err) {
   if (err)
     llvm::report_fatal_error(nng_strerror(err));
 }
+
+static std::mutex stdout_mutex;
 
 namespace {
 
@@ -151,9 +155,36 @@ struct NNGRequest : public HTTPRequest {
     auto body_str = body.toStringRef(buffer);
     checkErr(
         nng_http_res_copy_data(res.get(), body_str.data(), body_str.size()));
+    writeLog(body_str.size());
   }
 
-  void sendEmptyBody() override { sendHeader("Content-Length", "0"); }
+  void sendEmptyBody() override {
+    sendHeader("Content-Length", "0");
+    writeLog(0);
+  }
+
+  void writeLog(size_t body_size) {
+    // https://en.wikipedia.org/wiki/Common_Log_Format
+
+    StringRef ip_address = "-"; // TODO: NNG doesn't seem to expose this.
+
+    // TODO: ensure the locale is set correctly.
+    char time_buffer[32] = "";
+    std::time_t time = std::time(nullptr);
+    std::strftime(time_buffer, sizeof(time_buffer), "%d/%b/%Y:%H:%M:%S %z",
+                  std::localtime(&time));
+
+    SmallVector<char, 256> buffer;
+    auto line =
+        (ip_address + " - - [" + time_buffer + "] \"" + getMethodString() +
+         " " + nng_http_req_get_uri(req) + " " + nng_http_req_get_version(req) +
+         "\" " + Twine(nng_http_res_get_status(res.get())) + " " +
+         (body_size ? Twine(body_size) : Twine("-")))
+            .toStringRef(buffer);
+
+    std::lock_guard lock(stdout_mutex);
+    llvm::outs() << line << "\n";
+  }
 };
 } // end anonymous namespace
 
@@ -187,9 +218,10 @@ int main(int argc, char **argv) {
 
   checkErr(nng_http_server_start(http_server.get()));
 
-  while (true) {
+  llvm::errs() << "Server started!\n";
+
+  while (true)
     nng_msleep(1000);
-  }
 
   return 0;
 }
