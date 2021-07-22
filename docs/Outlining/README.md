@@ -34,7 +34,7 @@ smout extract-callees --name=lz4
 memodb-server http://127.0.0.1:51230/
 
 # In another window:
-curl http://127.0.0.1:51230/call
+curl -H "Accept: application/json" http://127.0.0.1:51230/call
 ```
 
 You can use the [REST API](../memodb/rest-api.md) to explore the outlining
@@ -42,12 +42,16 @@ results. The important functions are:
 
 - `smout.candidates`: for each original function, a list of all the possible
   outlining candidates. The candidates are grouped by the expected type of the
-  outlined callee function. Each candidate has the items `nodes` (indicates
-  which instructions would be outlined), `fixed_overhead` (estimated number of
-  bytes added if the first copy of the candidate is outlined), and
-  `savings_per_copy` (estimated number of bytes saved for each additional copy,
-  after the first one).
+  outlined callee function. Each candidate has these items:
+  - `nodes` indicates which ranges of instructions would be outlined. For
+    example, `[0, 1, 9, 12]` means that instructions 0, 9, 10, and 11 would be
+    outlined.
+  - `fixed_overhead` is the estimated number of bytes added if the first copy
+    of the candidate is outlined.
+  - `savings_per_copy` is the estimated number of bytes saved for each
+    additional copy outlined after the first one, reusing the same outlined
+    callee.
 - `smout.extracted.callee`: for each candidate, the LLVM bitcode of the
   outlined callee function. If two candidates have the same result for
-  `smout.extracted.callee`, they can both be outlined if only one copy of the
-  callee is added.
+  `smout.extracted.callee`, they can both be outlined sharing just one copy of
+  the callee.
