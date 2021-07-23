@@ -180,26 +180,28 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
     // TODO: calculate this stuff incrementally (store intermediate results in
     // the Candidate).
 
-    // For the first copy, we need to create a new function and call
-    // instruction.
-    candidate.fixed_overhead = candidate.bv.intersects(OutDep.CompilesToCall)
-                                   ? size_model->function_size_with_callees
-                                   : size_model->function_size_without_callees;
-    candidate.fixed_overhead += size_model->call_instruction_size;
-
-    // For each additional copy, we can delete the outlined instructions, but
-    // we need to add a new call instruction.
-    candidate.savings_per_copy = 0;
+    int candidate_size = 0;
     for (auto i : candidate.bv)
       if (auto ins = dyn_cast<Instruction>(OutDep.Nodes[i]))
-        candidate.savings_per_copy += size_model->instruction_sizes.lookup(ins);
-    candidate.savings_per_copy -= size_model->call_instruction_size;
+        candidate_size += size_model->instruction_sizes.lookup(ins);
+
+    // For each modified caller, we can delete the outlined instructions, but
+    // we need to add a new call instruction.
+    candidate.caller_savings =
+        candidate_size - size_model->call_instruction_size;
+
+    // For each new callee, we need to create a new function and fill it with
+    // instructions.
+    candidate.callee_size = candidate.bv.intersects(OutDep.CompilesToCall)
+                                ? size_model->function_size_with_callees
+                                : size_model->function_size_without_callees;
+    candidate.callee_size += candidate_size;
 
     // TODO: Provide options to change the profitability threshold. We might
     // want a stricter threshold like "must save at least 8 bytes if there are
     // 4 copies." Or, we might want to allow seemingly unprofitable candidates
     // just in case the size model is wrong.
-    if (candidate.savings_per_copy <= 0)
+    if (candidate.caller_savings <= 0)
       return;
 
     OutliningExtractor extractor(F, OutDep, candidate.bv);
@@ -219,8 +221,8 @@ void OutliningCandidates::print(raw_ostream &OS) const {
   for (const Candidate &candidate : Candidates) {
     OS << "candidate: [";
     OutDep.printSet(OS, candidate.bv);
-    OS << "], savings_per_copy " << candidate.savings_per_copy
-       << ", fixed_overhead " << candidate.fixed_overhead << ", type [";
+    OS << "], caller_savings " << candidate.caller_savings << ", callee_size "
+       << candidate.callee_size << ", type [";
     for (Type *type : candidate.arg_types)
       OS << ' ' << *type;
     OS << " ] => [";

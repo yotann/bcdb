@@ -228,8 +228,8 @@ NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
     group.emplace_back(
         Node(node_map_arg, {
                                {"nodes", encodeBitVector(candidate.bv)},
-                               {"fixed_overhead", candidate.fixed_overhead},
-                               {"savings_per_copy", candidate.savings_per_copy},
+                               {"callee_size", candidate.callee_size},
+                               {"caller_savings", candidate.caller_savings},
                            }));
   }
   return result;
@@ -326,8 +326,8 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
       for (auto &candidate : item.value().list_range()) {
         size_t m = x.size();
         x.emplace_back(problem.makeBoolVar(formatv("X{0}", m).str()));
-        s_m.emplace_back(candidate["savings_per_copy"].as<int>());
-        f_m.emplace_back(candidate["fixed_overhead"].as<int>());
+        s_m.emplace_back(candidate["caller_savings"].as<int>());
+        f_m.emplace_back(candidate["callee_size"].as<int>());
         for (size_t i : decodeBitVector(candidate["nodes"])) {
           if (overlaps.size() <= i)
             overlaps.resize(i + 1);

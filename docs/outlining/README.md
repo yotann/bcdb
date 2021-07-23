@@ -46,11 +46,10 @@ results. The important functions are:
   - `nodes` indicates which ranges of instructions would be outlined. For
     example, `[0, 1, 9, 12]` means that instructions 0, 9, 10, and 11 would be
     outlined.
-  - `fixed_overhead` is the estimated number of bytes added if the first copy
-    of the candidate is outlined.
-  - `savings_per_copy` is the estimated number of bytes saved for each
-    additional copy outlined after the first one, reusing the same outlined
-    callee.
+  - `callee_size` is the estimated number of bytes added in order to create the
+    outlined callee function.
+  - `caller_savings` is the estimated number of bytes saved in the outlined
+    caller function by performing outlining.
 - `smout.extracted.callee`: for each candidate, the LLVM bitcode of the
   outlined callee function. If two candidates have the same result for
   `smout.extracted.callee`, they can both be outlined sharing just one copy of

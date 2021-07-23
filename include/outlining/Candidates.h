@@ -28,8 +28,8 @@ class OutliningCandidates {
 public:
   struct Candidate {
     SparseBitVector<> bv;
-    int savings_per_copy = 0;
-    int fixed_overhead = 0;
+    int caller_savings = 0;
+    int callee_size = 0;
     SmallVector<Type *, 8> arg_types;
     SmallVector<Type *, 8> result_types;
   };
