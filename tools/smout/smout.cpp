@@ -39,7 +39,9 @@ static cl::opt<std::string> Threads("j",
 static cl::opt<std::string> ModuleName("name", cl::Required,
                                        cl::desc("Name of the head to work on"),
                                        cl::cat(SmoutCategory),
-                                       cl::sub(*cl::AllSubCommands));
+                                       cl::sub(CandidatesCommand),
+                                       cl::sub(CreateILPProblemCommand),
+                                       cl::sub(ExtractCalleesCommand));
 
 static cl::opt<std::string>
     StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
