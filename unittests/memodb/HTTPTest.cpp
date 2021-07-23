@@ -156,7 +156,7 @@ TEST(HTTPTest, GetContentNodeJSONInvalidNode) {
 
 TEST(HTTPTest, SendContentNodeCBOR) {
   TestHTTPRequest request("GET", "/cid/foo");
-  request.request_headers["accept"] = "application/*";
+  request.request_headers["accept"] = "application/cbor";
   request.sendContentNode(Node(12), *CID::parse("uAXEAAQw"),
                           Request::CacheControl::Mutable);
   EXPECT_EQ(request.response_status, 200);
@@ -171,6 +171,23 @@ TEST(HTTPTest, SendContentNodeCBOR) {
 
 TEST(HTTPTest, SendContentNodeJSON) {
   TestHTTPRequest request("GET", "/cid/foo");
+  request.sendContentNode(Node(12), std::nullopt,
+                          Request::CacheControl::Ephemeral);
+  EXPECT_EQ(request.response_status, 200);
+  EXPECT_EQ(request.response_headers["cache-control"],
+            "max-age=0, must-revalidate");
+  EXPECT_EQ(request.response_headers["content-type"], "application/json");
+  EXPECT_EQ(request.response_headers["etag"], "\"json+uAXEAAQw\"");
+  EXPECT_EQ(request.response_headers["server"], "MemoDB");
+  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
+  EXPECT_EQ(request.response_body, "12");
+}
+
+TEST(HTTPTest, SendContentNodeAcceptAll) {
+  // Curl, and Python's requests module, send "Accept: */*" by default. We want
+  // to respond with JSON in these cases.
+  TestHTTPRequest request("GET", "/cid/foo");
+  request.request_headers["accept"] = "*/*";
   request.sendContentNode(Node(12), std::nullopt,
                           Request::CacheControl::Ephemeral);
   EXPECT_EQ(request.response_status, 200);

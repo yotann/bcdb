@@ -47,8 +47,8 @@ GET /cid/uAXEABYIYfBiF HTTP/1.1
 Accept: application/octet-stream, application/cbor;q=0.9, application/problem+json
 ```
 
-If the `Accept` header is missing, the server will send responses in JSON
-format for maximum compatibility.
+If the `Accept` header does not specify a preference, the server will send
+responses in JSON format for maximum compatibility.
 
 ### Caching
 

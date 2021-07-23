@@ -305,8 +305,11 @@ void HTTPRequest::sendContentNode(const Node &node,
   CID cid = cid_if_known ? *cid_if_known : node.saveAsIPLD().first;
   std::string etag = cid.asString(Multibase::base64url);
 
+  // When the client doesn't specify a preference, we prefer
+  // json > octet-stream > cbor > html. Note that many clients, like curl and
+  // Python's requests module, send "Accept: */*" by default.
   ContentType type = ContentType::JSON;
-  if (node.kind() == Kind::Bytes && octet_stream_quality >= json_quality &&
+  if (node.kind() == Kind::Bytes && octet_stream_quality > json_quality &&
       octet_stream_quality >= cbor_quality &&
       octet_stream_quality >= html_quality) {
     etag = "raw+" + etag;
@@ -314,7 +317,7 @@ void HTTPRequest::sendContentNode(const Node &node,
   } else if (html_quality > cbor_quality && html_quality > json_quality) {
     etag = "html+" + etag;
     type = ContentType::HTML;
-  } else if (cbor_quality != 0 && cbor_quality >= json_quality) {
+  } else if (cbor_quality > json_quality) {
     etag = "cbor+" + etag;
     type = ContentType::CBOR;
   } else {
