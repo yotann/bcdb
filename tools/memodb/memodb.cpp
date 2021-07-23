@@ -94,10 +94,10 @@ static cl::opt<std::string>
               cl::sub(PathsToCommand), cl::sub(RefsToCommand),
               cl::sub(SetCommand));
 
-static cl::opt<std::string>
-    FuncName(cl::Positional, cl::Required, cl::desc("<function name>"),
-             cl::value_desc("func"), cl::cat(MemoDBCategory),
-             cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
+static cl::list<std::string>
+    FuncNames(cl::Positional, cl::OneOrMore, cl::desc("<function names>"),
+              cl::value_desc("funcs"), cl::cat(MemoDBCategory),
+              cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
 
 static Name GetNameFromURI(llvm::StringRef URI) {
   auto Parsed = ::URI::parse(URI);
@@ -263,7 +263,8 @@ static int Init() {
 
 static int Invalidate() {
   auto db = Store::open(GetStoreUri());
-  db->call_invalidate(FuncName);
+  for (const auto &func : FuncNames)
+    db->call_invalidate(func);
   return 0;
 }
 
@@ -271,8 +272,9 @@ static int Invalidate() {
 
 static int ListCalls() {
   auto Db = Store::open(GetStoreUri());
-  for (const Call &call : Db->list_calls(FuncName))
-    outs() << call << "\n";
+  for (const auto &func : FuncNames)
+    for (const Call &call : Db->list_calls(func))
+      outs() << call << "\n";
   return 0;
 }
 
