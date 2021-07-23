@@ -363,22 +363,62 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
     callee_for_caller.emplace_back(n);
   }
 
-  // Create variables only for candidates that can potentially be profitable.
+  // Eliminate candidates that can't be profitable.
+  std::vector<bool> useless_m(x_m.size());
+  std::vector<bool> useless_n(y_n.size());
   for (size_t n = 0; n < y_n.size(); ++n)
-    if (sum_s_n[n] > f_n[n])
+    useless_n[n] = sum_s_n[n] <= f_n[n];
+  for (size_t m = 0; m < x_m.size(); ++m)
+    useless_m[m] = useless_n[callee_for_caller[m]];
+
+  // Identify candidates that are always profitable.
+  std::vector<bool> has_overlap(x_m.size());
+  for (const auto &overlaps : func_overlaps) {
+    for (const auto &o : overlaps) {
+      size_t count = 0;
+      for (size_t m : o)
+        if (!useless_m[m])
+          ++count;
+      if (count >= 2)
+        for (size_t m : o)
+          has_overlap[m] = true;
+    }
+  }
+  std::vector<int> sum_no_overlap_s_n(y_n.size());
+  for (size_t m = 0; m < x_m.size(); ++m)
+    if (!has_overlap[m])
+      sum_no_overlap_s_n[callee_for_caller[m]] += s_m[m];
+  std::vector<bool> always_m(x_m.size());
+  std::vector<bool> always_n(y_n.size());
+  for (size_t n = 0; n < y_n.size(); ++n)
+    always_n[n] = sum_no_overlap_s_n[n] > f_n[n];
+  for (size_t m = 0; m < x_m.size(); ++m)
+    always_m[m] =
+        !useless_m[m] && !has_overlap[m] && always_n[callee_for_caller[m]];
+
+  // Create variables only for candidates that can potentially be profitable,
+  // but aren't necessarily profitable.
+  for (size_t n = 0; n < y_n.size(); ++n)
+    if (!useless_n[n] && !always_n[n])
       y_n[n] = problem.makeBoolVar(formatv("Y{0}", n).str());
   for (size_t m = 0; m < x_m.size(); ++m)
-    if (y_n[callee_for_caller[m]])
+    if (!useless_m[m] && !always_m[m])
       x_m[m] = problem.makeBoolVar(formatv("X{0}", m).str());
 
   // Calculate objective function.
   LinearProgram::Expr objective;
-  for (size_t m = 0; m < x_m.size(); ++m)
+  for (size_t m = 0; m < x_m.size(); ++m) {
     if (const auto &x = x_m[m])
       objective -= s_m[m] * *x;
-  for (size_t n = 0; n < y_n.size(); ++n)
+    else if (always_m[m])
+      objective -= s_m[m];
+  }
+  for (size_t n = 0; n < y_n.size(); ++n) {
     if (const auto &y = y_n[n])
       objective += f_n[n] * *y;
+    else if (always_n[n])
+      objective += f_n[n];
+  }
   problem.setObjective("COST", std::move(objective));
 
   // Add constraints to require a callee to be outlined if the corresponding
@@ -388,29 +428,30 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
     if (!x)
       continue;
     const auto &y = y_n[callee_for_caller[m]];
-    assert(y);
+    if (!y)
+      continue;
     problem.addConstraint(formatv("CALLEE{0}", m).str(), *x <= *y);
   }
 
   // Add constraints to prevent overlapping candidates from being outlined.
   for (size_t f = 0; f < func_overlaps.size(); ++f) {
     const auto &overlaps = func_overlaps[f];
+    std::vector<size_t> last_o;
     for (size_t i = 0; i < overlaps.size(); ++i) {
       if (overlaps[i].empty())
         continue;
-      if (i > 0 && overlaps[i] == overlaps[i - 1])
-        continue;
+      std::vector<size_t> o;
       LinearProgram::Expr sum;
-      size_t count = 0;
       for (auto m : overlaps[i]) {
         const auto &x = x_m[m];
         if (x) {
-          count++;
           sum += *x;
+          o.emplace_back(m);
         }
       }
-      if (count <= 1)
-        continue;
+      if (o.size() <= 1 || o == last_o)
+        continue; // constraint unnecessary or redundant
+      last_o = std::move(o);
       problem.addConstraint(formatv("OVERLAP{0}_{1}", f, i).str(),
                             std::move(sum) <= 1);
     }
