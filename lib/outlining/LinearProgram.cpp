@@ -122,7 +122,7 @@ LinearProgram::makeRealVar(llvm::StringRef Name,
 LinearProgram::Expr &
 LinearProgram::Expr::operator+=(const LinearProgram::Expr &Other) {
   Constant += Other.Constant;
-  Items.append(Other.Items);
+  Items.append(Other.Items.begin(), Other.Items.end());
   return *this;
 }
 
