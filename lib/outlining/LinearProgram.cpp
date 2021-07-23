@@ -1,7 +1,9 @@
 #include "outlining/LinearProgram.h"
 
-#include <llvm/Support/raw_ostream.h>
+#include <algorithm>
 #include <map>
+
+#include <llvm/Support/raw_ostream.h>
 
 using namespace bcdb;
 using namespace llvm;
@@ -82,6 +84,19 @@ void LinearProgram::writeFreeMPS(llvm::raw_ostream &OS) {
   OS << "ENDATA\n";
 }
 
+void LinearProgram::addConstraint(llvm::StringRef Name,
+                                  Constraint &&Constraint) {
+  Constraint.LHS.reduce();
+  ConstraintNames.emplace_back(Name);
+  Constraints.emplace_back(std::move(Constraint));
+}
+
+void LinearProgram::setObjective(llvm::StringRef Name, Expr &&Objective) {
+  Objective.reduce();
+  ObjectiveName = Name;
+  this->Objective = std::move(Objective);
+}
+
 LinearProgram::Var LinearProgram::makeBoolVar(llvm::StringRef Name) {
   return makeIntVar(Name, 0, 1);
 }
@@ -106,36 +121,15 @@ LinearProgram::makeRealVar(llvm::StringRef Name,
 LinearProgram::Expr &
 LinearProgram::Expr::operator+=(const LinearProgram::Expr &Other) {
   Constant += Other.Constant;
-  for (const auto &Item : Other.Items) {
-    bool Found = false;
-    for (auto &ResultItem : Items) {
-      if (ResultItem.first.ID == Item.first.ID) {
-        ResultItem.second += Item.second;
-        Found = true;
-        break;
-      }
-    }
-    if (!Found)
-      Items.emplace_back(Item);
-  }
+  Items.append(Other.Items);
   return *this;
 }
 
 LinearProgram::Expr &
 LinearProgram::Expr::operator-=(const LinearProgram::Expr &Other) {
   Constant -= Other.Constant;
-  for (const auto &Item : Other.Items) {
-    bool Found = false;
-    for (auto &ResultItem : Items) {
-      if (ResultItem.first.ID == Item.first.ID) {
-        ResultItem.second -= Item.second;
-        Found = true;
-        break;
-      }
-    }
-    if (!Found)
-      Items.emplace_back(Item.first, -Item.second);
-  }
+  for (const auto &Item : Other.Items)
+    Items.emplace_back(Item.first, -Item.second);
   return *this;
 }
 
@@ -144,4 +138,19 @@ LinearProgram::Expr &LinearProgram::Expr::operator*=(double Other) {
   for (auto &Item : Items)
     Item.second *= Other;
   return *this;
+}
+
+void LinearProgram::Expr::reduce() {
+  std::sort(Items.begin(), Items.end(), [](const auto &a, const auto &b) {
+    return a.first.ID < b.first.ID;
+  });
+  llvm::SmallVector<std::pair<Var, double>, 2> new_items;
+  for (const auto &item : Items) {
+    // TODO: delete items when they cancel out (item.second == 0).
+    if (!new_items.empty() && item.first.ID == new_items.back().first.ID)
+      new_items.back().second += item.second;
+    else
+      new_items.emplace_back(item);
+  }
+  std::swap(Items, new_items);
 }

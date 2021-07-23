@@ -53,7 +53,7 @@ TEST(LinearProgramTest, Simple) {
   LP.addConstraint("LIM1", X + Y <= 5);
   LP.addConstraint("LIM2", X + Z >= 10);
   LP.addConstraint("MYEQN", Z - Y == 7);
-  LP.setObjective("COST", X + 4 * Y + 9 * Z);
+  LP.setObjective("COST", Y + X + Y + 9 * Z + 2 * Y);
 
   std::string Buffer;
   llvm::raw_string_ostream OS(Buffer);

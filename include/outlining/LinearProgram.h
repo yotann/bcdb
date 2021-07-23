@@ -1,6 +1,7 @@
 #ifndef BCDB_LINEARPROGRAM_H
 #define BCDB_LINEARPROGRAM_H
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <optional>
@@ -27,7 +28,7 @@ public:
   class Expr {
     friend class LinearProgram;
 
-    std::vector<std::pair<Var, double>> Items = {};
+    llvm::SmallVector<std::pair<Var, double>, 2> Items = {};
     double Constant = 0;
 
   public:
@@ -38,6 +39,8 @@ public:
     Expr &operator+=(const Expr &Other);
     Expr &operator-=(const Expr &Other);
     Expr &operator*=(double Other);
+
+    void reduce();
   };
 
   class Constraint {
@@ -56,15 +59,8 @@ public:
   LinearProgram(llvm::StringRef Name);
   void writeFreeMPS(llvm::raw_ostream &OS);
 
-  void addConstraint(llvm::StringRef Name, Constraint &&Constraint) {
-    ConstraintNames.emplace_back(Name);
-    Constraints.emplace_back(std::move(Constraint));
-  }
-
-  void setObjective(llvm::StringRef Name, Expr &&Objective) {
-    ObjectiveName = Name;
-    this->Objective = std::move(Objective);
-  }
+  void addConstraint(llvm::StringRef Name, Constraint &&Constraint);
+  void setObjective(llvm::StringRef Name, Expr &&Objective);
 
   Var makeBoolVar(llvm::StringRef Name);
   Var makeIntVar(llvm::StringRef Name, std::optional<int> LowerBound,
