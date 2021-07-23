@@ -56,7 +56,8 @@ void LinearProgram::writeFreeMPS(llvm::raw_ostream &OS) {
   for (const auto &Info : Vars) {
     if (Info.IsInteger) {
       if (Info.LowerBound == 0 && Info.UpperBound == 1) {
-        OS << " BV BND1 " << Info.Name << "\n";
+        // The Symphony solver doesn't support BV bounds, only UI.
+        OS << " UI BND1 " << Info.Name << " 1\n";
       } else {
         if (Info.LowerBound != 0 || !Info.UpperBound)
           OS << " LI BND1 " << Info.Name << " "

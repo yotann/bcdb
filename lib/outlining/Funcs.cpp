@@ -314,7 +314,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
 
   std::vector<Future> callees;
   LinearProgram problem("SMOUT");
-  std::vector<LinearProgram::Var> x;
+  std::vector<std::optional<LinearProgram::Var>> x_m;
   std::vector<int> s_m, f_m;
   std::vector<std::vector<SmallVector<size_t, 4>>> func_overlaps;
   for (auto &future : func_candidates) {
@@ -324,8 +324,8 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
     auto &overlaps = func_overlaps.back();
     for (auto &item : result->map_range()) {
       for (auto &candidate : item.value().list_range()) {
-        size_t m = x.size();
-        x.emplace_back(problem.makeBoolVar(formatv("X{0}", m).str()));
+        size_t m = x_m.size();
+        x_m.emplace_back(std::nullopt);
         s_m.emplace_back(candidate["caller_savings"].as<int>());
         f_m.emplace_back(candidate["callee_size"].as<int>());
         for (size_t i : decodeBitVector(candidate["nodes"])) {
@@ -340,9 +340,10 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
   }
 
   StringMap<size_t> callee_indices;
-  std::vector<LinearProgram::Var> y;
+  std::vector<std::optional<LinearProgram::Var>> y_n;
   std::vector<int> f_n;
   std::vector<size_t> callee_for_caller;
+  std::vector<int> sum_s_n;
   for (size_t m = 0; m < callees.size(); ++m) {
     auto bytes = callees[m].getCID().asBytes();
     auto key =
@@ -351,30 +352,45 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
     if (callee_indices.count(key)) {
       n = callee_indices[key];
       f_n[n] = std::min(f_n[n], f_m[m]);
+      sum_s_n[n] += s_m[m];
     } else {
-      n = y.size();
-      y.emplace_back(problem.makeBoolVar(formatv("Y{0}", n).str()));
+      n = y_n.size();
+      y_n.emplace_back(std::nullopt);
+      sum_s_n.emplace_back(s_m[m]);
       f_n.emplace_back(f_m[m]);
       callee_indices[key] = n;
     }
     callee_for_caller.emplace_back(n);
   }
 
-  // TODO: skip candidates that can't possibly be profitable.
+  // Create variables only for candidates that can potentially be profitable.
+  for (size_t n = 0; n < y_n.size(); ++n)
+    if (sum_s_n[n] > f_n[n])
+      y_n[n] = problem.makeBoolVar(formatv("Y{0}", n).str());
+  for (size_t m = 0; m < x_m.size(); ++m)
+    if (y_n[callee_for_caller[m]])
+      x_m[m] = problem.makeBoolVar(formatv("X{0}", m).str());
 
   // Calculate objective function.
   LinearProgram::Expr objective;
-  for (size_t m = 0; m < x.size(); ++m)
-    objective += s_m[m] * x[m];
-  for (size_t n = 0; n < y.size(); ++n)
-    objective -= f_n[n] * y[n];
-  problem.setObjective("SAVINGS", std::move(objective));
+  for (size_t m = 0; m < x_m.size(); ++m)
+    if (const auto &x = x_m[m])
+      objective -= s_m[m] * *x;
+  for (size_t n = 0; n < y_n.size(); ++n)
+    if (const auto &y = y_n[n])
+      objective += f_n[n] * *y;
+  problem.setObjective("COST", std::move(objective));
 
   // Add constraints to require a callee to be outlined if the corresponding
   // caller is.
-  for (size_t m = 0; m < x.size(); ++m)
-    problem.addConstraint(formatv("CALLEE{0}", m).str(),
-                          x[m] <= y[callee_for_caller[m]]);
+  for (size_t m = 0; m < x_m.size(); ++m) {
+    const auto &x = x_m[m];
+    if (!x)
+      continue;
+    const auto &y = y_n[callee_for_caller[m]];
+    assert(y);
+    problem.addConstraint(formatv("CALLEE{0}", m).str(), *x <= *y);
+  }
 
   // Add constraints to prevent overlapping candidates from being outlined.
   for (size_t f = 0; f < func_overlaps.size(); ++f) {
@@ -385,8 +401,16 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
       if (i > 0 && overlaps[i] == overlaps[i - 1])
         continue;
       LinearProgram::Expr sum;
-      for (auto m : overlaps[i])
-        sum += x[m];
+      size_t count = 0;
+      for (auto m : overlaps[i]) {
+        const auto &x = x_m[m];
+        if (x) {
+          count++;
+          sum += *x;
+        }
+      }
+      if (count <= 1)
+        continue;
       problem.addConstraint(formatv("OVERLAP{0}_{1}", f, i).str(),
                             std::move(sum) <= 1);
     }

@@ -60,6 +60,8 @@ public:
   void writeFreeMPS(llvm::raw_ostream &OS);
 
   void addConstraint(llvm::StringRef Name, Constraint &&Constraint);
+
+  // All problems are assumed to be minimization problems.
   void setObjective(llvm::StringRef Name, Expr &&Objective);
 
   Var makeBoolVar(llvm::StringRef Name);
