@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <llvm/ADT/SparseBitVector.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeReader.h>
@@ -10,6 +11,8 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/Support/FormatVariadic.h>
+#include <llvm/Support/raw_ostream.h>
 #include <string>
 #include <vector>
 
@@ -22,11 +25,13 @@
 #include "outlining/Candidates.h"
 #include "outlining/Dependence.h"
 #include "outlining/Extractor.h"
+#include "outlining/LinearProgram.h"
 #include "outlining/SizeModel.h"
 
 using namespace llvm;
 using namespace memodb;
 using bcdb::getSoleDefinition;
+using bcdb::LinearProgram;
 using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
@@ -295,4 +300,100 @@ NodeOrCID smout::unique_callees(Evaluator &evaluator,
         StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
   }
   return Node(unique.size());
+}
+
+NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
+                             NodeRef mod) {
+  std::vector<std::pair<CID, Future>> func_candidates;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    func_candidates.emplace_back(
+        func_cid,
+        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+  }
+
+  std::vector<Future> callees;
+  LinearProgram problem("SMOUT");
+  std::vector<LinearProgram::Var> x;
+  std::vector<int> s_m, f_m;
+  std::vector<std::vector<SmallVector<size_t, 4>>> func_overlaps;
+  for (auto &future : func_candidates) {
+    const CID &func_cid = future.first;
+    Future &result = future.second;
+    func_overlaps.emplace_back();
+    auto &overlaps = func_overlaps.back();
+    for (auto &item : result->map_range()) {
+      for (auto &candidate : item.value().list_range()) {
+        size_t m = x.size();
+        x.emplace_back(problem.makeBoolVar(formatv("X{0}", m).str()));
+        s_m.emplace_back(candidate["savings_per_copy"].as<int>());
+        f_m.emplace_back(candidate["fixed_overhead"].as<int>());
+        for (size_t i : decodeBitVector(candidate["nodes"])) {
+          if (overlaps.size() <= i)
+            overlaps.resize(i + 1);
+          overlaps[i].push_back(m);
+        }
+        callees.emplace_back(evaluator.evaluateAsync(
+            "smout.extracted.callee", func_cid, candidate["nodes"]));
+      }
+    }
+  }
+
+  StringMap<size_t> callee_indices;
+  std::vector<LinearProgram::Var> y;
+  std::vector<int> f_n;
+  std::vector<size_t> callee_for_caller;
+  for (size_t m = 0; m < callees.size(); ++m) {
+    auto bytes = callees[m].getCID().asBytes();
+    auto key =
+        StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    size_t n;
+    if (callee_indices.count(key)) {
+      n = callee_indices[key];
+      f_n[n] = std::min(f_n[n], f_m[m]);
+    } else {
+      n = y.size();
+      y.emplace_back(problem.makeBoolVar(formatv("Y{0}", n).str()));
+      f_n.emplace_back(f_m[m]);
+      callee_indices[key] = n;
+    }
+    callee_for_caller.emplace_back(n);
+  }
+
+  // TODO: skip candidates that can't possibly be profitable.
+
+  // Calculate objective function.
+  LinearProgram::Expr objective;
+  for (size_t m = 0; m < x.size(); ++m)
+    objective += s_m[m] * x[m];
+  for (size_t n = 0; n < y.size(); ++n)
+    objective -= f_n[n] * y[n];
+  problem.setObjective("SAVINGS", std::move(objective));
+
+  // Add constraints to require a callee to be outlined if the corresponding
+  // caller is.
+  for (size_t m = 0; m < x.size(); ++m)
+    problem.addConstraint(formatv("CALLEE{0}", m).str(),
+                          x[m] <= y[callee_for_caller[m]]);
+
+  // Add constraints to prevent overlapping candidates from being outlined.
+  for (size_t f = 0; f < func_overlaps.size(); ++f) {
+    const auto &overlaps = func_overlaps[f];
+    for (size_t i = 0; i < overlaps.size(); ++i) {
+      if (overlaps[i].empty())
+        continue;
+      if (i > 0 && overlaps[i] == overlaps[i - 1])
+        continue;
+      LinearProgram::Expr sum;
+      for (auto m : overlaps[i])
+        sum += x[m];
+      problem.addConstraint(formatv("OVERLAP{0}_{1}", f, i).str(),
+                            std::move(sum) <= 1);
+    }
+  }
+
+  std::string buffer;
+  llvm::raw_string_ostream os(buffer);
+  problem.writeFreeMPS(os);
+  return Node(utf8_string_arg, os.str());
 }

@@ -24,6 +24,10 @@ static cl::SubCommand CandidatesCommand("candidates",
                                         "Generate outlineable candidates");
 
 static cl::SubCommand
+    CreateILPProblemCommand("create-ilp-problem",
+                            "Create ILP problem for optimal outlining");
+
+static cl::SubCommand
     ExtractCalleesCommand("extract-callees",
                           "Extract all outlinable callee functions");
 
@@ -71,6 +75,7 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   evaluator->registerFunc("smout.candidates_total", &smout::candidates_total);
   evaluator->registerFunc("smout.extracted.callee", &smout::extracted_callee);
   evaluator->registerFunc("smout.unique_callees", &smout::unique_callees);
+  evaluator->registerFunc("smout.ilp_problem", &smout::ilp_problem);
   return evaluator;
 }
 
@@ -84,6 +89,17 @@ static int Candidates() {
   NodeRef result = evaluator->evaluate("smout.candidates_total",
                                        getCandidatesOptions(), mod);
   llvm::outs() << "\nTotal candidates: " << *result << "\n";
+  return 0;
+}
+
+// smout create-ilp-problem
+
+static int CreateILPProblem() {
+  auto evaluator = createEvaluator();
+  CID mod = evaluator->getStore().resolve(Head(ModuleName));
+  NodeRef result =
+      evaluator->evaluate("smout.ilp_problem", getCandidatesOptions(), mod);
+  llvm::outs() << result->as<StringRef>();
   return 0;
 }
 
@@ -117,6 +133,8 @@ int main(int argc, char **argv) {
 
   if (CandidatesCommand) {
     return Candidates();
+  } else if (CreateILPProblemCommand) {
+    return CreateILPProblem();
   } else if (ExtractCalleesCommand) {
     return ExtractCallees();
   } else {

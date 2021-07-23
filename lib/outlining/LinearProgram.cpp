@@ -54,13 +54,13 @@ void LinearProgram::writeFreeMPS(llvm::raw_ostream &OS) {
   for (const auto &Info : Vars) {
     if (Info.IsInteger) {
       if (Info.LowerBound == 0 && Info.UpperBound == 1) {
-        OS << "BV BND1 " << Info.Name << "\n";
+        OS << " BV BND1 " << Info.Name << "\n";
       } else {
         if (Info.LowerBound != 0 || !Info.UpperBound)
-          OS << "LI BND1 " << Info.Name << " "
+          OS << " LI BND1 " << Info.Name << " "
              << static_cast<int>(*Info.LowerBound) << "\n";
         if (Info.UpperBound)
-          OS << "UI BND1 " << Info.Name << " "
+          OS << " UI BND1 " << Info.Name << " "
              << static_cast<int>(*Info.UpperBound) << "\n";
       }
     } else {

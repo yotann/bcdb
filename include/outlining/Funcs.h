@@ -16,6 +16,7 @@ NodeOrCID candidates_total(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID extracted_callee(Evaluator &evaluator, NodeRef func, NodeRef nodes);
 NodeOrCID unique_callees(Evaluator &evaluator, NodeRef candidates_options,
                          NodeRef mod);
+NodeOrCID ilp_problem(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
 } // end namespace smout
 
