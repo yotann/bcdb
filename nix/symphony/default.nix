@@ -1,4 +1,4 @@
-{ stdenv, lib, fetchFromGitHub, pkg-config, cgl, clp, coinutils, osi }:
+{ stdenv, lib, fetchFromGitHub, pkg-config, cgl, clp, coinutils, osi, llvmPackages ? null }:
 
 stdenv.mkDerivation rec {
   pname = "symphony";
@@ -13,6 +13,15 @@ stdenv.mkDerivation rec {
 
   nativeBuildInputs = [ pkg-config ];
   propagatedBuildInputs = [ cgl clp coinutils osi ];
+
+  buildInputs = lib.optionals stdenv.cc.isClang [
+    # TODO: This may mismatch the LLVM version in the stdenv, see nixpkgs#79818.
+    llvmPackages.openmp
+  ];
+
+  configureFlags = [
+    "--enable-openmp"
+  ];
 
   doCheck = true;
   enableParallelBuilding = true;
