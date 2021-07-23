@@ -478,6 +478,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       for (Instruction *use : tracker.uses)
         addForcedDepend(I, use);
     }
+    all_allocas.set(NodeIndices[I]);
     break;
   }
   default:
@@ -598,8 +599,10 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       // TODO: Some of these should have CompilesToCall set.
       break;
 
+    case Intrinsic::assume:
     case Intrinsic::expect:
     case Intrinsic::lifetime_end:
+    case Intrinsic::trap:
     case Intrinsic::vacopy:
 #if LLVM_VERSION_MAJOR >= 11
     case Intrinsic::expect_with_probability:
@@ -638,6 +641,15 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       PreventsOutlining.set(NodeIndices[I]);
       break;
 
+    case Intrinsic::stackrestore:
+    case Intrinsic::stacksave:
+      // Inherently can't be outlined. Also prevents alloca instructions from
+      // being outlined (otherwise we might change "stacksave stackrestore
+      // alloca use" to "stacksave alloca stackrestore use", which is invalid).
+      PreventsOutlining.set(NodeIndices[I]);
+      prevent_outlining_allocas = true;
+      break;
+
     default:
       errs() << "note: assuming intrinsic can't be outlined: "
              << CB->getCalledFunction()->getName() << "\n";
@@ -647,7 +659,10 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   }
 }
 
-void OutliningDependenceResults::finalizeDepends() {}
+void OutliningDependenceResults::finalizeDepends() {
+  if (prevent_outlining_allocas)
+    PreventsOutlining |= all_allocas;
+}
 
 void OutliningDependenceResults::computeTransitiveClosures() {
   // TODO: Make this function faster. It's so slow that we have to avoid

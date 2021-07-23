@@ -92,6 +92,9 @@ public:
   // the outlining point.
   std::vector<SparseBitVector<>> DominatingDepends;
 
+  SparseBitVector<> all_allocas;
+  bool prevent_outlining_allocas = false;
+
   Function &F;
   DominatorTree &DT;
   PostDominatorTree &PDT;

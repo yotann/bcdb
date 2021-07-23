@@ -32,7 +32,7 @@ static cl::opt<std::string> Threads("j",
                                     cl::cat(SmoutCategory),
                                     cl::sub(*cl::AllSubCommands));
 
-static cl::opt<std::string> ModuleName("name",
+static cl::opt<std::string> ModuleName("name", cl::Required,
                                        cl::desc("Name of the head to work on"),
                                        cl::cat(SmoutCategory),
                                        cl::sub(*cl::AllSubCommands));
