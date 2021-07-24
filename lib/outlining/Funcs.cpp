@@ -354,11 +354,10 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
       f_n[n] = std::min(f_n[n], f_m[m]);
       sum_s_n[n] += s_m[m];
     } else {
-      n = y_n.size();
+      n = callee_indices[key] = y_n.size();
       y_n.emplace_back(std::nullopt);
       sum_s_n.emplace_back(s_m[m]);
       f_n.emplace_back(f_m[m]);
-      callee_indices[key] = n;
     }
     callee_for_caller.emplace_back(n);
   }
@@ -407,18 +406,23 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
 
   // Calculate objective function.
   LinearProgram::Expr objective;
+  long free_benefit = 0;
   for (size_t m = 0; m < x_m.size(); ++m) {
     if (const auto &x = x_m[m])
       objective -= s_m[m] * *x;
     else if (always_m[m])
-      objective -= s_m[m];
+      free_benefit -= s_m[m];
   }
   for (size_t n = 0; n < y_n.size(); ++n) {
     if (const auto &y = y_n[n])
       objective += f_n[n] * *y;
     else if (always_n[n])
-      objective += f_n[n];
+      free_benefit += f_n[n];
   }
+  // We could add the free_benefit directly to objective, but some solvers will
+  // ignore a constant term in the objective. By using a variable, we ensure
+  // all solvers report the same objective value.
+  objective += free_benefit * problem.makeBoolVar("FREE");
   problem.setObjective("COST", std::move(objective));
 
   // Add constraints to require a callee to be outlined if the corresponding
@@ -462,4 +466,145 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
   llvm::raw_string_ostream os(buffer);
   problem.writeFixedMPS(os);
   return Node(utf8_string_arg, os.str());
+}
+
+NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
+                                 NodeRef mod) {
+  std::vector<std::pair<CID, Future>> func_candidates;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    func_candidates.emplace_back(
+        func_cid,
+        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+  }
+
+  // Get candidates.
+  std::vector<Future> callees;
+  std::vector<int> s_m, f_m;
+  std::vector<SparseBitVector<>> o_m;
+  std::vector<size_t> func_index_m;
+  std::vector<Node> nodes_m;
+  for (size_t func_index = 0; func_index < func_candidates.size();
+       ++func_index) {
+    auto &future = func_candidates[func_index];
+    const CID &func_cid = future.first;
+    Future &result = future.second;
+    std::vector<SmallVector<size_t, 4>> func_overlaps;
+    for (auto &item : result->map_range()) {
+      for (auto &candidate : item.value().list_range()) {
+        size_t m = s_m.size();
+        s_m.emplace_back(candidate["caller_savings"].as<int>());
+        f_m.emplace_back(candidate["callee_size"].as<int>());
+        o_m.emplace_back();
+        func_index_m.emplace_back(func_index);
+        nodes_m.emplace_back(candidate["nodes"]);
+        for (size_t i : decodeBitVector(nodes_m[m])) {
+          if (func_overlaps.size() <= i)
+            func_overlaps.resize(i + 1);
+          func_overlaps[i].push_back(m);
+        }
+        callees.emplace_back(evaluator.evaluateAsync("smout.extracted.callee",
+                                                     func_cid, nodes_m[m]));
+      }
+    }
+    for (size_t i = 0; i < func_overlaps.size(); ++i) {
+      if (i > 0 && func_overlaps[i] == func_overlaps[i - 1])
+        continue;
+      for (size_t m0 : func_overlaps[i])
+        for (size_t m1 : func_overlaps[i])
+          if (m0 != m1)
+            o_m[m0].set(m1);
+    }
+  }
+
+  // Get extracted callees.
+  StringMap<size_t> callee_indices;
+  std::vector<int> f_n;
+  std::vector<size_t> n_from_m;
+  std::vector<SmallVector<size_t, 2>> m_from_n;
+  for (size_t m = 0; m < callees.size(); ++m) {
+    auto bytes = callees[m].getCID().asBytes();
+    auto key =
+        StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    size_t n;
+    if (!callee_indices.count(key)) {
+      n = callee_indices[key] = callee_indices.size();
+      f_n.emplace_back(f_m[m]);
+      m_from_n.emplace_back();
+    } else {
+      n = callee_indices[key];
+      f_n[n] = std::min(f_n[n], f_m[m]);
+    }
+    m_from_n[n].emplace_back(m);
+    n_from_m.emplace_back(n);
+  }
+
+  // Calculate benefit of using each callee.
+  std::vector<bool> no_conflict_m(s_m.size());
+  std::vector<int> benefit_n(f_n.size());
+  for (size_t n = 0; n < f_n.size(); ++n) {
+    SparseBitVector<> conf;
+    benefit_n[n] = -f_n[n];
+    for (size_t m : m_from_n[n]) {
+      if (conf.test(m))
+        continue;
+      no_conflict_m[m] = true;
+      conf |= o_m[m];
+      benefit_n[n] += s_m[m];
+    }
+  }
+
+  // Determine which callees to use.
+  unsigned total_benefit = 0;
+  std::vector<size_t> selected_m;
+  std::vector<size_t> selected_n;
+  while (true) {
+    size_t best_n = 0;
+    int best_benefit = 0;
+    for (size_t n = 0; n < f_n.size(); ++n) {
+      if (benefit_n[n] > best_benefit) {
+        best_n = n;
+        best_benefit = benefit_n[n];
+      }
+    }
+    if (best_benefit <= 0)
+      break;
+
+    size_t n = best_n;
+    selected_n.push_back(n);
+    total_benefit += best_benefit;
+    benefit_n[n] = -1; // don't use this n again
+    for (size_t m : m_from_n[n]) {
+      if (!no_conflict_m[m])
+        continue;
+      selected_m.push_back(m);
+      no_conflict_m[m] = false;
+      for (size_t m2 : o_m[m]) {
+        if (!no_conflict_m[m2])
+          continue;
+        benefit_n[n_from_m[m2]] -= s_m[m2];
+        no_conflict_m[m2] = false;
+      }
+    }
+  }
+
+  Node result_functions(node_map_arg);
+  for (size_t m : selected_m) {
+    const CID &cid = func_candidates[func_index_m[m]].first;
+    const Node &nodes = nodes_m[m];
+    auto key = cid.asString(Multibase::base64url);
+    auto &value = result_functions[key];
+    if (value == Node())
+      value = Node(node_map_arg, {{"function", Node(cid)},
+                                  {"candidates", Node(node_list_arg)}});
+    value["candidates"].emplace_back(
+        Node(node_map_arg, {{"nodes", nodes},
+                            {"callee", Node(callees[m].getCID())},
+                            {"caller_savings", s_m[m]},
+                            {"callee_size", f_m[m]}}));
+  }
+  return Node(node_map_arg, {
+                                {"functions", result_functions},
+                                {"total_benefit", total_benefit},
+                            });
 }

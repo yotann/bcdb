@@ -31,17 +31,19 @@ static cl::SubCommand
     ExtractCalleesCommand("extract-callees",
                           "Extract all outlinable callee functions");
 
+static cl::SubCommand SolveGreedyCommand(
+    "solve-greedy", "Calculate greedy solution to optimal outlining problem");
+
 static cl::opt<std::string> Threads("j",
                                     cl::desc("Number of threads, or \"all\""),
                                     cl::cat(SmoutCategory),
                                     cl::sub(*cl::AllSubCommands));
 
-static cl::opt<std::string> ModuleName("name", cl::Required,
-                                       cl::desc("Name of the head to work on"),
-                                       cl::cat(SmoutCategory),
-                                       cl::sub(CandidatesCommand),
-                                       cl::sub(CreateILPProblemCommand),
-                                       cl::sub(ExtractCalleesCommand));
+static cl::opt<std::string>
+    ModuleName("name", cl::Required, cl::desc("Name of the head to work on"),
+               cl::cat(SmoutCategory), cl::sub(CandidatesCommand),
+               cl::sub(CreateILPProblemCommand), cl::sub(ExtractCalleesCommand),
+               cl::sub(SolveGreedyCommand));
 
 static cl::opt<std::string>
     StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
@@ -78,6 +80,7 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   evaluator->registerFunc("smout.extracted.callee", &smout::extracted_callee);
   evaluator->registerFunc("smout.unique_callees", &smout::unique_callees);
   evaluator->registerFunc("smout.ilp_problem", &smout::ilp_problem);
+  evaluator->registerFunc("smout.greedy_solution", &smout::greedy_solution);
   return evaluator;
 }
 
@@ -116,6 +119,17 @@ static int ExtractCallees() {
   return 0;
 }
 
+// smout solve-greedy
+
+static int SolveGreedy() {
+  auto evaluator = createEvaluator();
+  CID mod = evaluator->getStore().resolve(Head(ModuleName));
+  NodeRef result =
+      evaluator->evaluate("smout.greedy_solution", getCandidatesOptions(), mod);
+  llvm::outs() << *result;
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -139,6 +153,8 @@ int main(int argc, char **argv) {
     return CreateILPProblem();
   } else if (ExtractCalleesCommand) {
     return ExtractCallees();
+  } else if (SolveGreedyCommand) {
+    return SolveGreedy();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;
