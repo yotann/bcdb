@@ -57,7 +57,7 @@ public:
   };
 
   LinearProgram(llvm::StringRef Name);
-  void writeFreeMPS(llvm::raw_ostream &OS);
+  void writeFixedMPS(llvm::raw_ostream &OS);
 
   void addConstraint(llvm::StringRef Name, Constraint &&Constraint);
 

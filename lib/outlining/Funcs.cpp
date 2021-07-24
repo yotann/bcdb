@@ -430,10 +430,11 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
     const auto &y = y_n[callee_for_caller[m]];
     if (!y)
       continue;
-    problem.addConstraint(formatv("CALLEE{0}", m).str(), *x <= *y);
+    problem.addConstraint(formatv("C{0}", m).str(), *x <= *y);
   }
 
   // Add constraints to prevent overlapping candidates from being outlined.
+  size_t overlap_var_number = 0;
   for (size_t f = 0; f < func_overlaps.size(); ++f) {
     const auto &overlaps = func_overlaps[f];
     std::vector<size_t> last_o;
@@ -452,13 +453,13 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
       if (o.size() <= 1 || o == last_o)
         continue; // constraint unnecessary or redundant
       last_o = std::move(o);
-      problem.addConstraint(formatv("OVERLAP{0}_{1}", f, i).str(),
+      problem.addConstraint(formatv("O{0}", overlap_var_number++).str(),
                             std::move(sum) <= 1);
     }
   }
 
   std::string buffer;
   llvm::raw_string_ostream os(buffer);
-  problem.writeFreeMPS(os);
+  problem.writeFixedMPS(os);
   return Node(utf8_string_arg, os.str());
 }

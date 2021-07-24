@@ -9,47 +9,49 @@ using namespace bcdb;
 namespace {
 
 TEST(LinearProgramTest, Empty) {
-  LinearProgram LP("Empty");
+  LinearProgram LP("EMPTY");
   LP.setObjective("COST", {});
 
   std::string Buffer;
   llvm::raw_string_ostream OS(Buffer);
-  LP.writeFreeMPS(OS);
-  EXPECT_EQ(OS.str(), "NAME Empty\n"
-                      "ROWS\n"
-                      " N COST\n"
-                      "COLUMNS\n"
-                      "RHS\n"
-                      "BOUNDS\n"
-                      "ENDATA\n");
+  LP.writeFixedMPS(OS);
+  EXPECT_EQ(OS.str(), R"(NAME          EMPTY
+ROWS
+ N  COST
+COLUMNS
+RHS
+BOUNDS
+ENDATA
+)");
 }
 
 TEST(LinearProgramTest, Trivial) {
-  LinearProgram LP("Trivial");
-  auto X = LP.makeRealVar("X", 2.0, 3.0);
+  LinearProgram LP("TRIVIAL");
+  auto X = LP.makeRealVar("X", -2.00001, 1.3e-10);
   LP.setObjective("COST", X);
 
   std::string Buffer;
   llvm::raw_string_ostream OS(Buffer);
-  LP.writeFreeMPS(OS);
-  EXPECT_EQ(OS.str(), "NAME Trivial\n"
-                      "ROWS\n"
-                      " N COST\n"
-                      "COLUMNS\n"
-                      " X COST 1.000000e+00\n"
-                      "RHS\n"
-                      "BOUNDS\n"
-                      " LO BND1 X 2.000000e+00\n"
-                      " UP BND1 X 3.000000e+00\n"
-                      "ENDATA\n");
+  LP.writeFixedMPS(OS);
+  EXPECT_EQ(OS.str(), R"(NAME          TRIVIAL
+ROWS
+ N  COST
+COLUMNS
+    X         COST       1.00000E+00
+RHS
+BOUNDS
+ LO BND1      X         -2.00001E+00
+ UP BND1      X          1.30000E-10
+ENDATA
+)");
 }
 
 TEST(LinearProgramTest, Simple) {
   // Taken from http://lpsolve.sourceforge.net/5.5/mps-format.htm
   LinearProgram LP("TESTPROB");
-  auto X = LP.makeRealVar("X", 0.0, 4.0);
-  auto Y = LP.makeRealVar("Y", -1.0, 1.0);
-  auto Z = LP.makeRealVar("Z", 0.0, {});
+  auto X = LP.makeRealVar("XONE", 0.0, 4.0);
+  auto Y = LP.makeRealVar("YTWO", -1.0, 1.0);
+  auto Z = LP.makeRealVar("ZTHREE", 0.0, {});
   LP.addConstraint("LIM1", X + Y <= 5);
   LP.addConstraint("LIM2", X + Z >= 10);
   LP.addConstraint("MYEQN", Z - Y == 7);
@@ -57,32 +59,33 @@ TEST(LinearProgramTest, Simple) {
 
   std::string Buffer;
   llvm::raw_string_ostream OS(Buffer);
-  LP.writeFreeMPS(OS);
-  EXPECT_EQ(OS.str(), "NAME TESTPROB\n"
-                      "ROWS\n"
-                      " N COST\n"
-                      " L LIM1\n"
-                      " G LIM2\n"
-                      " E MYEQN\n"
-                      "COLUMNS\n"
-                      " X COST 1.000000e+00\n"
-                      " X LIM1 1.000000e+00\n"
-                      " X LIM2 1.000000e+00\n"
-                      " Y COST 4.000000e+00\n"
-                      " Y LIM1 1.000000e+00\n"
-                      " Y MYEQN -1.000000e+00\n"
-                      " Z COST 9.000000e+00\n"
-                      " Z LIM2 1.000000e+00\n"
-                      " Z MYEQN 1.000000e+00\n"
-                      "RHS\n"
-                      " RHS1 LIM1 5.000000e+00\n"
-                      " RHS1 LIM2 1.000000e+01\n"
-                      " RHS1 MYEQN 7.000000e+00\n"
-                      "BOUNDS\n"
-                      " UP BND1 X 4.000000e+00\n"
-                      " LO BND1 Y -1.000000e+00\n"
-                      " UP BND1 Y 1.000000e+00\n"
-                      "ENDATA\n");
+  LP.writeFixedMPS(OS);
+  EXPECT_EQ(OS.str(), R"(NAME          TESTPROB
+ROWS
+ N  COST
+ L  LIM1
+ G  LIM2
+ E  MYEQN
+COLUMNS
+    XONE      COST       1.00000E+00
+    XONE      LIM1       1.00000E+00
+    XONE      LIM2       1.00000E+00
+    YTWO      COST       4.00000E+00
+    YTWO      LIM1       1.00000E+00
+    YTWO      MYEQN     -1.00000E+00
+    ZTHREE    COST       9.00000E+00
+    ZTHREE    LIM2       1.00000E+00
+    ZTHREE    MYEQN      1.00000E+00
+RHS
+    RHS1      LIM1       5.00000E+00
+    RHS1      LIM2       1.00000E+01
+    RHS1      MYEQN      7.00000E+00
+BOUNDS
+ UP BND1      XONE       4.00000E+00
+ LO BND1      YTWO      -1.00000E+00
+ UP BND1      YTWO       1.00000E+00
+ENDATA
+)");
 }
 
 } // end anonymous namespace
