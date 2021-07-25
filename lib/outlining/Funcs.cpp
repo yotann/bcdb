@@ -10,6 +10,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
+#include <llvm/Linker/IRMover.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/raw_ostream.h>
@@ -33,10 +34,16 @@ using namespace memodb;
 using bcdb::getSoleDefinition;
 using bcdb::LinearProgram;
 using bcdb::OutliningCalleeExtractor;
+using bcdb::OutliningCallerExtractor;
 using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
+
+static StringRef cid_key(const CID &cid) {
+  auto bytes = cid.asBytes();
+  return StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+}
 
 static Node encodeBitVector(const SparseBitVector<> &bv) {
   // Most bitvectors just have one contiguous range of set bits. So we encode
@@ -268,6 +275,8 @@ NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
   OutliningCalleeExtractor extractor(f, deps, bv);
   Function *callee = extractor.createDefinition();
 
+  // FIXME: run at least SimplifyCFG, and infer function attributes.
+
   bcdb::Splitter splitter(*m);
   auto mpart = splitter.SplitGlobal(callee);
   SmallVector<char, 0> buffer;
@@ -297,9 +306,7 @@ NodeOrCID smout::unique_callees(Evaluator &evaluator,
   StringSet unique;
   for (auto &result : callees) {
     result.freeNode();
-    auto bytes = result.getCID().asBytes();
-    unique.insert(
-        StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
+    unique.insert(cid_key(result.getCID()));
   }
   return Node(unique.size());
 }
@@ -349,16 +356,14 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
   std::vector<int> sum_s_n;
   for (size_t m = 0; m < callees.size(); ++m) {
     callees[m].freeNode();
-    auto bytes = callees[m].getCID().asBytes();
-    auto key =
-        StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    auto cid = callees[m].getCID();
     size_t n;
-    if (callee_indices.count(key)) {
-      n = callee_indices[key];
+    if (callee_indices.count(cid_key(cid))) {
+      n = callee_indices[cid_key(cid)];
       f_n[n] = std::min(f_n[n], f_m[m]);
       sum_s_n[n] += s_m[m];
     } else {
-      n = callee_indices[key] = y_n.size();
+      n = callee_indices[cid_key(cid)] = y_n.size();
       y_n.emplace_back(std::nullopt);
       sum_s_n.emplace_back(s_m[m]);
       f_n.emplace_back(f_m[m]);
@@ -529,16 +534,14 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
   std::vector<SmallVector<size_t, 2>> m_from_n;
   for (size_t m = 0; m < callees.size(); ++m) {
     callees[m].freeNode();
-    auto bytes = callees[m].getCID().asBytes();
-    auto key =
-        StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    auto cid = callees[m].getCID();
     size_t n;
-    if (!callee_indices.count(key)) {
-      n = callee_indices[key] = callee_indices.size();
+    if (!callee_indices.count(cid_key(cid))) {
+      n = callee_indices[cid_key(cid)] = callee_indices.size();
       f_n.emplace_back(f_m[m]);
       m_from_n.emplace_back();
     } else {
-      n = callee_indices[key];
+      n = callee_indices[cid_key(cid)];
       f_n[n] = std::min(f_n[n], f_m[m]);
     }
     m_from_n[n].emplace_back(m);
@@ -608,9 +611,126 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
                             {"callee", Node(callees[m].getCID())},
                             {"caller_savings", s_m[m]},
                             {"callee_size", f_m[m]}}));
+    // FIXME: sort candidates.
   }
   return Node(node_map_arg, {
                                 {"functions", result_functions},
                                 {"total_benefit", total_benefit},
                             });
+}
+
+NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
+                                  NodeRef callees) {
+  ExitOnError Err("smout.extracted.caller: ");
+  LLVMContext context;
+  auto m = Err(parseBitcodeFile(
+      MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
+  Function &f = getSoleDefinition(*m);
+
+  std::vector<SparseBitVector<>> bvs;
+  for (const auto &callee : callees->list_range())
+    bvs.emplace_back(decodeBitVector(callee["nodes"]));
+
+  FunctionAnalysisManager am;
+  // TODO: Would it be faster to just register the analyses we need?
+  PassBuilder().registerFunctionAnalyses(am);
+  am.registerPass([] { return OutliningDependenceAnalysis(); });
+  auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
+
+  OutliningCallerExtractor extractor(f, deps, bvs);
+  Function *caller = extractor.createDefinition();
+
+  for (size_t i = 0; i < callees->size(); ++i) {
+    Function *callee = extractor.callees[i].createDeclaration();
+    StringRef name = (*callees)[i]["name"].as<StringRef>();
+    callee->setName(name);
+    if (callee->getName() != name) {
+      // We may be extracting multiple copies of the same callee.
+      callee->replaceAllUsesWith(callee->getParent()->getFunction(name));
+    }
+  }
+
+  // FIXME: run at least SimplifyCFG, and infer function attributes (including
+  // on callees).
+
+  bcdb::Splitter splitter(*m);
+  auto mpart = splitter.SplitGlobal(caller);
+  SmallVector<char, 0> buffer;
+  bcdb::WriteAlignedModule(*mpart, buffer);
+  return Node(byte_string_arg, buffer);
+}
+
+NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
+  NodeRef solution = evaluator.evaluate("smout.greedy_solution", options, mod);
+  Node mod_node = *mod;
+
+  ExitOnError err("smout.optimized: ");
+  LLVMContext context;
+  Node old_remainder = evaluator.getStore().get((*mod)["remainder"].as<CID>());
+  auto remainder = err(parseBitcodeFile(
+      MemoryBufferRef(old_remainder.as<StringRef>(byte_string_arg), ""),
+      context));
+  IRMover mover(*remainder);
+
+  // Choose name for each callee, insert callee into module, and start
+  // extracting callers.
+  StringMap<std::string> callee_names;
+  StringMap<Future> callers;
+  for (const auto &function_item : (*solution)["functions"].map_range()) {
+    const auto &function = function_item.value();
+    Node callees(node_list_arg);
+    for (const auto &candidate : function["candidates"].list_range()) {
+      auto cid = candidate["callee"].as<CID>();
+      if (!callee_names.count(cid_key(cid))) {
+        // NOTE: we could base the callee name on the first caller name we come
+        // across, but that would make caching less effective.
+        std::string name = "outlined.callee." + cid.asString(Multibase::base32);
+        while (mod_node["functions"].count(name))
+          name += "_";
+        callee_names[cid_key(cid)] = name;
+
+        mod_node["functions"][name] = Node(cid);
+
+        // Copy callee declaration into remainder module.
+        Node callee_bc = evaluator.getStore().get(cid);
+        auto callee_m = err(parseBitcodeFile(
+            MemoryBufferRef(callee_bc.as<StringRef>(byte_string_arg), ""),
+            context));
+        Function &callee_f = getSoleDefinition(*callee_m);
+        callee_f.deleteBody();
+        new UnreachableInst(context,
+                            BasicBlock::Create(context, "", &callee_f));
+        callee_f.setName(name);
+        assert(callee_f.getName() == name && "name conflict");
+        err(mover.move(
+            std::move(callee_m), {&callee_f},
+            [](GlobalValue &, IRMover::ValueAdder) {},
+            /*IsPerformingImport*/ false));
+      }
+      callees.emplace_back(
+          Node(node_map_arg,
+               {{"name", Node(utf8_string_arg, callee_names[cid_key(cid)])},
+                {"nodes", candidate["nodes"]}}));
+    }
+    auto cid = function["function"].as<CID>();
+    callers.insert_or_assign(cid_key(cid),
+                             evaluator.evaluateAsync("smout.extracted.caller",
+                                                     cid, std::move(callees)));
+  }
+
+  // Insert callers into module.
+  for (auto &item : mod_node["functions"].map_range()) {
+    auto orig = item.value().as<CID>();
+    auto caller_iter = callers.find(cid_key(orig));
+    if (caller_iter != callers.end())
+      item.value() = Node(caller_iter->getValue().getCID());
+  }
+
+  // Replace remainder module.
+  SmallVector<char, 0> buffer;
+  bcdb::WriteAlignedModule(*remainder, buffer);
+  mod_node["remainder"] =
+      Node(evaluator.getStore().put(Node(byte_string_arg, buffer)));
+
+  return mod_node;
 }

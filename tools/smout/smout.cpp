@@ -31,6 +31,9 @@ static cl::SubCommand
     ExtractCalleesCommand("extract-callees",
                           "Extract all outlinable callee functions");
 
+static cl::SubCommand OptimizeCommand("optimize",
+                                      "Optimize module with oulining");
+
 static cl::SubCommand SolveGreedyCommand(
     "solve-greedy", "Calculate greedy solution to optimal outlining problem");
 
@@ -43,7 +46,7 @@ static cl::opt<std::string>
     ModuleName("name", cl::Required, cl::desc("Name of the head to work on"),
                cl::cat(SmoutCategory), cl::sub(CandidatesCommand),
                cl::sub(CreateILPProblemCommand), cl::sub(ExtractCalleesCommand),
-               cl::sub(SolveGreedyCommand));
+               cl::sub(OptimizeCommand), cl::sub(SolveGreedyCommand));
 
 static cl::opt<std::string>
     StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
@@ -81,6 +84,8 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   evaluator->registerFunc("smout.unique_callees", &smout::unique_callees);
   evaluator->registerFunc("smout.ilp_problem", &smout::ilp_problem);
   evaluator->registerFunc("smout.greedy_solution", &smout::greedy_solution);
+  evaluator->registerFunc("smout.extracted.caller", &smout::extracted_caller);
+  evaluator->registerFunc("smout.optimized", &smout::optimized);
   return evaluator;
 }
 
@@ -119,6 +124,17 @@ static int ExtractCallees() {
   return 0;
 }
 
+// smout optimize
+
+static int Optimize() {
+  auto evaluator = createEvaluator();
+  CID mod = evaluator->getStore().resolve(Head(ModuleName));
+  NodeRef result =
+      evaluator->evaluate("smout.optimized", getCandidatesOptions(), mod);
+  llvm::outs() << *result;
+  return 0;
+}
+
 // smout solve-greedy
 
 static int SolveGreedy() {
@@ -153,6 +169,8 @@ int main(int argc, char **argv) {
     return CreateILPProblem();
   } else if (ExtractCalleesCommand) {
     return ExtractCallees();
+  } else if (OptimizeCommand) {
+    return Optimize();
   } else if (SolveGreedyCommand) {
     return SolveGreedy();
   } else {

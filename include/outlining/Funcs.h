@@ -18,6 +18,8 @@ NodeOrCID unique_callees(Evaluator &evaluator, NodeRef candidates_options,
                          NodeRef mod);
 NodeOrCID ilp_problem(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID greedy_solution(Evaluator &evaluator, NodeRef options, NodeRef mod);
+NodeOrCID extracted_caller(Evaluator &evaluator, NodeRef func, NodeRef callees);
+NodeOrCID optimized(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
 } // end namespace smout
 
