@@ -415,7 +415,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
 
   // Calculate objective function.
   LinearProgram::Expr objective;
-  long free_benefit = 0;
+  std::int64_t free_benefit = 0;
   for (size_t m = 0; m < x_m.size(); ++m) {
     if (const auto &x = x_m[m])
       objective -= s_m[m] * *x;
