@@ -15,22 +15,22 @@
 using namespace bcdb;
 using namespace llvm;
 
-OutliningExtractor::OutliningExtractor(Function &F,
-                                       const OutliningDependenceResults &OutDep,
-                                       const SparseBitVector<> &BV)
-    : F(F), OutDep(OutDep), BV(BV) {
-  const auto &Nodes = OutDep.Nodes;
-  const auto &NodeIndices = OutDep.NodeIndices;
+OutliningCalleeExtractor::OutliningCalleeExtractor(
+    Function &function, const OutliningDependenceResults &deps,
+    const SparseBitVector<> &bv)
+    : function(function), deps(deps), bv(bv) {
+  const auto &Nodes = deps.Nodes;
+  const auto &NodeIndices = deps.NodeIndices;
 
-  if (!OutDep.isOutlinable(BV))
+  if (!deps.isOutlinable(bv))
     report_fatal_error("Specified nodes cannot be outlined",
                        /* gen_crash_diag */ false);
 
   auto addInputValue = [&](Value *v) {
     if (Argument *arg = dyn_cast<Argument>(v))
-      ArgInputs.set(arg->getArgNo());
+      arg_inputs.set(arg->getArgNo());
     else if (NodeIndices.count(v))
-      ExternalInputs.set(NodeIndices.lookup(v));
+      external_inputs.set(NodeIndices.lookup(v));
     else
       assert(isa<Constant>(v) && "impossible");
   };
@@ -38,20 +38,20 @@ OutliningExtractor::OutliningExtractor(Function &F,
   // Determine which nodes inside the new callee will need to have their
   // results passed back to the new caller.
   for (size_t i = 0; i < Nodes.size(); i++) {
-    if (BV.test(i))
+    if (bv.test(i))
       continue;
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
       SmallPtrSet<Value *, 8> phi_incoming;
       for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
         Value *v = phi->getIncomingValue(j);
-        if (BV.test(NodeIndices.lookup(
+        if (bv.test(NodeIndices.lookup(
                 phi->getIncomingBlock(j)->getTerminator()))) {
           // May depend on control flow in the callee.
           phi_incoming.insert(v);
         } else if (NodeIndices.count(v)) {
           // Only depends on control flow from the caller, but may need a value
           // from the callee.
-          ExternalOutputs.set(NodeIndices.lookup(v));
+          external_outputs.set(NodeIndices.lookup(v));
         }
       }
       if (phi_incoming.size() > 1) {
@@ -65,22 +65,22 @@ OutliningExtractor::OutliningExtractor(Function &F,
       } else if (!phi_incoming.empty()) {
         // Only one phi value is used for all paths within the callee, so we
         // return that value directly and use it in the phi in the caller.
-        ExternalOutputs.set(NodeIndices.lookup(*phi_incoming.begin()));
+        external_outputs.set(NodeIndices.lookup(*phi_incoming.begin()));
       }
     } else {
-      ExternalOutputs |= OutDep.DataDepends[i];
+      external_outputs |= deps.DataDepends[i];
     }
   }
-  ExternalOutputs &= BV;
-  ExternalOutputs |= output_phis;
+  external_outputs &= bv;
+  external_outputs |= output_phis;
 
   // Determine which function arguments and other nodes need to be passed as
   // arguments to the new callee.
-  for (auto i : BV) {
+  for (auto i : bv) {
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
       SmallPtrSet<Value *, 8> phi_incoming;
       for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
-        if (BV.test(NodeIndices.lookup(
+        if (bv.test(NodeIndices.lookup(
                 phi->getIncomingBlock(j)->getTerminator()))) {
           // This part of the phi will be outlined, so we need to make sure the
           // appropriate phi input values are accessible.
@@ -100,99 +100,115 @@ OutliningExtractor::OutliningExtractor(Function &F,
         addInputValue(*phi_incoming.begin());
       }
     } else {
-      ExternalInputs |= OutDep.DataDepends[i];
-      ArgInputs |= OutDep.ArgDepends[i];
+      external_inputs |= deps.DataDepends[i];
+      arg_inputs |= deps.ArgDepends[i];
     }
   }
   // The next statement must be executed after all calls to addInputValue().
-  ExternalInputs.intersectWithComplement(BV);
-  ExternalInputs |= input_phis;
+  external_inputs.intersectWithComplement(bv);
+  external_inputs |= input_phis;
 
-  for (auto i : BV) {
+  for (auto i : bv) {
     if (isa<BasicBlock>(Nodes[i]))
-      OutlinedBlocks.set(i);
+      outlined_blocks.set(i);
     else if (Instruction *I = dyn_cast<Instruction>(Nodes[i]))
-      OutlinedBlocks.set(NodeIndices.lookup(I->getParent()));
+      outlined_blocks.set(NodeIndices.lookup(I->getParent()));
   }
 }
 
-unsigned OutliningExtractor::getNumCalleeArgs() const {
-  return ArgInputs.count() + ExternalInputs.count();
+unsigned OutliningCalleeExtractor::getNumArgs() const {
+  return arg_inputs.count() + external_inputs.count();
 }
 
-unsigned OutliningExtractor::getNumCalleeReturnValues() const {
-  return ExternalOutputs.count();
+unsigned OutliningCalleeExtractor::getNumReturnValues() const {
+  return external_outputs.count();
 }
 
-void OutliningExtractor::getArgTypes(SmallVectorImpl<Type *> &types) const {
-  for (auto i : ArgInputs)
-    types.push_back((F.arg_begin() + i)->getType());
-  for (auto i : ExternalInputs)
-    types.push_back(OutDep.Nodes[i]->getType());
+void OutliningCalleeExtractor::getArgTypes(
+    SmallVectorImpl<Type *> &types) const {
+  for (auto i : arg_inputs)
+    types.push_back((function.arg_begin() + i)->getType());
+  for (auto i : external_inputs)
+    types.push_back(deps.Nodes[i]->getType());
 }
 
-void OutliningExtractor::getResultTypes(SmallVectorImpl<Type *> &types) const {
-  for (auto i : ExternalOutputs)
-    types.push_back(OutDep.Nodes[i]->getType());
+void OutliningCalleeExtractor::getResultTypes(
+    SmallVectorImpl<Type *> &types) const {
+  for (auto i : external_outputs)
+    types.push_back(deps.Nodes[i]->getType());
 }
 
-Function *OutliningExtractor::createNewCallee() {
-  if (NewCallee)
-    return NewCallee;
+Function *OutliningCalleeExtractor::createDeclaration() {
+  if (new_callee)
+    return new_callee;
 
-  const auto &PDT = OutDep.PDT;
-  const auto &Nodes = OutDep.Nodes;
-  const auto &NodeIndices = OutDep.NodeIndices;
+  const auto &nodes = deps.Nodes;
 
   // Determine the type of the outlined function.
   // FIXME: Canonicalize arguments and return values by reordering them. Also
   // make all pointers opaque.
   SmallVector<Type *, 8> result_types, arg_types;
-  for (auto i : ExternalOutputs)
-    result_types.push_back(Nodes[i]->getType());
-  Type *result_type = StructType::get(F.getContext(), result_types);
-  for (auto i : ArgInputs)
-    arg_types.push_back((F.arg_begin() + i)->getType());
-  for (auto i : ExternalInputs)
-    arg_types.push_back(Nodes[i]->getType());
-  CalleeType = FunctionType::get(result_type, arg_types, /* isVarArg */ false);
+  for (auto i : external_outputs)
+    result_types.push_back(nodes[i]->getType());
+  Type *result_type = StructType::get(function.getContext(), result_types);
+  for (auto i : arg_inputs)
+    arg_types.push_back((function.arg_begin() + i)->getType());
+  for (auto i : external_inputs)
+    arg_types.push_back(nodes[i]->getType());
+  FunctionType *callee_type =
+      FunctionType::get(result_type, arg_types, /* isVarArg */ false);
 
-  raw_string_ostream NewNameOS(NewName);
-  NewNameOS << F.getName() << ".outlined.";
+  std::string new_name;
+  raw_string_ostream new_name_os(new_name);
+  new_name_os << function.getName() << ".outlined.";
   // Use assembler-friendly characters "." and "_".
-  OutDep.printSet(NewNameOS, BV, ".", "_");
-  NewCallee = Function::Create(CalleeType, GlobalValue::ExternalLinkage,
-                               NewNameOS.str() + ".callee", F.getParent());
+  deps.printSet(new_name_os, bv, ".", "_");
+  new_callee =
+      Function::Create(callee_type, GlobalValue::ExternalLinkage,
+                       new_name_os.str() + ".callee", function.getParent());
 
   // Pass more arguments and return values in registers.
   // TODO: experiment to check whether the code is actually smaller this way.
-  NewCallee->setCallingConv(CallingConv::Fast);
+  new_callee->setCallingConv(CallingConv::Fast);
 
   // Add function attributes.
   //
   // Note that we don't add the uwtable attribute. If the function never throws
   // exceptions, that means the unwinding table will be omitted, making the
   // function smaller but also preventing backtraces from working correctly.
-  NewCallee->addFnAttr(Attribute::MinSize);
-  NewCallee->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
-  if (F.hasPersonalityFn()) {
-    for (auto i : BV) {
-      if (Instruction *ins = dyn_cast<Instruction>(Nodes[i])) {
+  new_callee->addFnAttr(Attribute::MinSize);
+  new_callee->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  if (function.hasPersonalityFn()) {
+    for (auto i : bv) {
+      if (Instruction *ins = dyn_cast<Instruction>(nodes[i])) {
         if (ins->isEHPad()) {
-          NewCallee->setPersonalityFn(F.getPersonalityFn());
+          new_callee->setPersonalityFn(function.getPersonalityFn());
           break;
         }
       }
     }
   }
 
+  return new_callee;
+}
+
+Function *OutliningCalleeExtractor::createDefinition() {
+  if (!new_callee)
+    createDeclaration();
+  if (!new_callee->isDeclaration())
+    return new_callee;
+
+  const auto &PDT = deps.PDT;
+  const auto &Nodes = deps.Nodes;
+  const auto &NodeIndices = deps.NodeIndices;
+
   // Add entry and exit blocks. We need a new entry block because we might be
   // outlining a loop, and LLVM prohibits the entry block from being part of a
   // loop. We need a new exit block so we can set up the return value.
   BasicBlock *EntryBlock =
-      BasicBlock::Create(NewCallee->getContext(), "outline_entry", NewCallee);
-  BasicBlock *ExitBlock =
-      BasicBlock::Create(NewCallee->getContext(), "outline_return", NewCallee);
+      BasicBlock::Create(new_callee->getContext(), "outline_entry", new_callee);
+  BasicBlock *ExitBlock = BasicBlock::Create(new_callee->getContext(),
+                                             "outline_return", new_callee);
 
   // Create the value map and fill in the input values.
   ValueToValueMapTy VMap;
@@ -205,14 +221,14 @@ Function *OutliningExtractor::createNewCallee() {
   ValueMapper VM(VMap, RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
   // Map the callee's arguments to input values.
-  Function::arg_iterator new_arg_iter = NewCallee->arg_begin();
-  for (auto i : ArgInputs) {
-    Argument &orig_arg = *(F.arg_begin() + i);
+  Function::arg_iterator new_arg_iter = new_callee->arg_begin();
+  for (auto i : arg_inputs) {
+    Argument &orig_arg = *(function.arg_begin() + i);
     Argument &new_arg = *new_arg_iter++;
     VMap[&orig_arg] = &new_arg;
     new_arg.setName(orig_arg.getName());
   }
-  for (auto i : ExternalInputs) {
+  for (auto i : external_inputs) {
     Value &orig_value = *Nodes[i];
     Argument &new_value = *new_arg_iter++;
     if (input_phis.test(i))
@@ -221,11 +237,11 @@ Function *OutliningExtractor::createNewCallee() {
       VMap[&orig_value] = &new_value;
     new_value.setName(orig_value.getName());
   }
-  assert(new_arg_iter == NewCallee->arg_end());
+  assert(new_arg_iter == new_callee->arg_end());
 
   // Map blocks in the original function to blocks in the outlined function.
   DenseMap<BasicBlock *, BasicBlock *> BBMap;
-  for (BasicBlock &BB : F) {
+  for (BasicBlock &BB : function) {
     if (!NodeIndices.count(&BB))
       continue; // unreachable block
     // We may be outlining a branch (either a conditional branch, or an
@@ -234,24 +250,25 @@ Function *OutliningExtractor::createNewCallee() {
     // postdominator tree to skip blocks until we find one that actually is
     // being outlined.
     BasicBlock *PDom = &BB;
-    while (PDom && !OutlinedBlocks.test(NodeIndices.lookup(PDom)))
+    while (PDom && !outlined_blocks.test(NodeIndices.lookup(PDom)))
       PDom = PDT[PDom]->getIDom()->getBlock();
     if (!PDom) {
       VMap[&BB] = ExitBlock;
       continue;
     }
     if (!BBMap.count(PDom))
-      BBMap[PDom] = BasicBlock::Create(NewCallee->getContext(), PDom->getName(),
-                                       NewCallee);
+      BBMap[PDom] = BasicBlock::Create(new_callee->getContext(),
+                                       PDom->getName(), new_callee);
     VMap[&BB] = BBMap[PDom];
   }
 
   // Jump from the entry block to the first actual outlined block.
-  BasicBlock *FirstBlock = cast<BasicBlock>(Nodes[OutlinedBlocks.find_first()]);
+  BasicBlock *FirstBlock =
+      cast<BasicBlock>(Nodes[outlined_blocks.find_first()]);
   BranchInst::Create(BBMap[FirstBlock], EntryBlock);
 
   // Clone the selected instructions into the outlined function.
-  for (auto i : BV) {
+  for (auto i : bv) {
     if (Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i])) {
       BasicBlock *new_block = BBMap[orig_ins->getParent()];
       Instruction *new_ins = orig_ins->clone();
@@ -262,7 +279,7 @@ Function *OutliningExtractor::createNewCallee() {
   }
 
   // Remap instruction operands.
-  for (auto i : BV) {
+  for (auto i : bv) {
     Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i]);
     if (!orig_ins)
       continue;
@@ -281,7 +298,7 @@ Function *OutliningExtractor::createNewCallee() {
           new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
           continue;
         }
-        if (!BV.test(NodeIndices.lookup(orig_pred->getTerminator()))) {
+        if (!bv.test(NodeIndices.lookup(orig_pred->getTerminator()))) {
           // This incoming block is not being outlined. Instead, we will have
           // EntryBlock as a predecessor.
           phi_incoming.insert(orig_phi->getIncomingValue(j - 1));
@@ -332,40 +349,66 @@ Function *OutliningExtractor::createNewCallee() {
       BasicBlock *orig_pred = orig_phi->getIncomingBlock(j);
       if (!NodeIndices.count(orig_pred))
         continue; // unreachable block
-      if (BV.test(NodeIndices.lookup(orig_pred->getTerminator())))
+      if (bv.test(NodeIndices.lookup(orig_pred->getTerminator())))
         new_phi->addIncoming(orig_phi->getIncomingValue(j), orig_pred);
     }
     VM.remapInstruction(*new_phi);
   }
 
   // Set up the return instruction.
-  Value *ResultValue = UndefValue::get(CalleeType->getReturnType());
+  Value *ResultValue = UndefValue::get(new_callee->getReturnType());
   unsigned ResultI = 0;
-  for (auto i : ExternalOutputs)
+  for (auto i : external_outputs)
     ResultValue = InsertValueInst::Create(ResultValue, VMap[Nodes[i]],
                                           {ResultI++}, "", ExitBlock);
-  ReturnInst::Create(NewCallee->getContext(), ResultValue, ExitBlock);
+  ReturnInst::Create(new_callee->getContext(), ResultValue, ExitBlock);
 
   // If we're outlining an infinite loop, we shouldn't have an exit block.
   if (pred_empty(ExitBlock))
     ExitBlock->eraseFromParent();
 
-  return NewCallee;
+  return new_callee;
 }
 
-Function *OutliningExtractor::createNewCaller() {
-  createNewCallee();
+OutliningCallerExtractor::OutliningCallerExtractor(
+    Function &function, const OutliningDependenceResults &deps,
+    const std::vector<SparseBitVector<>> &bvs)
+    : function(function), deps(deps), bvs(bvs) {
+  for (const auto &bv : bvs)
+    callees.emplace_back(function, deps, bv);
+}
 
-  const auto &PDT = OutDep.PDT;
-  const auto &Nodes = OutDep.Nodes;
-  const auto &NodeIndices = OutDep.NodeIndices;
+Function *OutliningCallerExtractor::createDefinition() {
+  if (new_caller)
+    return new_caller;
+
+  const auto &PDT = deps.PDT;
+  const auto &Nodes = deps.Nodes;
+  const auto &NodeIndices = deps.NodeIndices;
 
   ValueToValueMapTy VMap;
-  NewCaller = CloneFunction(&F, VMap, nullptr);
-  NewCaller->setName(NewName + ".caller");
+  new_caller = CloneFunction(&function, VMap, nullptr);
+
+  std::string new_name;
+  raw_string_ostream new_name_os(new_name);
+  new_name_os << function.getName() << ".outlined.";
+  // Use assembler-friendly characters "." and "_".
+  bool new_name_first = true;
+  for (const auto &bv : bvs) {
+    if (new_name_first)
+      new_name_first = false;
+    else
+      new_name_os << "__";
+    deps.printSet(new_name_os, bv, ".", "_");
+  }
+  new_caller->setName(new_name_os.str() + ".caller");
+
+  assert(callees.size() == 1 && "unimplemented");
+  callees[0].createDeclaration();
+  const auto &bv = bvs[0];
 
   // Identify outlining point.
-  Value *OutliningPoint = Nodes[BV.find_first()];
+  Value *OutliningPoint = Nodes[bv.find_first()];
   Instruction *InsertionPoint;
   if (isa<Instruction>(OutliningPoint)) {
     InsertionPoint = cast<Instruction>(VMap[OutliningPoint]);
@@ -379,18 +422,19 @@ Function *OutliningExtractor::createNewCaller() {
 
   // Construct the call.
   SmallVector<Value *, 8> Args;
-  for (auto i : ArgInputs)
-    Args.push_back(NewCaller->arg_begin() + i);
-  for (auto i : ExternalInputs)
+  for (auto i : callees[0].arg_inputs)
+    Args.push_back(new_caller->arg_begin() + i);
+  for (auto i : callees[0].external_inputs)
     Args.push_back(VMap[Nodes[i]]);
-  CallInst *CI = CallInst::Create(NewCallee->getFunctionType(), NewCallee, Args,
-                                  "", InsertionPoint);
-  CI->setCallingConv(NewCallee->getCallingConv());
+  Function *new_callee = callees[0].createDeclaration();
+  CallInst *CI = CallInst::Create(new_callee->getFunctionType(), new_callee,
+                                  Args, "", InsertionPoint);
+  CI->setCallingConv(new_callee->getCallingConv());
 
   // Extract outputs.
   DenseMap<size_t, Value *> OutputValues;
   unsigned ResultI = 0;
-  for (auto i : ExternalOutputs)
+  for (auto i : callees[0].external_outputs)
     OutputValues[i] =
         ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
 
@@ -398,7 +442,7 @@ Function *OutliningExtractor::createNewCaller() {
   // BasicBlocks, because that would complicate the handling of PHI nodes. Any
   // unreachable or empty blocks can be deleted later by the SimplifyCFG pass.
   SmallVector<Instruction *, 16> insns_to_delete;
-  for (auto i : BV) {
+  for (auto i : bv) {
     if (Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i])) {
       if (isa<PHINode>(orig_ins) && orig_ins->getParent() == OutliningPoint) {
         // PHI node in the first block being outlined. We shouldn't necessarily
@@ -411,7 +455,7 @@ Function *OutliningExtractor::createNewCaller() {
         // Iterate backwards so we don't have to care about removeIncomingValue
         // renumbering things.
         for (unsigned j = orig_phi->getNumIncomingValues(); j > 0; --j)
-          if (BV.test(NodeIndices.lookup(
+          if (bv.test(NodeIndices.lookup(
                   orig_phi->getIncomingBlock(j - 1)->getTerminator())))
             new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
         continue;
@@ -453,11 +497,11 @@ Function *OutliningExtractor::createNewCaller() {
 
   // Handle PHI nodes in the caller that depend on control flow within the
   // callee. Other phi values will be rewritten by replaceAllUsesWith below.
-  for (size_t i : output_phis) {
+  for (size_t i : callees[0].output_phis) {
     PHINode *orig_phi = cast<PHINode>(Nodes[i]);
     PHINode *new_phi = cast<PHINode>(VMap[orig_phi]);
     for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j)
-      if (BV.test(NodeIndices.lookup(
+      if (bv.test(NodeIndices.lookup(
               orig_phi->getIncomingBlock(j)->getTerminator())))
         new_phi->setIncomingValue(j, OutputValues[i]);
   }
@@ -468,8 +512,8 @@ Function *OutliningExtractor::createNewCaller() {
   //
   // XXX: replaceAllUsesWith changes the values stored in VMap! So we can't use
   // VMap after executing this loop.
-  for (auto i : ExternalOutputs) {
-    if (!BV.test(i)) {
+  for (auto i : callees[0].external_outputs) {
+    if (!bv.test(i)) {
       // PHI node in the block after the call; handled separately.
       continue;
     }
@@ -483,10 +527,10 @@ Function *OutliningExtractor::createNewCaller() {
     ins->eraseFromParent();
   }
 
-  return NewCaller;
+  return new_caller;
 }
 
-static bool runOnFunction(Function &F, OutliningDependenceResults &OutDep,
+static bool runOnFunction(Function &function, OutliningDependenceResults &deps,
                           OutliningCandidates &OutCands) {
   // We track outlined functions in the output module by adding metadata nodes.
   // We can't add the metadata to the new functions because that would prevent
@@ -497,32 +541,31 @@ static bool runOnFunction(Function &F, OutliningDependenceResults &OutDep,
   SmallVector<Metadata *, 8> MDNodes;
 
   for (OutliningCandidates::Candidate &candidate : OutCands.Candidates) {
-    OutliningExtractor Extractor(F, OutDep, candidate.bv);
-    Function *NewCallee = Extractor.createNewCallee();
+    std::vector<SparseBitVector<>> bvs = {candidate.bv};
+    OutliningCallerExtractor caller_extractor(function, deps, bvs);
+    Function *NewCallee = caller_extractor.callees[0].createDefinition();
     if (NewCallee) {
       Changed = true;
 
-      Constant *NewCaller = Extractor.createNewCaller();
-      if (!NewCaller)
-        NewCaller = ConstantPointerNull::get(F.getType());
+      Function *NewCaller = caller_extractor.createDefinition();
 
       SmallVector<unsigned, 8> Bits;
       for (auto i : candidate.bv)
         Bits.push_back(i);
-      Metadata *BVNode =
-          ConstantAsMetadata::get(ConstantDataArray::get(F.getContext(), Bits));
+      Metadata *BVNode = ConstantAsMetadata::get(
+          ConstantDataArray::get(function.getContext(), Bits));
       Metadata *CalleeNode = ConstantAsMetadata::get(NewCallee);
       Metadata *CallerNode = ConstantAsMetadata::get(NewCaller);
       MDNodes.push_back(
-          MDNode::get(F.getContext(), {BVNode, CalleeNode, CallerNode}));
+          MDNode::get(function.getContext(), {BVNode, CalleeNode, CallerNode}));
     }
   }
 
   if (Changed) {
-    Metadata *OrigNode = ConstantAsMetadata::get(&F);
-    MDNode *ListNode = MDNode::get(F.getContext(), MDNodes);
-    MDNode *TopNode = MDNode::get(F.getContext(), {OrigNode, ListNode});
-    F.getParent()
+    Metadata *OrigNode = ConstantAsMetadata::get(&function);
+    MDNode *ListNode = MDNode::get(function.getContext(), MDNodes);
+    MDNode *TopNode = MDNode::get(function.getContext(), {OrigNode, ListNode});
+    function.getParent()
         ->getOrInsertNamedMetadata("smout.extracted.functions")
         ->addOperand(TopNode);
   }
@@ -541,10 +584,10 @@ PreservedAnalyses OutliningExtractorPass::run(Module &m,
       Functions.push_back(&F);
   bool Changed = false;
   for (Function *F : Functions) {
-    OutliningDependenceResults &OutDep =
+    OutliningDependenceResults &deps =
         fam.getResult<OutliningDependenceAnalysis>(*F);
     auto &OutCands = fam.getResult<OutliningCandidatesAnalysis>(*F);
-    Changed = runOnFunction(*F, OutDep, OutCands) || Changed;
+    Changed = runOnFunction(*F, deps, OutCands) || Changed;
   }
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
@@ -560,11 +603,11 @@ bool OutliningExtractorWrapperPass::runOnModule(Module &M) {
       Functions.push_back(&F);
   bool Changed = false;
   for (Function *F : Functions) {
-    OutliningDependenceResults &OutDep =
+    OutliningDependenceResults &deps =
         getAnalysis<OutliningDependenceWrapperPass>(*F).getOutDep();
     auto &OutCands =
         getAnalysis<OutliningCandidatesWrapperPass>(*F).getOutCands();
-    Changed = runOnFunction(*F, OutDep, OutCands) || Changed;
+    Changed = runOnFunction(*F, deps, OutCands) || Changed;
   }
   return Changed;
 }

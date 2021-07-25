@@ -25,28 +25,29 @@ namespace bcdb {
 
 using namespace llvm;
 
-class OutliningExtractor {
+class OutliningCalleeExtractor {
 public:
-  OutliningExtractor(Function &F, const OutliningDependenceResults &OutDep,
-                     const SparseBitVector<> &BV);
+  OutliningCalleeExtractor(Function &function,
+                           const OutliningDependenceResults &deps,
+                           const SparseBitVector<> &bv);
 
-  Function *createNewCallee();
-  Function *createNewCaller();
-  unsigned getNumCalleeArgs() const;
-  unsigned getNumCalleeReturnValues() const;
+  Function *createDeclaration();
+  Function *createDefinition();
+  unsigned getNumArgs() const;
+  unsigned getNumReturnValues() const;
   void getArgTypes(SmallVectorImpl<Type *> &types) const;
   void getResultTypes(SmallVectorImpl<Type *> &types) const;
 
-  Function &F;
-  const OutliningDependenceResults &OutDep;
-  const SparseBitVector<> &BV;
+  Function &function;
+  const OutliningDependenceResults &deps;
+  const SparseBitVector<> &bv;
 
 private:
-  FunctionType *CalleeType = nullptr;
-  Function *NewCallee = nullptr;
-  Function *NewCaller = nullptr;
-  SparseBitVector<> OutlinedBlocks;
-  SparseBitVector<> ArgInputs, ExternalInputs, ExternalOutputs;
+  friend class OutliningCallerExtractor;
+
+  Function *new_callee = nullptr;
+  SparseBitVector<> outlined_blocks;
+  SparseBitVector<> arg_inputs, external_inputs, external_outputs;
 
   // PHI nodes that were chosen for outlining, but which depend on control flow
   // outside the outlined set.
@@ -55,8 +56,23 @@ private:
   // PHI nodes that were not chosen for outlining, but which depend on control
   // flow in the outlined set.
   SparseBitVector<> output_phis;
+};
 
-  std::string NewName;
+class OutliningCallerExtractor {
+public:
+  OutliningCallerExtractor(Function &function,
+                           const OutliningDependenceResults &deps,
+                           const std::vector<SparseBitVector<>> &bvs);
+
+  Function *createDefinition();
+
+  Function &function;
+  const OutliningDependenceResults &deps;
+  const std::vector<SparseBitVector<>> &bvs;
+  std::vector<OutliningCalleeExtractor> callees;
+
+private:
+  Function *new_caller = nullptr;
 };
 
 // Needs to be a module pass because it adds new functions.

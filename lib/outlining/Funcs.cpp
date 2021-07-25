@@ -32,10 +32,10 @@ using namespace llvm;
 using namespace memodb;
 using bcdb::getSoleDefinition;
 using bcdb::LinearProgram;
+using bcdb::OutliningCalleeExtractor;
 using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
-using bcdb::OutliningExtractor;
 using bcdb::SizeModelAnalysis;
 
 static Node encodeBitVector(const SparseBitVector<> &bv) {
@@ -265,8 +265,8 @@ NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
-  OutliningExtractor extractor(f, deps, bv);
-  Function *callee = extractor.createNewCallee();
+  OutliningCalleeExtractor extractor(f, deps, bv);
+  Function *callee = extractor.createDefinition();
 
   bcdb::Splitter splitter(*m);
   auto mpart = splitter.SplitGlobal(callee);

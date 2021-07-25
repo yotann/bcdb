@@ -204,8 +204,8 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
     if (candidate.caller_savings <= 0)
       return;
 
-    OutliningExtractor extractor(F, OutDep, candidate.bv);
-    if (extractor.getNumCalleeArgs() + extractor.getNumCalleeReturnValues() >
+    OutliningCalleeExtractor extractor(F, OutDep, candidate.bv);
+    if (extractor.getNumArgs() + extractor.getNumReturnValues() >
         OutlineMaxArgs)
       return;
     candidate.arg_types.clear();
