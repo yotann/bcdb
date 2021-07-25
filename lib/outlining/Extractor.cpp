@@ -374,20 +374,20 @@ OutliningCallerExtractor::OutliningCallerExtractor(
     Function &function, const OutliningDependenceResults &deps,
     const std::vector<SparseBitVector<>> &bvs)
     : function(function), deps(deps), bvs(bvs) {
-  for (const auto &bv : bvs)
+  SparseBitVector<> all_bv;
+  for (const auto &bv : bvs) {
+    if (all_bv.intersects(bv))
+      report_fatal_error("can't outline overlapping candidates");
+    all_bv |= bv;
     callees.emplace_back(function, deps, bv);
+  }
 }
 
 Function *OutliningCallerExtractor::createDefinition() {
   if (new_caller)
     return new_caller;
 
-  const auto &PDT = deps.PDT;
-  const auto &Nodes = deps.Nodes;
-  const auto &NodeIndices = deps.NodeIndices;
-
-  ValueToValueMapTy VMap;
-  new_caller = CloneFunction(&function, VMap, nullptr);
+  new_caller = CloneFunction(&function, vmap, nullptr);
 
   std::string new_name;
   raw_string_ostream new_name_os(new_name);
@@ -395,130 +395,28 @@ Function *OutliningCallerExtractor::createDefinition() {
   // Use assembler-friendly characters "." and "_".
   bool new_name_first = true;
   for (const auto &bv : bvs) {
-    if (new_name_first)
-      new_name_first = false;
-    else
+    if (!new_name_first)
       new_name_os << "__";
+    new_name_first = false;
     deps.printSet(new_name_os, bv, ".", "_");
   }
   new_caller->setName(new_name_os.str() + ".caller");
 
-  assert(callees.size() == 1 && "unimplemented");
-  callees[0].createDeclaration();
-  const auto &bv = bvs[0];
+  unreachable_block =
+      BasicBlock::Create(new_caller->getContext(), "unreachable", new_caller);
+  new UnreachableInst(new_caller->getContext(), unreachable_block);
+  i32_type = IntegerType::get(new_caller->getContext(), 32);
 
-  // Identify outlining point.
-  Value *OutliningPoint = Nodes[bv.find_first()];
-  Instruction *InsertionPoint;
-  if (isa<Instruction>(OutliningPoint)) {
-    InsertionPoint = cast<Instruction>(VMap[OutliningPoint]);
-  } else if (isa<BasicBlock>(OutliningPoint)) {
-    InsertionPoint = cast<BasicBlock>(VMap[OutliningPoint])->getFirstNonPHI();
-  } else {
-    // MemoryPhi is impossible here because it has a forced dependence on the
-    // corresponding BasicBlock.
-    llvm_unreachable("Impossible node type");
-  }
-
-  // Construct the call.
-  SmallVector<Value *, 8> Args;
-  for (auto i : callees[0].arg_inputs)
-    Args.push_back(new_caller->arg_begin() + i);
-  for (auto i : callees[0].external_inputs)
-    Args.push_back(VMap[Nodes[i]]);
-  Function *new_callee = callees[0].createDeclaration();
-  CallInst *CI = CallInst::Create(new_callee->getFunctionType(), new_callee,
-                                  Args, "", InsertionPoint);
-  CI->setCallingConv(new_callee->getCallingConv());
-
-  // Extract outputs.
-  DenseMap<size_t, Value *> OutputValues;
-  unsigned ResultI = 0;
-  for (auto i : callees[0].external_outputs)
-    OutputValues[i] =
-        ExtractValueInst::Create(CI, {ResultI++}, "", InsertionPoint);
-
-  // Prepare to delete outlined instructions. We don't actually delete any
-  // BasicBlocks, because that would complicate the handling of PHI nodes. Any
-  // unreachable or empty blocks can be deleted later by the SimplifyCFG pass.
-  SmallVector<Instruction *, 16> insns_to_delete;
-  for (auto i : bv) {
-    if (Instruction *orig_ins = dyn_cast<Instruction>(Nodes[i])) {
-      if (isa<PHINode>(orig_ins) && orig_ins->getParent() == OutliningPoint) {
-        // PHI node in the first block being outlined. We shouldn't necessarily
-        // delete it; if it depends on control flow in the caller, we need to
-        // pass the result of the PHI into the callee. We do need to remove the
-        // PHI values that depend on control flow in the callee, because we're
-        // removing the corresponding CFG edges.
-        PHINode *orig_phi = cast<PHINode>(orig_ins);
-        PHINode *new_phi = cast<PHINode>(VMap[orig_phi]);
-        // Iterate backwards so we don't have to care about removeIncomingValue
-        // renumbering things.
-        for (unsigned j = orig_phi->getNumIncomingValues(); j > 0; --j)
-          if (bv.test(NodeIndices.lookup(
-                  orig_phi->getIncomingBlock(j - 1)->getTerminator())))
-            new_phi->removeIncomingValue(j - 1, /*DeletePHIIfEmpty*/ false);
-        continue;
-      }
-      insns_to_delete.push_back(cast<Instruction>(VMap[orig_ins]));
-      if (orig_ins->isTerminator()) {
-        // Replace a (possibly conditional) branch or other terminator with an
-        // unconditional branch, skipping over outlined conditional code.
-        auto PDom = PDT[orig_ins->getParent()]->getIDom();
-        if (PDom && PDom->getBlock()) {
-          BranchInst::Create(cast<BasicBlock>(VMap[PDom->getBlock()]),
-                             cast<BasicBlock>(VMap[orig_ins->getParent()]));
-        } else {
-          // There are a few ways this can happen:
-          //
-          // 1. The terminator is a RetInst or an "unwind to caller"
-          // instruction.
-          // 2. The terminator is an UnreachableInst.
-          // 3. The terminator is a ResumeInst.
-          // 4. The terminator is part of an infinite loop.
-          // 5. The terminator is a conditional branch with at least one path
-          //    to one of cases 1-5.
-          //
-          // Case 1 is prohibited by OutliningDependence. In case 5, all
-          // instructions that can be executed after the branch will be
-          // (directly or indirectly) control-dependent on it, and
-          // OutliningDependence requires all such instructions be outlined
-          // whenever the branch is outlined; this is only allowed if all paths
-          // after the branch eventually lead to cases 2-4. And no path leading
-          // to cases 2-4 will ever return normally from the outlined callee.
-          // So regardless of which case we have, this instruction is
-          // unreachable.
-          new UnreachableInst(orig_ins->getContext(),
-                              cast<BasicBlock>(VMap[orig_ins->getParent()]));
-        }
-      }
-    }
-  }
-
-  // Handle PHI nodes in the caller that depend on control flow within the
-  // callee. Other phi values will be rewritten by replaceAllUsesWith below.
-  for (size_t i : callees[0].output_phis) {
-    PHINode *orig_phi = cast<PHINode>(Nodes[i]);
-    PHINode *new_phi = cast<PHINode>(VMap[orig_phi]);
-    for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j)
-      if (bv.test(NodeIndices.lookup(
-              orig_phi->getIncomingBlock(j)->getTerminator())))
-        new_phi->setIncomingValue(j, OutputValues[i]);
-  }
+  for (size_t m = 0; m < callees.size(); ++m)
+    handleSingleCallee(bvs[m], callees[m]);
 
   // Replace uses of outlined instructions.
   //
-  // XXX: this loop must be executed *after* the PHI node handling above.
-  //
-  // XXX: replaceAllUsesWith changes the values stored in VMap! So we can't use
-  // VMap after executing this loop.
-  for (auto i : callees[0].external_outputs) {
-    if (!bv.test(i)) {
-      // PHI node in the block after the call; handled separately.
-      continue;
-    }
-    OutputValues[i]->takeName(VMap[Nodes[i]]);
-    VMap[Nodes[i]]->replaceAllUsesWith(OutputValues[i]);
+  // XXX: replaceAllUsesWith changes the values stored in vmap! So we can't use
+  // vmap after executing this loop.
+  for (const auto &item : replacements) {
+    item.second->takeName(item.first);
+    item.first->replaceAllUsesWith(item.second);
   }
 
   // Actually delete outlined instructions.
@@ -528,6 +426,147 @@ Function *OutliningCallerExtractor::createDefinition() {
   }
 
   return new_caller;
+}
+
+BasicBlock *OutliningCallerExtractor::findNextBlock(BasicBlock *bb) {
+  const auto &pdt = deps.PDT;
+  auto pdom = pdt[bb]->getIDom();
+  if (!pdom || !pdom->getBlock())
+    return nullptr;
+
+  // Breadth-first search.
+  DenseMap<BasicBlock *, BasicBlock *> pred;
+  pred[bb] = nullptr;
+  SmallVector<BasicBlock *, 8> queue;
+  queue.emplace_back(bb);
+  for (BasicBlock *block : queue) {
+    if (block == pdom->getBlock())
+      break;
+    for (BasicBlock *succ : successors(block)) {
+      if (!pred.count(succ)) {
+        pred[succ] = block;
+        queue.emplace_back(succ);
+      }
+    }
+  }
+
+  BasicBlock *block = pdom->getBlock();
+  while (pred[block] != bb) {
+    assert(pred[block] && "no path found to postdominator!");
+    block = pred[block];
+  }
+  return block;
+}
+
+void OutliningCallerExtractor::handleSingleCallee(
+    const SparseBitVector<> &bv, OutliningCalleeExtractor &callee) {
+  const auto &nodes = deps.Nodes;
+  const auto &node_indices = deps.NodeIndices;
+
+  Value *outlining_point = nodes[bv.find_first()];
+  Instruction *insertion_point;
+  if (isa<Instruction>(outlining_point)) {
+    insertion_point = cast<Instruction>(vmap[outlining_point]);
+  } else if (isa<BasicBlock>(outlining_point)) {
+    insertion_point = cast<BasicBlock>(vmap[outlining_point])->getFirstNonPHI();
+  } else {
+    // MemoryPhi is impossible here because it has a forced dependence on the
+    // corresponding BasicBlock.
+    llvm_unreachable("Impossible node type");
+  }
+
+  // Construct the call.
+  SmallVector<Value *, 8> args;
+  for (auto i : callee.arg_inputs)
+    args.push_back(new_caller->arg_begin() + i);
+  for (auto i : callee.external_inputs)
+    args.push_back(vmap[nodes[i]]);
+  Function *new_callee = callee.createDeclaration();
+  CallInst *call_inst = CallInst::Create(new_callee->getFunctionType(),
+                                         new_callee, args, "", insertion_point);
+  call_inst->setCallingConv(new_callee->getCallingConv());
+
+  // Extract outputs.
+  DenseMap<size_t, Value *> output_values;
+  unsigned result_i = 0;
+  for (auto i : callee.external_outputs)
+    output_values[i] =
+        ExtractValueInst::Create(call_inst, {result_i++}, "", insertion_point);
+
+  // Handle PHI nodes in the caller that depend on control flow within the
+  // callee. Other phi values will be rewritten by replaceAllUsesWith below.
+  for (size_t i : callee.output_phis) {
+    PHINode *orig_phi = cast<PHINode>(nodes[i]);
+    PHINode *new_phi = cast<PHINode>(vmap[orig_phi]);
+    for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j)
+      if (bv.test(node_indices.lookup(
+              orig_phi->getIncomingBlock(j)->getTerminator())))
+        new_phi->setIncomingValue(j, output_values[i]);
+  }
+
+  // Prepare to delete outlined instructions. We don't actually delete any
+  // BasicBlocks or CFG edges, because that would complicate the handling of
+  // PHI nodes. Any unreachable or empty blocks can be deleted later by the
+  // SimplifyCFG pass.
+  for (auto i : bv) {
+    if (Instruction *orig_ins = dyn_cast<Instruction>(nodes[i])) {
+      if (isa<PHINode>(orig_ins) && orig_ins->getParent() == outlining_point) {
+        // PHI node in the first block being outlined. We shouldn't necessarily
+        // delete it; if it depends on control flow in the caller, we need to
+        // pass the result of the PHI into the callee.
+        continue;
+      }
+      insns_to_delete.push_back(cast<Instruction>(vmap[orig_ins]));
+      if (orig_ins->isTerminator()) {
+        // The terminator's input values may be deleted, but we don't want to
+        // change the CFG, so we replace it with a switch instruction that has
+        // all the same successors.
+
+        // The switch instruction should always jump to the next block on the
+        // path to the postdominator.
+        BasicBlock *next = findNextBlock(orig_ins->getParent());
+
+        // There are a few ways next can be nullptr:
+        //
+        // 1. The terminator is a RetInst or an "unwind to caller" instruction.
+        // 2. The terminator is an UnreachableInst.
+        // 3. The terminator is a ResumeInst.
+        // 4. The terminator is part of an infinite loop.
+        // 5. The terminator is a conditional branch with at least one path to
+        //    one of cases 1-5.
+        //
+        // Case 1 is prohibited by OutliningDependence. In case 5, all
+        // instructions that can be executed after the branch will be (directly
+        // or indirectly) control-dependent on it, and OutliningDependence
+        // requires all such instructions be outlined whenever the branch is
+        // outlined; this is only allowed if all paths after the branch
+        // eventually lead to cases 2-4. And no path leading to cases 2-4 will
+        // ever return normally from the outlined callee. So regardless of
+        // which case we have, this instruction is unreachable.
+        BasicBlock *default_block =
+            next ? cast<BasicBlock>(vmap[next]) : unreachable_block;
+
+        unsigned next_index = 0;
+        auto switch_inst = SwitchInst::Create(
+            ConstantInt::get(i32_type, next_index++), default_block, 0,
+            cast<BasicBlock>(vmap[orig_ins->getParent()]));
+        for (BasicBlock *succ : successors(orig_ins->getParent())) {
+          if (succ == next)
+            continue;
+          switch_inst->addCase(ConstantInt::get(i32_type, next_index++),
+                               cast<BasicBlock>(vmap[succ]));
+        }
+      }
+    }
+  }
+
+  for (auto i : callee.external_outputs) {
+    if (!bv.test(i)) {
+      // PHI node in the block after the call; handled separately.
+      continue;
+    }
+    replacements[vmap[nodes[i]]] = output_values[i];
+  }
 }
 
 static bool runOnFunction(Function &function, OutliningDependenceResults &deps,

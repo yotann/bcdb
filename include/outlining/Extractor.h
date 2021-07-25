@@ -6,6 +6,7 @@
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
+#include <llvm/Transforms/Utils/ValueMapper.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,7 +16,9 @@
 
 namespace llvm {
 class AnalysisUsage;
+class BasicBlock;
 class Function;
+class IntegerType;
 class Module;
 class Type;
 class raw_ostream;
@@ -72,7 +75,19 @@ public:
   std::vector<OutliningCalleeExtractor> callees;
 
 private:
+  // Find a successor of bb that leads to its immediate postdominator, or
+  // nullptr if there is no such successor.
+  BasicBlock *findNextBlock(BasicBlock *bb);
+
+  void handleSingleCallee(const SparseBitVector<> &bv,
+                          OutliningCalleeExtractor &callee);
+
   Function *new_caller = nullptr;
+  DenseMap<Value *, Value *> replacements;
+  SmallVector<Instruction *, 16> insns_to_delete;
+  ValueToValueMapTy vmap;
+  BasicBlock *unreachable_block;
+  IntegerType *i32_type;
 };
 
 // Needs to be a module pass because it adds new functions.
