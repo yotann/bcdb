@@ -36,6 +36,8 @@ const Node *Future::operator->() { return &operator*(); }
 
 const CID &Future::getCID() { return get().getCID(); }
 
+void Future::freeNode() { get().freeNode(); }
+
 Future::Future(std::shared_future<NodeRef> &&future)
     : future(std::move(future)) {}
 

@@ -292,9 +292,11 @@ NodeOrCID smout::unique_callees(Evaluator &evaluator,
       for (auto &candidate : item.value().list_range())
         callees.emplace_back(evaluator.evaluateAsync(
             "smout.extracted.callee", func_cid, candidate["nodes"]));
+    result.freeNode();
   }
   StringSet unique;
   for (auto &result : callees) {
+    result.freeNode();
     auto bytes = result.getCID().asBytes();
     unique.insert(
         StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
@@ -337,6 +339,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
             "smout.extracted.callee", func_cid, candidate["nodes"]));
       }
     }
+    result.freeNode();
   }
 
   StringMap<size_t> callee_indices;
@@ -345,6 +348,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
   std::vector<size_t> callee_for_caller;
   std::vector<int> sum_s_n;
   for (size_t m = 0; m < callees.size(); ++m) {
+    callees[m].freeNode();
     auto bytes = callees[m].getCID().asBytes();
     auto key =
         StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
@@ -515,6 +519,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
           if (m0 != m1)
             o_m[m0].set(m1);
     }
+    result.freeNode();
   }
 
   // Get extracted callees.
@@ -523,6 +528,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
   std::vector<size_t> n_from_m;
   std::vector<SmallVector<size_t, 2>> m_from_n;
   for (size_t m = 0; m < callees.size(); ++m) {
+    callees[m].freeNode();
     auto bytes = callees[m].getCID().asBytes();
     auto key =
         StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());

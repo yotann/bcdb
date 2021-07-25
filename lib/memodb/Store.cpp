@@ -43,6 +43,11 @@ const CID &NodeRef::getCID() {
   return *cid;
 }
 
+void NodeRef::freeNode() {
+  getCID();
+  node.reset();
+}
+
 std::unique_ptr<Store> Store::open(llvm::StringRef uri,
                                    bool create_if_missing) {
   if (uri.startswith("sqlite:")) {

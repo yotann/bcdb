@@ -100,6 +100,7 @@ public:
   const Node &operator*();
   const Node *operator->();
   const CID &getCID();
+  void freeNode();
 };
 
 class Store {
