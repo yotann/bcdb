@@ -40,9 +40,16 @@ public:
 template <unsigned bits_per_char>
 std::optional<std::vector<std::uint8_t>>
 BitwiseBase<bits_per_char>::decodeWithoutPrefix(llvm::StringRef str) const {
-  // XXX: strings are accepted even if their pad bits are nonzero (e.g.,
-  // "cafkqaab=" is equivalent to "cafkqaaa=").
+  // XXX: strings are accepted even if their pad bits are nonzero (e.g., base64
+  // "AVUAAA==" is equivalent to "AVUAAB=="). This matches other base64
+  // decoders.
+  //
+  // RFC4648 says "These pad bits MUST be set to zero by conforming encoders",
+  // and "decoders MAY chose to reject an encoding if the pad bits have not
+  // been set to zero".
+
   std::vector<std::uint8_t> Result;
+  Result.reserve(bits_per_char * str.size() / 8);
   bool PadSeen = false;
   while (!str.empty()) {
     std::uint64_t Value = 0;
@@ -50,32 +57,40 @@ BitwiseBase<bits_per_char>::decodeWithoutPrefix(llvm::StringRef str) const {
     do {
       Value <<= bits_per_char;
       NumBits += bits_per_char;
-      if (str.empty() && pad_)
-        return {}; // missing padding
-      if (str.empty())
-        continue;
-      std::int8_t CharValue = values_[(std::uint8_t)str[0]];
-      str = str.drop_front();
-      if (CharValue == InvalidValue)
-        return {}; // invalid char
-      if (CharValue == PadValue && !ValidBits)
-        return {}; // too much padding
-      if (CharValue == PadValue) {
-        PadSeen = true;
+
+      std::int8_t CharValue;
+      if (str.empty()) {
+        if (pad_)
+          return {}; // missing padding
+        else
+          CharValue = PadValue; // pretend there's padding
       } else {
-        if (PadSeen)
-          return {}; // chars after padding
+        CharValue = values_[(std::uint8_t)str[0]];
+        str = str.drop_front();
+      }
+
+      if (CharValue == InvalidValue) {
+        return {}; // invalid char
+      } else if (CharValue == PadValue) {
+        if (!ValidBits)
+          return {}; // too much padding
+        PadSeen = true;
+      } else if (PadSeen) {
+        return {}; // non-padding chars after padding
+      } else {
         ValidBits += bits_per_char;
         Value |= CharValue;
       }
     } while (NumBits % 8);
+
     while (ValidBits >= 8) {
       ValidBits -= 8;
       NumBits -= 8;
       Result.push_back((Value >> NumBits) & 0xff);
     }
+
     if (ValidBits >= bits_per_char)
-      return {}; // unused char
+      return {}; // wrong padding amount (unused char)
   }
   return Result;
 }

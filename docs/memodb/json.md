@@ -196,8 +196,8 @@ suitable for use in URLs without any escaping. It might be nice to use
 `base64pad` instead, to match the representation of byte strings, but that
 would require CIDs to be reencoded or escaped when used in URLs, which would be
 inconvenient for debugging. On the rare occasions when it's necessary to decode
-a CID into binary, clients can easily convert the `base64url` CIDs into
-`base64pad`.
+a CID into binary, clients can easily [convert the `base64url` CIDs into
+`base64pad`](https://datatracker.ietf.org/doc/html/rfc7515#appendix-C).
 
 The format could allow other multibases to be used, but that would create
 difficulties for clients that don't have a Multibase implementation available.
