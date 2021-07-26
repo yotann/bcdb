@@ -1,5 +1,7 @@
 #include "memodb/Node.h"
 
+#include <limits>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/ConvertUTF.h>
 #include <llvm/Support/Format.h>
 #include <llvm/Support/JSON.h>
@@ -252,12 +254,22 @@ static void writeJSON(llvm::json::OStream &os, const Node &value) {
   case Kind::Float:
     os.objectBegin();
     os.attributeBegin("float");
+#if LLVM_VERSION_MAJOR >= 12
     os.rawValue([&value](llvm::raw_ostream &os) {
       os << '"'
          << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
                          value.as<double>())
          << '"';
     });
+#else
+    {
+      llvm::SmallVector<char, 64> buffer;
+      llvm::raw_svector_ostream raw_os(buffer);
+      raw_os << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
+                             value.as<double>());
+      os.value(raw_os.str());
+    }
+#endif
     os.attributeEnd();
     os.objectEnd();
     break;
