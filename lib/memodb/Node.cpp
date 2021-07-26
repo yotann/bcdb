@@ -1,6 +1,7 @@
 #include "memodb/Node.h"
 
 #include <llvm/Support/ConvertUTF.h>
+#include <llvm/Support/Format.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 #include <sstream>
@@ -250,7 +251,14 @@ static void writeJSON(llvm::json::OStream &os, const Node &value) {
     break;
   case Kind::Float:
     os.objectBegin();
-    os.attribute("float", value.as<double>());
+    os.attributeBegin("float");
+    os.rawValue([&value](llvm::raw_ostream &os) {
+      os << '"'
+         << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
+                         value.as<double>())
+         << '"';
+    });
+    os.attributeEnd();
     os.objectEnd();
     break;
   case Kind::String:
@@ -706,8 +714,11 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
   case llvm::json::Value::Object: {
     const auto &outer = *value.getAsObject();
     if (outer.size() == 1) {
-      if (auto f = outer.getNumber("float")) {
-        return Node(*f);
+      if (auto f = outer.getString("float")) {
+        double d;
+        if (f->getAsDouble(d))
+          return createInvalidJSONError("Invalid float");
+        return Node(d);
       }
       if (auto base64 = outer.getString("base64")) {
         auto bytes = Multibase::base64pad.decodeWithoutPrefix(*base64);

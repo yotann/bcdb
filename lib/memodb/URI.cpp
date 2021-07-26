@@ -164,7 +164,9 @@ std::string URI::encode() const {
     result += "/";
   if (!path_segments.empty()) {
     for (const auto &segment : path_segments) {
-      percentEncode(segment, escape_slashes_in_segments ? path_allowed : path_allowed_with_slash);
+      percentEncode(segment, escape_slashes_in_segments
+                                 ? path_allowed
+                                 : path_allowed_with_slash);
       result += "/";
     }
     result.pop_back();

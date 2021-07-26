@@ -24,9 +24,17 @@ TEST(JSONWriteTest, Integer) {
 }
 
 TEST(JSONWriteTest, Float) {
-  test_print("{\"float\":1}", Node(1.0));
-  test_print("{\"float\":1.5}", Node(1.5));
-  test_print("{\"float\":-4.5}", Node(-4.5));
+  test_print("{\"float\":\"1\"}", Node(1.0));
+  test_print("{\"float\":\"1.5\"}", Node(1.5));
+  test_print("{\"float\":\"-4.5\"}", Node(-4.5));
+  // This is a weird value--the correct value is closer to
+  // -1.00000000000000065e-308 than -1.0000000000000009e-308--but it still
+  // rounds to the correct 64-bit float.
+  test_print("{\"float\":\"-1.0000000000000009e-308\"}",
+             Node(-1.000000000000001e-308));
+  test_print("{\"float\":\"-1.0000000000000004e-308\"}",
+             Node(-1.0000000000000004e-308));
+  test_print("{\"float\":\"-0\"}", Node(-0.0));
 }
 
 TEST(JSONWriteTest, Bool) {

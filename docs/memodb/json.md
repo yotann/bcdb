@@ -119,12 +119,15 @@ representations of integers.
 ## Floats
 
 ```json
-{"float": 3.142}
-{"float": 1}
+{"float": "3.142"}
+{"float": "1"}
+{"float": "-0"}
+{"float": "-1.00000000000000065042509409911827826032367803636410424129692898e-308"}
 ```
 
 MemoDB floats are represented with a special single-element JSON object, with
-the name `"float"` and a value which is a JSON number.
+the name `"float"` and a value which is a string representation of the float.
+The string representation will itself be a valid JSON number.
 
 Implementations do **not** need to support floating-point infinities and NaNs,
 which are not allowed in MemoDB Nodes.
@@ -135,6 +138,19 @@ Floats could be distinguished from integers by the presence of a fractional
 part, so `1` would be an integer and `1.0` would be a float. However, some
 useful JSON implementations (such as the `jq` tool, and LLVM's implementation)
 do not distinguish between `1` and `1.0`.
+
+Floats could be represented with special objects containing JSON numbers, like
+`{"float": 1}`. However, some useful implementations (such as [PHP] and
+Chromium's `JSON.stringify()`) do not distinguish between `0.0` and `-0.0`.
+There are also some disagreements between floating point parsers; Ruby rounds
+the number
+`"-1.00000000000000065042509409911827826032367803636410424129692898e-308"`
+incorrectly, for example, although the MemoDB server is unlikely to produce a
+value with such an excessive number of digits.
+
+All in all, the best way to ensure the JSON is a faithful representation of the
+Node is to avoid the use of the client's floating-point parser and formatter.
+If you don't like it, switch to CBOR, which avoids all of these issues.
 
 ## Text strings
 
@@ -262,8 +278,12 @@ header to be valid, allowing cached JSON responses to be validated.
 
 The exact details of the server's JSON encoding are partially unspecified in
 order to allow the server to switch to a different JSON implementation in the
-future.
+future. It might be nice to use the rules in [RFC 8785], but some of the
+requirements there are a poor match for MemoDB (for instance, the required use
+of UTF-16 for sorting).
 
 [DAG-JSON]: https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-json.md
 [Diagnostic Notation]: https://www.rfc-editor.org/rfc/rfc8949.html#name-diagnostic-notation
 [Extended Diagnostic Notation]: https://datatracker.ietf.org/doc/html/rfc8610#appendix-G
+[PHP]: https://github.com/php/php-src/pull/7234
+[RFC 8785]: https://www.rfc-editor.org/info/rfc8785

@@ -1,7 +1,9 @@
 #include "memodb/Node.h"
 
-#include "gtest/gtest.h"
+#include <cmath>
 #include <sstream>
+
+#include "gtest/gtest.h"
 
 using namespace memodb;
 
@@ -24,9 +26,24 @@ TEST(JSONLoadTest, Integer) {
 }
 
 TEST(JSONLoadTest, Float) {
-  test_load("{\"float\":1}", Node(1.0));
-  test_load("{\"float\":1.5}", Node(1.5));
-  test_load("{\"float\":-4.5}", Node(-4.5));
+  test_load("{\"float\":\"1\"}", Node(1.0));
+  test_load("{\"float\":\"1.5\"}", Node(1.5));
+  test_load("{\"float\":\"-4.5\"}", Node(-4.5));
+  test_load("{\"float\":\"-1.000000000000001e-308\"}",
+            Node(-1.000000000000001e-308));
+  test_load(
+      "{\"float\":\"-1."
+      "00000000000000065042509409911827826032367803636410424129692898e-308\"}",
+      Node(-1.000000000000001e-308));
+  test_load(
+      "{\"float\":\"-1."
+      "00000000000000065042509409911827826032367803636410424129692897e-308\"}",
+      Node(-1.0000000000000004e-308));
+
+  test_load("{\"float\":\"-0\"}", Node(-0.0));
+  auto actualOrErr = Node::loadFromJSON("{\"float\":\"-0\"}");
+  EXPECT_EQ(true, (bool)actualOrErr);
+  EXPECT_TRUE(std::signbit(actualOrErr->as<double>()));
 }
 
 TEST(JSONLoadTest, Bool) {
