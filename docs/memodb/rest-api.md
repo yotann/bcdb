@@ -66,6 +66,15 @@ algorithm as the server. In particular, the choice between raw data and
 DAG-CBOR CIDs and the choice between identity and Blake2b-256 CIDs must match
 between client and server. Otherwise, things may not work properly.
 
+### Head formats
+
+Forward slashes in head names may optionally be escaped. For example
+`/head/a/b` and `/head/a%2Fb` are equivalent. When the server returns a list of
+head names, it will not escape slashes.
+
+Note that other characters (such as backslashes) must still be escaped if
+required by the URI specification.
+
 ## CID endpoints
 
 ### Get a Node by looking up its CID

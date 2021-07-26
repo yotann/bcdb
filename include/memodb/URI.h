@@ -32,6 +32,7 @@ public:
   bool rootless = false;
   std::vector<std::string> path_segments;
   std::vector<std::string> query_params;
+  bool escape_slashes_in_segments = true;
 };
 
 } // end namespace memodb

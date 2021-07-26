@@ -64,12 +64,14 @@ std::unique_ptr<Store> Store::open(llvm::StringRef uri,
 std::ostream &memodb::operator<<(std::ostream &os, const Head &head) {
   URI uri;
   uri.path_segments = {"head", head.Name};
+  uri.escape_slashes_in_segments = false;
   return os << uri.encode();
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Head &head) {
   URI uri;
   uri.path_segments = {"head", head.Name};
+  uri.escape_slashes_in_segments = false;
   return os << uri.encode();
 }
 

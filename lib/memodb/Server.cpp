@@ -55,8 +55,8 @@ void Server::handleRequest(Request &request) {
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "head") {
     if (uri.path_segments.size() == 1)
       return handleRequestHead(request, std::nullopt);
-    if (uri.path_segments.size() == 2)
-      return handleRequestHead(request, uri.path_segments[1]);
+    if (uri.path_segments.size() >= 2)
+      return handleRequestHead(request, uri.getPathString(1));
   }
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "call") {
     if (uri.path_segments.size() == 1)
@@ -144,6 +144,7 @@ void Server::handleRequestHead(Request &request,
     store.eachHead([&](const Head &head) {
       uris.emplace_back();
       uris.back().path_segments = {"head", head.Name};
+      uris.back().escape_slashes_in_segments = false;
       return false;
     });
     return request.sendContentURIs(uris, Request::CacheControl::Mutable);
