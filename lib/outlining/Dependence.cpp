@@ -392,9 +392,15 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   }
 
   // Memory dependences.
-  if (MSSA.getMemoryAccess(I)) {
-    MemoryAccess *MA = MSSA.getWalker()->getClobberingMemoryAccess(I);
-    addDepend(I, MA);
+  if (MemoryAccess *ma = MSSA.getMemoryAccess(I)) {
+    if (MemoryDef *def = dyn_cast<MemoryDef>(ma)) {
+      // This is necessary in case there is a MemoryUse later on that depends
+      // on this instruction, but the actual store occurred in a previous
+      // instruction.
+      addDepend(I, def->getDefiningAccess());
+    } else {
+      addDepend(I, MSSA.getWalker()->getClobberingMemoryAccess(ma));
+    }
   }
 
   // Control dependences.

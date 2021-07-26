@@ -439,7 +439,9 @@ BasicBlock *OutliningCallerExtractor::findNextBlock(BasicBlock *bb) {
   pred[bb] = nullptr;
   SmallVector<BasicBlock *, 8> queue;
   queue.emplace_back(bb);
-  for (BasicBlock *block : queue) {
+  for (size_t i = 0; i < queue.size(); ++i) {
+    // Note that queue is modified within this loop.
+    BasicBlock *block = queue[i];
     if (block == pdom->getBlock())
       break;
     for (BasicBlock *succ : successors(block)) {

@@ -22,22 +22,34 @@ def trace_args(args):
 opts, args = getopt.gnu_getopt(
     sys.argv[1:],
     "",
-    ["no-run"],
+    ["allow-nonzero-return", "no-run"],
 )
-filename = args[0]
-lli_args = args[1:]
+filename = None
+lli_pre_args = []
+lli_post_args = []
+for arg in args:
+    if filename is None and not arg.startswith("-"):
+        filename = arg
+    elif filename is None:
+        lli_pre_args.append(arg)
+    else:
+        lli_post_args.append(arg)
 
+allow_nonzero_return = False
 enable_lli = True
 for opt, value in opts:
     if opt == "--no-run":
         enable_lli = False
+    elif opt == "--allow-nonzero-return":
+        allow_nonzero_return = True
 
 if enable_lli:
     # Run original code to determine expected output.
-    args = ["lli", filename] + lli_args
+    args = ["lli"] + lli_pre_args + ["-"] + lli_post_args
     trace_args(args)
-    p = subprocess.run(args, capture_output=True)
-    p.check_returncode()
+    p = subprocess.run(args, input=open(filename, "rb").read(), capture_output=True)
+    if not allow_nonzero_return:
+        p.check_returncode()
     expected_returncode = p.returncode
     expected_stdout = p.stdout
     expected_stderr = p.stderr
@@ -59,7 +71,9 @@ class Candidate:
         return f"{self.function}:{self.nodes}"
 
     def overlaps(self, other):
-        return not self.node_set.isdisjoint(other.node_set)
+        return self.function == other.function and not self.node_set.isdisjoint(
+            other.node_set
+        )
 
 
 # List all candidates.
@@ -102,7 +116,7 @@ while candidates:
     bitcode = subprocess.check_output(args)
 
     if enable_lli:
-        args = ["lli", "-"] + lli_args
+        args = ["lli"] + lli_pre_args + ["-"] + lli_post_args
         trace_args(args)
         p = subprocess.run(args, input=bitcode, capture_output=True)
         if p.returncode != expected_returncode:
