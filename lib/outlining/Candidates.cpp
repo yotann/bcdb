@@ -1,5 +1,8 @@
 #include "outlining/Candidates.h"
 
+#include <string>
+#include <tuple>
+
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/Support/CommandLine.h>
@@ -13,10 +16,9 @@
 using namespace bcdb;
 using namespace llvm;
 
-static cl::list<int> OutlineOnly("outline-only", cl::CommaSeparated,
-                                 cl::ZeroOrMore,
-                                 cl::desc("Specify nodes to outline"),
-                                 cl::value_desc("node,node,..."));
+static cl::list<std::string> OutlineOnly("outline-only", cl::ZeroOrMore,
+                                         cl::desc("Specify nodes to outline"),
+                                         cl::value_desc("func:node,node,..."));
 
 static cl::opt<size_t>
     OutlineMaxAdjacent("outline-max-adjacent", cl::init(10),
@@ -41,13 +43,31 @@ OutliningCandidates::OutliningCandidates(Function &F,
                                          const SizeModelResults *size_model)
     : F(F), OutDep(OutDep), size_model(size_model) {
   if (!OutlineOnly.empty()) {
-    Candidate candidate;
-    for (int i : OutlineOnly)
-      candidate.bv.set(i);
-    if (!OutDep.isOutlinable(candidate.bv))
-      report_fatal_error("Specified nodes cannot be outlined",
-                         /* gen_crash_diag */ false);
-    Candidates.emplace_back(std::move(candidate));
+    for (StringRef chosen : OutlineOnly) {
+      if (chosen.contains(':')) {
+        StringRef func_name;
+        std::tie(func_name, chosen) = chosen.split(':');
+        if (func_name != F.getName())
+          continue;
+      }
+      Candidate candidate;
+      while (!chosen.empty()) {
+        StringRef span;
+        std::tie(span, chosen) = chosen.split(',');
+        StringRef first_str, last_str;
+        std::tie(first_str, last_str) = span.split('-');
+        size_t first = 0;
+        first_str.getAsInteger(10, first);
+        size_t last = first;
+        last_str.getAsInteger(10, last);
+        for (size_t i = first; i <= last; ++i)
+          candidate.bv.set(i);
+      }
+      if (!OutDep.isOutlinable(candidate.bv))
+        report_fatal_error("Specified nodes cannot be outlined",
+                           /* gen_crash_diag */ false);
+      Candidates.emplace_back(std::move(candidate));
+    }
     return;
   }
 

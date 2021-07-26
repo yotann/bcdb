@@ -571,45 +571,22 @@ void OutliningCallerExtractor::handleSingleCallee(
 
 static bool runOnFunction(Function &function, OutliningDependenceResults &deps,
                           OutliningCandidates &OutCands) {
-  // We track outlined functions in the output module by adding metadata nodes.
-  // We can't add the metadata to the new functions because that would prevent
-  // the BCDB from deduplicating them, and it seems silly to modify the
-  // original function just to add one piece of metadata. So we use
-  // module-level named metadata.
-  bool Changed = false;
-  SmallVector<Metadata *, 8> MDNodes;
+  std::vector<SparseBitVector<>> bvs;
+  for (OutliningCandidates::Candidate &candidate : OutCands.Candidates)
+    bvs.emplace_back(candidate.bv);
 
-  for (OutliningCandidates::Candidate &candidate : OutCands.Candidates) {
-    std::vector<SparseBitVector<>> bvs = {candidate.bv};
-    OutliningCallerExtractor caller_extractor(function, deps, bvs);
-    Function *NewCallee = caller_extractor.callees[0].createDefinition();
-    if (NewCallee) {
-      Changed = true;
+  if (bvs.empty())
+    return false;
 
-      Function *NewCaller = caller_extractor.createDefinition();
+  OutliningCallerExtractor caller_extractor(function, deps, bvs);
+  for (auto &callee : caller_extractor.callees)
+    callee.createDefinition();
+  Function *NewCaller = caller_extractor.createDefinition();
+  NewCaller->takeName(&function);
+  function.replaceAllUsesWith(NewCaller);
+  function.eraseFromParent();
 
-      SmallVector<unsigned, 8> Bits;
-      for (auto i : candidate.bv)
-        Bits.push_back(i);
-      Metadata *BVNode = ConstantAsMetadata::get(
-          ConstantDataArray::get(function.getContext(), Bits));
-      Metadata *CalleeNode = ConstantAsMetadata::get(NewCallee);
-      Metadata *CallerNode = ConstantAsMetadata::get(NewCaller);
-      MDNodes.push_back(
-          MDNode::get(function.getContext(), {BVNode, CalleeNode, CallerNode}));
-    }
-  }
-
-  if (Changed) {
-    Metadata *OrigNode = ConstantAsMetadata::get(&function);
-    MDNode *ListNode = MDNode::get(function.getContext(), MDNodes);
-    MDNode *TopNode = MDNode::get(function.getContext(), {OrigNode, ListNode});
-    function.getParent()
-        ->getOrInsertNamedMetadata("smout.extracted.functions")
-        ->addOperand(TopNode);
-  }
-
-  return Changed;
+  return true;
 }
 
 PreservedAnalyses OutliningExtractorPass::run(Module &m,

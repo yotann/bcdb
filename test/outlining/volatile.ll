@@ -1,8 +1,7 @@
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outlining-dependence -analyze %s | FileCheck %s
 
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: %outliningtest --no-run %s
 
 ; based on llvm/test/Analysis/MemorySSA/volatile-clobber.ll
 

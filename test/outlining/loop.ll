@@ -1,8 +1,7 @@
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
 ; RUN:     -outline-only=3 -outlining-extractor -verify -S %s | FileCheck %s
 
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: %outliningtest --no-run %s
 
 define i32 @f(i32 %arg) {
 ; block 0 depends [] forced []
@@ -34,7 +33,7 @@ exit:                                             ; preds = %loopentry
 ; CHECK-NEXT: %x = add i32 %arg, 1
 ; CHECK-NEXT: br label %outline_return
 
-; CHECK-LABEL: define i32 @f.outlined.3.caller(i32 %arg) {
+; CHECK-LABEL: define i32 @f(i32 %arg) {
 ; CHECK: loopentry:
 ; CHECK-NEXT: %1 = call fastcc { i32 } @f.outlined.3.callee(i32 %arg)
 ; CHECK-NEXT: %x = extractvalue { i32 } %1, 0

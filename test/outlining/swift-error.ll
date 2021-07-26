@@ -1,7 +1,6 @@
 ; XFAIL: *
 
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: %outliningtest --no-run %s
 
 %swift.error = type opaque
 

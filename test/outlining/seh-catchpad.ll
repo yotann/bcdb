@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: %outliningtest --no-run %s
 
 ; based on llvm/test/CodeGen/X86/seh-catchpad.ll
 

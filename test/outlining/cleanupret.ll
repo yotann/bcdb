@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: %outliningtest --no-run %s
 
 declare dso_local void @bar()
 declare dso_local i32 @__CxxFrameHandler3(...)

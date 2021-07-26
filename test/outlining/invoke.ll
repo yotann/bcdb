@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-extractor -outline-unprofitable -verify -S %s
+; RUN: %outliningtest --no-run %s
 
 declare i32 @test()
 define i32 @test2() personality i32 (...)* @__gxx_personality_v0 {

@@ -16,6 +16,7 @@ config.available_features.add(config.host_arch)
 config.substitutions.append(("%shlibdir", "@LLVM_SHLIB_OUTPUT_INTDIR@"))
 config.substitutions.append(("%shlibext", "@SHLIBEXT@"))
 config.substitutions.append(("%gltest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/utils/gl-test.py"))
+config.substitutions.append(("%outliningtest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/utils/outlining-test.py"))
 
 # Add our newly-built tools to the path
 newpath = "@LLVM_RUNTIME_OUTPUT_INTDIR@"
@@ -23,3 +24,10 @@ curpath = os.environ.get("PATH", "")
 if curpath:
     newpath += ":" + curpath
 config.environment["PATH"] = newpath
+
+# Add our newly-built plugins to the plugin path
+newpath = "@LLVM_SHLIB_OUTPUT_INTDIR@"
+curpath = os.environ.get("LD_LIBRARY_PATH", "")
+if curpath:
+    newpath += ":" + curpath
+config.environment["LD_LIBRARY_PATH"] = newpath

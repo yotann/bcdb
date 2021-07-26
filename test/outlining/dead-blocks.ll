@@ -33,6 +33,6 @@ dead1:
 ; EXTRACT: %x = add i32 1, 2
 ; EXTRACT: br label %outline_return
 
-; EXTRACT-LABEL: define void @f.outlined.1.caller() {
+; EXTRACT-LABEL: define void @f() {
 ; EXTRACT-NEXT: %1 = call fastcc {} @f.outlined.1.callee()
 ; EXTRACT-NEXT: ret void
