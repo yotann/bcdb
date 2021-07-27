@@ -278,7 +278,6 @@ Function *OutliningCalleeExtractor::createDefinition() {
       if (bv.test(NodeIndices.lookup(orig_pred->getTerminator())))
         new_phi->addIncoming(orig_phi->getIncomingValue(j), orig_pred);
     }
-    VM.remapInstruction(*new_phi);
   }
 
   // Jump from the entry block to the first actual outlined block.
@@ -342,6 +341,8 @@ Function *OutliningCalleeExtractor::createDefinition() {
 
     VM.remapInstruction(*new_ins);
   }
+  for (auto i : output_phis)
+    VM.remapInstruction(*cast<Instruction>(VMap[Nodes[i]]));
 
   // Add terminators to blocks that didn't have their terminator selected for
   // outlining.
