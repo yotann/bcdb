@@ -274,7 +274,7 @@ Function *OutliningCalleeExtractor::createDefinition() {
     PHINode *orig_phi = cast<PHINode>(Nodes[i]);
     PHINode *new_phi =
         PHINode::Create(orig_phi->getType(), 0, orig_phi->getName(),
-                        BBMap[orig_phi->getParent()]);
+                        cast<BasicBlock>(VMap[orig_phi->getParent()]));
     VMap[orig_phi] = new_phi;
     for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j) {
       BasicBlock *orig_pred = orig_phi->getIncomingBlock(j);
