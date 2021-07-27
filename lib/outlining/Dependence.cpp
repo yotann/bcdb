@@ -394,11 +394,19 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   // Memory dependences.
   if (MemoryAccess *ma = MSSA.getMemoryAccess(I)) {
     if (MemoryDef *def = dyn_cast<MemoryDef>(ma)) {
-      // This is necessary in case there is a MemoryUse later on that depends
-      // on this instruction, but the actual store occurred in a previous
-      // instruction.
+      // Output dependences (write-after-write). Also necessary in case there
+      // is a MemoryUse later on that depends on this instruction, but the
+      // actual store occurred in a previous instruction.
       addDepend(I, def->getDefiningAccess());
+
+      // Anti dependences (write-after-read).
+      // TODO: Ignore cases where the write and the read are on different CFG
+      // paths. (Do we need DependenceAnalysis?)
+      for (User *user : def->getDefiningAccess()->users())
+        if (MemoryUse *use = dyn_cast<MemoryUse>(user))
+          addDepend(I, use);
     } else {
+      // Flow dependences (read-after-write).
       addDepend(I, MSSA.getWalker()->getClobberingMemoryAccess(ma));
     }
   }
