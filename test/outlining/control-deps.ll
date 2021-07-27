@@ -15,21 +15,21 @@ entry:
   br i1 undef, label %then, label %else
 
 ; CHECK: then:
-; CHECK-NEXT: block 2 dominating [0-1]
+; CHECK-NEXT: block 2 dominating [0] forced [1-5]
 ; CHECK-NEXT: node 3 dominating [0-2]
 ; CHECK-NEXT: br label %endif
 then:
   br label %endif
 
 ; CHECK: else:
-; CHECK-NEXT: block 4 dominating [0-1]
+; CHECK-NEXT: block 4 dominating [0] forced [1-5]
 ; CHECK-NEXT: node 5 dominating [0-1, 4]
 ; CHECK-NEXT: br label %endif
 else:
   br label %endif
 
 ; CHECK: endif:
-; CHECK-NEXT: block 6
+; CHECK-NEXT: block 6 forced [1-5]
 ; CHECK-NEXT: node 7 prevents outlining
 ; CHECK-NEXT: ret void
 endif:
@@ -48,35 +48,35 @@ entry:
   br label %head
 
 ; CHECK: head:
-; CHECK-NEXT: block 2 forced [2-9]
-; CHECK-NEXT: node 3 forced [2-9]
+; CHECK-NEXT: block 2 forced [1-9]
+; CHECK-NEXT: node 3 forced [1-9]
 ; CHECK-NEXT: br i1 undef, label %may_break, label %exit
 head:
   br i1 undef, label %may_break, label %exit
 
 ; CHECK: may_break:
-; CHECK-NEXT: block 4 dominating [2-3]
-; CHECK-NEXT: node 5 forced [2-9]
+; CHECK-NEXT: block 4 forced [1-9]
+; CHECK-NEXT: node 5 forced [1-9]
 ; CHECK-NEXT: br i1 undef, label %exit, label %may_continue
 may_break:
   br i1 undef, label %exit, label %may_continue
 
 ; CHECK: may_continue:
-; CHECK-NEXT: block 6 dominating [2-5]
-; CHECK-NEXT: node 7 dominating [2-6] forced [7-9]
+; CHECK-NEXT: block 6 forced [1-9]
+; CHECK-NEXT: node 7 forced [1-9]
 ; CHECK-NEXT: br i1 undef, label %head, label %body
 may_continue:
   br i1 undef, label %head, label %body
 
 ; CHECK: body:
-; CHECK-NEXT: block 8 dominating [2-7]
+; CHECK-NEXT: block 8 forced [1-9]
 ; CHECK-NEXT: node 9 dominating [2-8]
 ; CHECK-NEXT: br label %head
 body:
   br label %head
 
 ; CHECK: exit:
-; CHECK-NEXT: block 10
+; CHECK-NEXT: block 10 forced [1]
 ; CHECK-NEXT: node 11 prevents outlining
 ; CHECK-NEXT: ret void
 exit:
@@ -95,35 +95,35 @@ entry:
   br label %may_continue
 
 ; CHECK: may_continue:
-; CHECK-NEXT: block 2 forced [2-9]
-; CHECK-NEXT: node 3 forced [2-9]
+; CHECK-NEXT: block 2 forced [1-9]
+; CHECK-NEXT: node 3 forced [1-9]
 ; CHECK-NEXT: br i1 undef, label %head, label %may_break
 may_continue:
   br i1 undef, label %head, label %may_break
 
 ; CHECK: head:
-; CHECK-NEXT: block 4 forced [2-9]
-; CHECK-NEXT: node 5 forced [2-9]
+; CHECK-NEXT: block 4 forced [1-9]
+; CHECK-NEXT: node 5 forced [1-9]
 ; CHECK-NEXT: br i1 undef, label %may_continue, label %exit
 head:
   br i1 undef, label %may_continue, label %exit
 
 ; CHECK: may_break:
-; CHECK-NEXT: block 6 dominating [2-3]
-; CHECK-NEXT: node 7 forced [2-9]
+; CHECK-NEXT: block 6 forced [1-9]
+; CHECK-NEXT: node 7 forced [1-9]
 ; CHECK-NEXT: br i1 undef, label %exit, label %body
 may_break:
   br i1 undef, label %exit, label %body
 
 ; CHECK: body:
-; CHECK-NEXT: block 8 dominating [2-3, 6-7]
+; CHECK-NEXT: block 8 forced [1-9]
 ; CHECK-NEXT: node 9 dominating [2-3, 6-8]
 ; CHECK-NEXT: br label %head
 body:
   br label %head
 
 ; CHECK: exit:
-; CHECK-NEXT: block 10
+; CHECK-NEXT: block 10 forced [1]
 ; CHECK-NEXT: node 11 prevents outlining
 ; CHECK-NEXT: ret void
 exit:
@@ -156,7 +156,7 @@ right:
   br i1 undef, label %left, label %exit
 
 ; CHECK: exit:
-; CHECK-NEXT: block 6
+; CHECK-NEXT: block 6 forced [1-5]
 ; CHECK-NEXT: node 7 prevents outlining
 ; CHECK-NEXT: ret void
 exit:

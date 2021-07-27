@@ -46,7 +46,7 @@ entry:
   br label %b1
 
 ; CHECK: b1:
-; CHECK-NEXT: block 3
+; CHECK-NEXT: block 3 forced [2]
 b1:
 ; CHECK-NEXT: node 4 dominating [3]
 ; CHECK-NEXT: call void @may_throw_or_exit()
@@ -56,7 +56,7 @@ b1:
   br label %b2
 
 ; CHECK: b2:
-; CHECK-NEXT: block 6 dominating [3-5]
+; CHECK-NEXT: block 6 dominating [3-4] forced [5]
 b2:
 ; CHECK-NEXT: node 7 data [1] dominating [0-1, 3-6]
 ; CHECK-NEXT: call void @may_have_side_effects(i32 %x)
@@ -66,7 +66,7 @@ b2:
   br label %b3
 
 ; CHECK: b3:
-; CHECK-NEXT: block 9 dominating [0-1, 3-8]
+; CHECK-NEXT: block 9 dominating [0-1, 3-4] forced [5-8]
 b3:
 ; CHECK-NEXT: node 10 data [1] dominating [0-1, 3-9]
 ; CHECK-NEXT: %y = sdiv i32 1, %x
@@ -76,7 +76,7 @@ b3:
   br label %b4
 
 ; CHECK: b4:
-; CHECK-NEXT: block 12 dominating [0-1, 3-9]
+; CHECK-NEXT: block 12 dominating [0-1, 3-9] forced [11]
 b4:
 ; CHECK-NEXT: node 13 prevents outlining
 ; CHECK-NEXT: ret void

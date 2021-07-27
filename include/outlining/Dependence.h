@@ -75,6 +75,10 @@ public:
   // Nodes[j].
   std::vector<SparseBitVector<>> DataDepends;
 
+  // If ControlDepends[i].test(j) is true, Nodes[i] has a control dependency on
+  // Nodes[j] (as determined using CorrectPostDominatorTree).
+  std::vector<SparseBitVector<>> ControlDepends;
+
   // If ArgDepends[i].test(j) is true, Nodes[i] has a data dependency on
   // function argument j.
   std::vector<SparseBitVector<>> ArgDepends;

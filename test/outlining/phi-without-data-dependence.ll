@@ -11,12 +11,12 @@ entry:
   br i1 %cond, label %if, label %then
 
 if:
-; CHECK: block 2 dominating [0-1]
+; CHECK: block 2 dominating [0] forced [1-3]
 ; CHECK-NEXT: node 3 dominating [0-2]
   br label %then
 
 then:
-; CHECK: block 4
+; CHECK: block 4 forced [1-3]
 ; CHECK-NEXT: node 5 dominating [0] forced [1-4]
 ; CHECK-NEXT: %x = phi
   %x = phi i32 [ 0, %entry ], [ 1, %if ]

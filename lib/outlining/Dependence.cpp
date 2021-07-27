@@ -226,6 +226,7 @@ void OutliningDependenceResults::numberNodes() {
   DominatingDepends.resize(Nodes.size());
   ForcedDepends.resize(Nodes.size());
   DataDepends.resize(Nodes.size());
+  ControlDepends.resize(Nodes.size());
   ArgDepends.resize(Nodes.size());
 
   // Fill in Dominators.
@@ -323,6 +324,7 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
         if (DT.dominates(path[j], path[i]))
           dep = path[j];
       addDepend(path[i], dep);
+      ControlDepends[NodeIndices[path[i]]].set(NodeIndices[a]);
     }
   }
 
@@ -358,6 +360,19 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
       addForcedDepend(branch, m);
       for (Instruction &ins : *m)
         addForcedDepend(branch, &ins);
+    }
+  }
+
+  // Ensure that if BB is outlined, the outlining point will not be placed in a
+  // loop unless BB was already within that loop.
+  // TODO: Don't actually add a forced dependence on the terminator; just add a
+  // fake node that doesn't correspond to any instruction, but ensures the
+  // outlining point is in the right place.
+  for (auto dom = DT[BB]->getIDom(); dom; dom = dom->getIDom()) {
+    if (ControlDepends[NodeIndices[BB]].contains(
+            ControlDepends[NodeIndices[dom->getBlock()]])) {
+      addForcedDepend(BB, dom->getBlock()->getTerminator());
+      break;
     }
   }
 
