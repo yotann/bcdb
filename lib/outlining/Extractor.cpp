@@ -22,9 +22,15 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
   const auto &Nodes = deps.Nodes;
   const auto &NodeIndices = deps.NodeIndices;
 
-  if (!deps.isOutlinable(bv))
+  if (!deps.isOutlinable(bv)) {
+    // This can happen if the candidate was generated using different alias
+    // analysis results than we have now. The "opt" program seems to use
+    // different alias analysis settings for analysis than it does for
+    // optimization (only with the legacy pass manager), which can lead to this
+    // problem.
     report_fatal_error("Specified nodes cannot be outlined",
                        /* gen_crash_diag */ false);
+  }
 
   auto addInputValue = [&](Value *v) {
     if (Argument *arg = dyn_cast<Argument>(v))
