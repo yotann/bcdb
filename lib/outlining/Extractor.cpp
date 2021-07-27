@@ -44,8 +44,8 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
       SmallPtrSet<Value *, 8> phi_incoming;
       for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
         Value *v = phi->getIncomingValue(j);
-        if (bv.test(NodeIndices.lookup(
-                phi->getIncomingBlock(j)->getTerminator()))) {
+        Instruction *term = phi->getIncomingBlock(j)->getTerminator();
+        if (term && bv.test(NodeIndices.lookup(term))) {
           // May depend on control flow in the callee.
           phi_incoming.insert(v);
         } else if (NodeIndices.count(v)) {
@@ -65,7 +65,8 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
       } else if (!phi_incoming.empty()) {
         // Only one phi value is used for all paths within the callee, so we
         // return that value directly and use it in the phi in the caller.
-        external_outputs.set(NodeIndices.lookup(*phi_incoming.begin()));
+        if (NodeIndices.count(*phi_incoming.begin()))
+          external_outputs.set(NodeIndices.lookup(*phi_incoming.begin()));
       }
     } else {
       external_outputs |= deps.DataDepends[i];
@@ -80,8 +81,8 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
     if (PHINode *phi = dyn_cast<PHINode>(Nodes[i])) {
       SmallPtrSet<Value *, 8> phi_incoming;
       for (unsigned j = 0; j < phi->getNumIncomingValues(); j++) {
-        if (bv.test(NodeIndices.lookup(
-                phi->getIncomingBlock(j)->getTerminator()))) {
+        Instruction *term = phi->getIncomingBlock(j)->getTerminator();
+        if (term && bv.test(NodeIndices.lookup(term))) {
           // This part of the phi will be outlined, so we need to make sure the
           // appropriate phi input values are accessible.
           addInputValue(phi->getIncomingValue(j));
@@ -250,8 +251,12 @@ Function *OutliningCalleeExtractor::createDefinition() {
     // postdominator tree to skip blocks until we find one that actually is
     // being outlined.
     BasicBlock *PDom = &BB;
-    while (PDom && !outlined_blocks.test(NodeIndices.lookup(PDom)))
+    while (PDom) {
+      assert(NodeIndices.count(PDom));
+      if (outlined_blocks.test(NodeIndices.lookup(PDom)))
+        break;
       PDom = PDT[PDom]->getIDom()->getBlock();
+    }
     if (!PDom) {
       VMap[&BB] = ExitBlock;
       continue;
