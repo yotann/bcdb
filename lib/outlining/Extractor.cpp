@@ -262,6 +262,25 @@ Function *OutliningCalleeExtractor::createDefinition() {
     VMap[&BB] = BBMap[PDom];
   }
 
+  // Set up PHI nodes that were not chosen for outlining, but which depend on
+  // control flow in the outlined set. This needs to be done before other
+  // instructions are added.
+  for (auto i : output_phis) {
+    PHINode *orig_phi = cast<PHINode>(Nodes[i]);
+    PHINode *new_phi =
+        PHINode::Create(orig_phi->getType(), 0, orig_phi->getName(),
+                        BBMap[orig_phi->getParent()]);
+    VMap[orig_phi] = new_phi;
+    for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j) {
+      BasicBlock *orig_pred = orig_phi->getIncomingBlock(j);
+      if (!NodeIndices.count(orig_pred))
+        continue; // unreachable block
+      if (bv.test(NodeIndices.lookup(orig_pred->getTerminator())))
+        new_phi->addIncoming(orig_phi->getIncomingValue(j), orig_pred);
+    }
+    VM.remapInstruction(*new_phi);
+  }
+
   // Jump from the entry block to the first actual outlined block.
   BasicBlock *FirstBlock =
       cast<BasicBlock>(Nodes[outlined_blocks.find_first()]);
@@ -336,23 +355,6 @@ Function *OutliningCalleeExtractor::createDefinition() {
         new_target = cast<BasicBlock>(VMap[PDom->getBlock()]);
       BranchInst::Create(new_target, new_block);
     }
-  }
-
-  // Set up PHI nodes that were not chosen for outlining, but which depend on
-  // control flow in the outlined set.
-  for (auto i : output_phis) {
-    PHINode *orig_phi = cast<PHINode>(Nodes[i]);
-    PHINode *new_phi =
-        PHINode::Create(orig_phi->getType(), 0, orig_phi->getName(), ExitBlock);
-    VMap[orig_phi] = new_phi;
-    for (unsigned j = 0; j < orig_phi->getNumIncomingValues(); ++j) {
-      BasicBlock *orig_pred = orig_phi->getIncomingBlock(j);
-      if (!NodeIndices.count(orig_pred))
-        continue; // unreachable block
-      if (bv.test(NodeIndices.lookup(orig_pred->getTerminator())))
-        new_phi->addIncoming(orig_phi->getIncomingValue(j), orig_pred);
-    }
-    VM.remapInstruction(*new_phi);
   }
 
   // Set up the return instruction.
