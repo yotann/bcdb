@@ -67,7 +67,7 @@ public:
                            const OutliningDependenceResults &deps,
                            const std::vector<SparseBitVector<>> &bvs);
 
-  Function *createDefinition();
+  void modifyDefinition();
 
   Function &function;
   const OutliningDependenceResults &deps;
@@ -82,12 +82,11 @@ private:
   void handleSingleCallee(const SparseBitVector<> &bv,
                           OutliningCalleeExtractor &callee);
 
-  Function *new_caller = nullptr;
   DenseMap<Value *, Value *> replacements;
   SmallVector<Instruction *, 16> insns_to_delete;
-  ValueToValueMapTy vmap;
   BasicBlock *unreachable_block;
   IntegerType *i32_type;
+  bool already_modified = false;
 };
 
 // Needs to be a module pass because it adds new functions.

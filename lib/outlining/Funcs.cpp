@@ -638,8 +638,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
   OutliningCallerExtractor extractor(f, deps, bvs);
-  Function *caller = extractor.createDefinition();
-
+  extractor.modifyDefinition();
   for (size_t i = 0; i < callees->size(); ++i) {
     Function *callee = extractor.callees[i].createDeclaration();
     StringRef name = (*callees)[i]["name"].as<StringRef>();
@@ -654,7 +653,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   // on callees).
 
   bcdb::Splitter splitter(*m);
-  auto mpart = splitter.SplitGlobal(caller);
+  auto mpart = splitter.SplitGlobal(&f);
   SmallVector<char, 0> buffer;
   bcdb::WriteAlignedModule(*mpart, buffer);
   return Node(byte_string_arg, buffer);

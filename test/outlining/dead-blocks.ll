@@ -24,6 +24,10 @@ dead1:
   br i1 undef, label %dead0, label %dead1
 }
 
+; EXTRACT-LABEL: define void @f() {
+; EXTRACT-NEXT: %1 = call fastcc {} @f.outlined.1.callee()
+; EXTRACT-NEXT: ret void
+
 ; EXTRACT-LABEL: define fastcc {} @f.outlined.1.callee() unnamed_addr #0 {
 ; EXTRACT: outline_entry:
 ; EXTRACT: br label %0
@@ -32,7 +36,3 @@ dead1:
 ; EXTRACT: 0:
 ; EXTRACT: %x = add i32 1, 2
 ; EXTRACT: br label %outline_return
-
-; EXTRACT-LABEL: define void @f() {
-; EXTRACT-NEXT: %1 = call fastcc {} @f.outlined.1.callee()
-; EXTRACT-NEXT: ret void
