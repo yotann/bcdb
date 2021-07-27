@@ -379,8 +379,38 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // Don't outline computed goto targets. We could outline computed gotos if we
   // also outlined every possible target of the goto, but computed gotos are
   // too rare to make it worth the trouble.
-  if (BB->hasAddressTaken())
+  if (BB->hasAddressTaken()) {
     PreventsOutlining.set(NodeIndices[BB]);
+
+    // Also don't outline instructions that use blockaddress() operands
+    // referring to the same function (even indirectly through a ConstantExpr).
+    // There are two reasons:
+    //
+    // 1. OutliningCalleeExtractor would try to remap these operands to use
+    //    blocks in the wrong function (this could be fixed).
+    // 2. Funcs.cpp extracts the callee into a separate module than the caller,
+    //    which is invalid if the callee contains blockaddresses that refer to
+    //    the caller.
+    //
+    // Indirect references, like instructions that load from a global constant
+    // that contains blockaddresses, can still be outlined.
+    SmallVector<User *, 8> users;
+    for (User *user : BB->users())
+      if (isa<BlockAddress>(user))
+        users.emplace_back(user);
+    for (size_t i = 0; i < users.size(); ++i) {
+      User *user = users[i];
+      if (isa<GlobalObject>(user))
+        continue;
+      if (isa<Instruction>(user)) {
+        if (NodeIndices.count(user))
+          PreventsOutlining.set(NodeIndices[user]);
+        continue;
+      }
+      for (User *user2 : user->users())
+        users.emplace_back(user2);
+    }
+  }
 }
 
 void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
