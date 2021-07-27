@@ -548,6 +548,11 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     if (CB->isMustTailCall())
       PreventsOutlining.set(NodeIndices[I]);
 
+    // Calls to functions like setjmp() cannot be outlined, because the
+    // outlined callee might return before the call to longjmp() occurs.
+    if (CB->hasFnAttr(Attribute::ReturnsTwice))
+      PreventsOutlining.set(NodeIndices[I]);
+
     // Some intrinsics, like vastart, will not work correctly if moved to
     // another function. Unfortunately there's no simple way to check which
     // intrinsics are outlinable, so we need to list all the safe ones.
