@@ -65,7 +65,7 @@ would become this JSON:
 {
   "map": {
     "foo": {"cid": "uAXEAAfY"},
-    "bar": {"float": 1},
+    "bar": {"float": "1"},
     "baz": {"base64": "Vao="}
   }
 }
