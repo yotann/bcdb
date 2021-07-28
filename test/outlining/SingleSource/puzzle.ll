@@ -1,5 +1,7 @@
 ; RUN: %outliningtest %s
 
+; REQUIRES: llvm12
+
 source_filename = "build-llvm12/SingleSource/Benchmarks/BenchmarkGame/puzzle"
 
 @next = internal unnamed_addr global i64 1, align 8
