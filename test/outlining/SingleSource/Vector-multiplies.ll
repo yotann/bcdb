@@ -1,4 +1,5 @@
-; RUN: %outliningtest %s
+; Need the interpreter to run this on AArch64.
+; RUN: %outliningtest -- --force-interpreter %s
 
 source_filename = "build-llvm12/SingleSource/UnitTests/Vector/Vector-multiplies"
 
