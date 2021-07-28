@@ -117,7 +117,7 @@ define dso_local i32 @main() local_unnamed_addr #1 {
 }
 
 ; Function Attrs: nofree nounwind
-declare dso_local noundef i32 @printf(i8* nocapture noundef readonly, ...) local_unnamed_addr #2
+declare dso_local i32 @printf(i8* nocapture readonly, ...) local_unnamed_addr #2
 
 ; Function Attrs: nofree nosync nounwind readnone speculatable willreturn
 declare i32 @llvm.bitreverse.i32(i32) #3

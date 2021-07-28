@@ -5,6 +5,7 @@
 ; new pass manager.
 
 ; REQUIRES: x86_64
+; REQUIRES: llvm12
 
 ; RUN: %outliningtest --no-run %s
 
