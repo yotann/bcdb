@@ -1,9 +1,3 @@
-; XFAIL: *
-; Fails because "opt --outlining-dependence" has more precise MemorySSA results
-; than "opt --outlining-extractor" for some reason, and candidates that are
-; valid for one are invalid for the other. This problem doesn't happen with the
-; new pass manager.
-
 ; REQUIRES: x86_64
 ; REQUIRES: llvm12
 

@@ -2,7 +2,7 @@
 
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Analysis/CaptureTracking.h>
-#include <llvm/Analysis/MemorySSA.h>
+#include <llvm/Analysis/DependenceAnalysis.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/AssemblyAnnotationWriter.h>
@@ -68,9 +68,6 @@ public:
   void emitBasicBlockStartAnnot(const BasicBlock *BB,
                                 formatted_raw_ostream &OS) override {
     emitValueAnnot("block", BB, OS);
-    MemoryPhi *MPhi = OutDep->MSSA.getMemoryAccess(BB);
-    if (MPhi)
-      emitValueAnnot("memoryphi", MPhi, OS);
   }
 
   void emitInstructionAnnot(const Instruction *I,
@@ -83,8 +80,8 @@ public:
 OutliningDependenceResults::OutliningDependenceResults(Function &F,
                                                        DominatorTree &DT,
                                                        PostDominatorTree &PDT,
-                                                       MemorySSA &MSSA)
-    : F(F), DT(DT), PDT(PDT), MSSA(MSSA) {
+                                                       DependenceInfo &DI)
+    : F(F), DT(DT), PDT(PDT), DI(DI) {
   CPDT = std::make_unique<CorrectPostDominatorTree>(F);
   DT.updateDFSNumbers();    // Needed for fast queries.
   PDT.updateDFSNumbers();   // Needed for fast queries.
@@ -93,8 +90,6 @@ OutliningDependenceResults::OutliningDependenceResults(Function &F,
   for (Value *V : Nodes) {
     if (BasicBlock *BB = dyn_cast<BasicBlock>(V))
       analyzeBlock(BB);
-    else if (MemoryPhi *MPhi = dyn_cast<MemoryPhi>(V))
-      analyzeMemoryPhi(MPhi);
     else if (Instruction *I = dyn_cast<Instruction>(V))
       analyzeInstruction(I);
     else
@@ -155,12 +150,6 @@ std::optional<size_t> OutliningDependenceResults::lookupNode(Value *V) {
   auto It = NodeIndices.find(V);
   if (It != NodeIndices.end())
     return It->second;
-  if (MemoryAccess *MA = dyn_cast<MemoryAccess>(V)) {
-    if (MSSA.isLiveOnEntryDef(MA))
-      return std::nullopt;
-    if (MemoryUseOrDef *MUOD = dyn_cast<MemoryUseOrDef>(MA))
-      return lookupNode(MUOD->getMemoryInst());
-  }
   return std::nullopt;
 }
 
@@ -213,8 +202,6 @@ void OutliningDependenceResults::numberNodes() {
   // Create all the nodes.
   for (BasicBlock *BB : Blocks) {
     Nodes.push_back(BB);
-    if (MemoryPhi *MPhi = MSSA.getMemoryAccess(BB))
-      Nodes.push_back(MPhi);
     for (Instruction &I : *BB)
       Nodes.push_back(&I);
   }
@@ -365,9 +352,13 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
 
   // Ensure that if BB is outlined, the outlining point will not be placed in a
   // loop unless BB was already within that loop.
+  //
   // TODO: Don't actually add a forced dependence on the terminator; just add a
   // fake node that doesn't correspond to any instruction, but ensures the
   // outlining point is in the right place.
+  //
+  // TODO: Should we use llvm::isControlFlowEquivalent() instead? This faster,
+  // but it is equivalent?
   for (auto dom = DT[BB]->getIDom(); dom; dom = dom->getIDom()) {
     if (ControlDepends[NodeIndices[BB]].contains(
             ControlDepends[NodeIndices[dom->getBlock()]])) {
@@ -413,17 +404,6 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   }
 }
 
-void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
-  addForcedDepend(MPhi, MPhi->getBlock());
-  for (Value *value : MPhi->incoming_values())
-    addDepend(MPhi, value);
-
-  // This is probably redundant, but let's keep it so we match the handling of
-  // PHINode.
-  for (BasicBlock *block : MPhi->blocks())
-    addDepend(MPhi, block->getTerminator());
-}
-
 void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   // Data dependences.
   for (Value *Op : I->operands()) {
@@ -437,23 +417,18 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   }
 
   // Memory dependences.
-  if (MemoryAccess *ma = MSSA.getMemoryAccess(I)) {
-    if (MemoryDef *def = dyn_cast<MemoryDef>(ma)) {
-      // Output dependences (write-after-write). Also necessary in case there
-      // is a MemoryUse later on that depends on this instruction, but the
-      // actual store occurred in a previous instruction.
-      addDepend(I, def->getDefiningAccess());
-
-      // Anti dependences (write-after-read).
-      // TODO: Ignore cases where the write and the read are on different CFG
-      // paths. (Do we need DependenceAnalysis?)
-      for (User *user : def->getDefiningAccess()->users())
-        if (MemoryUse *use = dyn_cast<MemoryUse>(user))
-          addDepend(I, use);
-    } else {
-      // Flow dependences (read-after-write).
-      addDepend(I, MSSA.getWalker()->getClobberingMemoryAccess(ma));
-    }
+  // TODO: can we avoid calling DependenceInfo::depends() n**2 times?
+  // Maybe if we find a dependence on I2 and I2 dominates I, we can stop
+  // searching anything that dominates I2.
+  for (Value *v2 : Nodes) {
+    Instruction *I2 = dyn_cast<Instruction>(v2);
+    if (!I2 || I2 == I)
+      continue;
+    auto dep = DI.depends(I2, I, true);
+    if (!dep || !dep->isOrdered())
+      continue;
+    // FIXME: use dependence splitting.
+    addDepend(I, I2);
   }
 
   // Control dependences.
@@ -794,8 +769,8 @@ OutliningDependenceResults
 OutliningDependenceAnalysis::run(Function &f, FunctionAnalysisManager &am) {
   auto &dt = am.getResult<DominatorTreeAnalysis>(f);
   auto &pdt = am.getResult<PostDominatorTreeAnalysis>(f);
-  auto &mssa = am.getResult<MemorySSAAnalysis>(f);
-  return OutliningDependenceResults(f, dt, pdt, mssa.getMSSA());
+  auto &di = am.getResult<DependenceAnalysis>(f);
+  return OutliningDependenceResults(f, dt, pdt, di);
 }
 
 PreservedAnalyses
@@ -812,8 +787,8 @@ OutliningDependenceWrapperPass::OutliningDependenceWrapperPass()
 bool OutliningDependenceWrapperPass::runOnFunction(Function &F) {
   auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto &PDT = getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
-  auto &MSSA = getAnalysis<MemorySSAWrapperPass>().getMSSA();
-  OutDep.emplace(F, DT, PDT, MSSA);
+  auto &DI = getAnalysis<DependenceAnalysisWrapperPass>().getDI();
+  OutDep.emplace(F, DT, PDT, DI);
   return false;
 }
 
@@ -826,7 +801,7 @@ void OutliningDependenceWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
   AU.addRequiredTransitive<DominatorTreeWrapperPass>();
   AU.addRequiredTransitive<PostDominatorTreeWrapperPass>();
-  AU.addRequiredTransitive<MemorySSAWrapperPass>();
+  AU.addRequiredTransitive<DependenceAnalysisWrapperPass>();
 }
 
 void OutliningDependenceWrapperPass::releaseMemory() { OutDep.reset(); }
