@@ -13,6 +13,7 @@
 
 namespace memodb {
 class CID;
+struct Name;
 class Store;
 } // end namespace memodb
 
@@ -36,6 +37,11 @@ std::string bytesToUTF8(llvm::ArrayRef<std::uint8_t> Bytes);
 std::string bytesToUTF8(llvm::StringRef Bytes);
 std::string utf8ToByteString(llvm::StringRef Str);
 
+// Join the parts of a module back together and return the result.
+llvm::Expected<std::unique_ptr<llvm::Module>>
+getSplitModule(llvm::LLVMContext &context, memodb::Store &store,
+               const memodb::Name &name);
+
 class BCDB {
   std::unique_ptr<llvm::LLVMContext> Context;
   std::unique_ptr<memodb::Store> unique_db;
@@ -52,7 +58,6 @@ public:
 
   llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
   llvm::Expected<memodb::CID> AddWithoutHead(std::unique_ptr<llvm::Module> M);
-  llvm::Expected<std::unique_ptr<llvm::Module>> Get(llvm::StringRef Name);
   llvm::Expected<std::unique_ptr<llvm::Module>>
   GetFunctionById(llvm::StringRef Id);
   llvm::Expected<std::vector<std::string>> ListModules();

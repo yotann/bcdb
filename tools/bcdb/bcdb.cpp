@@ -94,9 +94,17 @@ static cl::opt<bool> DisableVerify("disable-verify",
                                    cl::sub(GLCommand), cl::sub(MeltCommand),
                                    cl::sub(MergeCommand), cl::sub(MuxCommand));
 
-static cl::opt<std::string> GetName("name", cl::Required,
-                                    cl::desc("Name of the head to get"),
-                                    cl::sub(GetCommand));
+// FIXME: it's very confusing to have both GetHeadName and GetNameURI. We
+// should deprecate GetHeadName.
+
+static cl::opt<std::string> GetHeadName("name", cl::Optional,
+                                        cl::desc("Name of the head to get"),
+                                        cl::sub(GetCommand));
+
+static cl::opt<std::string> GetNameURI(cl::Positional, cl::Optional,
+                                       cl::desc("<name URI>"),
+                                       cl::value_desc("uri"),
+                                       cl::sub(GetCommand));
 
 static cl::opt<std::string> GetId("id", cl::Required,
                                   cl::desc("ID of the function to get"),
@@ -145,8 +153,26 @@ static int WriteModule(Module &M) {
 
 static int Get() {
   ExitOnError Err("bcdb get: ");
-  std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
-  std::unique_ptr<Module> M = Err(db->Get(GetName));
+  if (GetHeadName.empty() && GetNameURI.empty()) {
+    errs() << "You must provide a name:\n";
+    errs() << "  bcdb get --name=hello\n";
+    errs() << " -or-\n";
+    errs() << "  bcdb get /head/hello\n";
+    return 1;
+  }
+  if (!GetHeadName.empty() && !GetNameURI.empty()) {
+    errs() << "Too many names!\n";
+    return 1;
+  }
+  std::optional<Name> name;
+  name = !GetHeadName.empty() ? Head(GetHeadName) : Name::parse(GetNameURI);
+  if (!name) {
+    errs() << "Invalid name URI.\n";
+    return 1;
+  }
+  std::unique_ptr<Store> store = Store::open(GetStoreUri());
+  LLVMContext context;
+  std::unique_ptr<Module> M = Err(getSplitModule(context, *store, *name));
   return WriteModule(*M);
 }
 

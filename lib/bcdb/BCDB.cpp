@@ -252,20 +252,25 @@ Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
   return LoadModuleFromValue(db, *CID::parse(Id), Id, *Context);
 }
 
-Expected<std::unique_ptr<Module>> BCDB::Get(StringRef Name) {
-  CID head_ref = db->resolve(Head(Name));
-  Node head = db->get(head_ref);
+Expected<std::unique_ptr<Module>>
+bcdb::getSplitModule(LLVMContext &context, Store &store, const Name &name) {
+  auto cid = store.resolveOptional(name);
+  if (!cid)
+    report_fatal_error("Module not found in store");
+  auto head = store.getOptional(*cid);
+  if (!head)
+    report_fatal_error("Module not found in store");
 
-  auto M = LoadModuleFromValue(db, head["remainder"].as<CID>(), "remainder",
-                               *Context);
-  Joiner Joiner(*M);
-  for (auto &Item : head["functions"].map_range()) {
-    auto Name = utf8ToByteString(Item.key());
-    auto MPart =
-        LoadModuleFromValue(db, Item.value().as<CID>(), Name, *Context);
-    Joiner.JoinGlobal(Name, std::move(MPart));
+  auto m = LoadModuleFromValue(&store, (*head)["remainder"].as<CID>(),
+                               "remainder", context);
+  Joiner joiner(*m);
+  for (auto &item : (*head)["functions"].map_range()) {
+    auto name = utf8ToByteString(item.key());
+    auto mpart =
+        LoadModuleFromValue(&store, item.value().as<CID>(), name, context);
+    joiner.JoinGlobal(name, std::move(mpart));
   }
 
-  Joiner.Finish();
-  return M;
+  joiner.Finish();
+  return m;
 }
