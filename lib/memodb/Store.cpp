@@ -95,6 +95,39 @@ llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Call &call) {
   return os << uri.encode();
 }
 
+std::optional<Name> Name::parse(llvm::StringRef uri_str) {
+  auto uri = URI::parse(uri_str);
+  if (!uri || !uri->scheme.empty() || !uri->host.empty() || uri->port != 0 ||
+      uri->path_segments.empty() || uri->rootless ||
+      !uri->query_params.empty() || !uri->fragment.empty())
+    return std::nullopt;
+  if (uri->path_segments[0] == "head" && uri->path_segments.size() >= 2) {
+    Head result(uri->getPathString(1));
+    if (result.Name.empty())
+      return std::nullopt;
+    return result;
+  } else if (uri->path_segments[0] == "cid" && uri->path_segments.size() == 2) {
+    return CID::parse(uri->path_segments[1]);
+  } else if (uri->path_segments[0] == "call" &&
+             uri->path_segments.size() == 3) {
+    std::vector<CID> args;
+    llvm::SmallVector<llvm::StringRef, 8> arg_strs;
+    const auto &func_name = uri->path_segments[1];
+    if (func_name.empty())
+      return std::nullopt;
+    llvm::StringRef(uri->path_segments[2]).split(arg_strs, ',');
+    for (auto arg_str : arg_strs) {
+      auto arg = CID::parse(arg_str);
+      if (!arg)
+        return std::nullopt;
+      args.emplace_back(std::move(*arg));
+    }
+    return Call(func_name, args);
+  } else {
+    return std::nullopt;
+  }
+}
+
 std::ostream &memodb::operator<<(std::ostream &os, const Name &name) {
   if (const CID *cid = std::get_if<CID>(&name)) {
     URI uri;

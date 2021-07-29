@@ -65,6 +65,8 @@ struct Name : public std::variant<CID, Head, Call> {
     const BaseType &Base = *this;
     return std::visit(vis, Base);
   }
+
+  static std::optional<Name> parse(llvm::StringRef uri_str);
 };
 
 std::ostream &operator<<(std::ostream &os, const Name &name);

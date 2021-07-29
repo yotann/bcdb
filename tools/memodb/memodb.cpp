@@ -100,28 +100,10 @@ static cl::list<std::string>
               cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
 
 static Name GetNameFromURI(llvm::StringRef URI) {
-  auto Parsed = ::URI::parse(URI);
-  if (!Parsed || !Parsed->scheme.empty() || !Parsed->host.empty() ||
-      Parsed->port != 0 || Parsed->path_segments.empty() || Parsed->rootless ||
-      !Parsed->query_params.empty() || !Parsed->fragment.empty())
+  auto result = Name::parse(URI);
+  if (!result)
     report_fatal_error("invalid name URI");
-  if (Parsed->path_segments[0] == "head" && Parsed->path_segments.size() >= 2) {
-    return Head(Parsed->getPathString(1));
-  } else if (Parsed->path_segments[0] == "cid" &&
-             Parsed->path_segments.size() == 2) {
-    return *CID::parse(Parsed->path_segments[1]);
-  } else if (Parsed->path_segments[0] == "call" &&
-             Parsed->path_segments.size() == 3) {
-    std::vector<CID> args;
-    SmallVector<StringRef, 8> arg_strs;
-    const auto &func_name = Parsed->path_segments[1];
-    StringRef(Parsed->path_segments[2]).split(arg_strs, ',');
-    for (StringRef arg_str : arg_strs)
-      args.emplace_back(*CID::parse(arg_str));
-    return Call(func_name, args);
-  } else {
-    report_fatal_error("invalid name URI");
-  }
+  return *result;
 }
 
 // input options (XXX: must come after Name options)
