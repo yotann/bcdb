@@ -357,8 +357,8 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // fake node that doesn't correspond to any instruction, but ensures the
   // outlining point is in the right place.
   //
-  // TODO: Should we use llvm::isControlFlowEquivalent() instead? This faster,
-  // but it is equivalent?
+  // TODO: Should we use llvm::isControlFlowEquivalent() instead? This is
+  // faster, but it is equivalent?
   for (auto dom = DT[BB]->getIDom(); dom; dom = dom->getIDom()) {
     if (ControlDepends[NodeIndices[BB]].contains(
             ControlDepends[NodeIndices[dom->getBlock()]])) {
@@ -452,14 +452,28 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
       addForcedDepend(I, BB->getTerminator());
 
   switch (I->getOpcode()) {
-  case Instruction::PHI:
+  case Instruction::PHI: {
     // Only outline PHI nodes when also outlining the full basic block head.
     addForcedDepend(I, I->getParent());
-    // We can only calculate the PHI value correctly if we know the control
-    // flow leading to it.
-    for (BasicBlock *BB : cast<PHINode>(I)->blocks())
-      addDepend(I, BB->getTerminator());
+    PHINode *phi = cast<PHINode>(I);
+    for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+      Instruction *term = phi->getIncomingBlock(i)->getTerminator();
+
+      // We can only calculate the PHI value correctly if we know the control
+      // flow leading to it.
+      addDepend(I, term);
+
+      // If the terminator is outlined, we must also outline the corresponding
+      // PHI value. Even if the PHINode isn't included in the outlining set, we
+      // may need to move part of it into the outlined callee anyway.
+      //
+      // TODO: What about the case where only one of the terminators is
+      // outlined, so we don't need to move part of the PHINode into the
+      // callee? This dependence is unnecessary in that case.
+      addDepend(term, phi->getIncomingValue(i));
+    }
     break;
+  }
   case Instruction::Ret:
     // TODO: if we're returning a value other than void, we could outline the
     // return instructions as long as every path in the outlined callee reaches
