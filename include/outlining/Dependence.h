@@ -16,6 +16,7 @@ namespace llvm {
 class AnalysisUsage;
 class BasicBlock;
 class DominatorTree;
+class FalseMemorySSA;
 class Function;
 class Instruction;
 class MemoryPhi;
@@ -38,7 +39,8 @@ using namespace llvm;
 class OutliningDependenceResults {
 public:
   OutliningDependenceResults(Function &F, DominatorTree &DT,
-                             PostDominatorTree &PDT, MemorySSA &MSSA);
+                             PostDominatorTree &PDT, MemorySSA &MSSA,
+                             FalseMemorySSA &FMSSA);
 
   OutliningDependenceResults(OutliningDependenceResults &&rhs) = default;
 
@@ -105,6 +107,7 @@ public:
   // Wrapped in unique_ptr so OutliningDependenceResults can be moved.
   std::unique_ptr<CorrectPostDominatorTree> CPDT;
   MemorySSA &MSSA;
+  FalseMemorySSA &FMSSA;
 
 private:
   std::optional<size_t> lookupNode(Value *V);

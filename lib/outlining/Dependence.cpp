@@ -17,6 +17,7 @@
 
 #include "bcdb/LLVMCompat.h"
 #include "outlining/CorrectPostDominatorTree.h"
+#include "outlining/FalseMemorySSA.h"
 
 using namespace bcdb;
 using namespace llvm;
@@ -71,6 +72,9 @@ public:
     MemoryPhi *MPhi = OutDep->MSSA.getMemoryAccess(BB);
     if (MPhi)
       emitValueAnnot("memoryphi", MPhi, OS);
+    MPhi = OutDep->FMSSA.getMemoryAccess(BB);
+    if (MPhi)
+      emitValueAnnot("false_memoryphi", MPhi, OS);
   }
 
   void emitInstructionAnnot(const Instruction *I,
@@ -83,8 +87,9 @@ public:
 OutliningDependenceResults::OutliningDependenceResults(Function &F,
                                                        DominatorTree &DT,
                                                        PostDominatorTree &PDT,
-                                                       MemorySSA &MSSA)
-    : F(F), DT(DT), PDT(PDT), MSSA(MSSA) {
+                                                       MemorySSA &MSSA,
+                                                       FalseMemorySSA &FMSSA)
+    : F(F), DT(DT), PDT(PDT), MSSA(MSSA), FMSSA(FMSSA) {
   CPDT = std::make_unique<CorrectPostDominatorTree>(F);
   DT.updateDFSNumbers();    // Needed for fast queries.
   PDT.updateDFSNumbers();   // Needed for fast queries.
@@ -156,7 +161,7 @@ std::optional<size_t> OutliningDependenceResults::lookupNode(Value *V) {
   if (It != NodeIndices.end())
     return It->second;
   if (MemoryAccess *MA = dyn_cast<MemoryAccess>(V)) {
-    if (MSSA.isLiveOnEntryDef(MA))
+    if (MSSA.isLiveOnEntryDef(MA) || FMSSA.isLiveOnEntryDef(MA))
       return std::nullopt;
     if (MemoryUseOrDef *MUOD = dyn_cast<MemoryUseOrDef>(MA))
       return lookupNode(MUOD->getMemoryInst());
@@ -214,6 +219,8 @@ void OutliningDependenceResults::numberNodes() {
   for (BasicBlock *BB : Blocks) {
     Nodes.push_back(BB);
     if (MemoryPhi *MPhi = MSSA.getMemoryAccess(BB))
+      Nodes.push_back(MPhi);
+    if (MemoryPhi *MPhi = FMSSA.getMemoryAccess(BB))
       Nodes.push_back(MPhi);
     for (Instruction &I : *BB)
       Nodes.push_back(&I);
@@ -442,20 +449,34 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
   // Memory dependences.
   if (MemoryAccess *ma = MSSA.getMemoryAccess(I)) {
     if (MemoryDef *def = dyn_cast<MemoryDef>(ma)) {
-      // Output dependences (write-after-write). Also necessary in case there
-      // is a MemoryUse later on that depends on this instruction, but the
-      // actual store occurred in a previous instruction.
-      addDepend(I, def->getDefiningAccess());
+      MemoryDef *fdef = cast<MemoryDef>(FMSSA.getMemoryAccess(I));
+      MemoryAccess *parent = fdef;
 
-      // Anti dependences (write-after-read).
-      // TODO: Ignore cases where the write and the read are on different CFG
-      // paths. (Do we need DependenceAnalysis?)
-      for (User *user : def->getDefiningAccess()->users())
-        if (MemoryUse *use = dyn_cast<MemoryUse>(user))
-          addDepend(I, use);
+      // We can't use the Walker here because it might skip over instructions
+      // that don't alias with this store, but do alias with a load later on
+      // that depends on this store.
+
+      // Anti dependences (write-after-read). We need to loop here in case
+      // there's a series of load instructions that I has anti dependences on.
+      while (true) {
+        MemoryDef *old_def = dyn_cast<MemoryDef>(parent);
+        if (!old_def)
+          break;
+        parent = old_def->getDefiningAccess();
+        MemoryDef *parent_def = dyn_cast<MemoryDef>(parent);
+        if (FMSSA.isLiveOnEntryDef(parent) || !parent_def)
+          break;
+        if (!isa<MemoryUse>(MSSA.getMemoryAccess(parent_def->getMemoryInst())))
+          break;
+        addDepend(I, parent_def->getMemoryInst());
+      }
+
+      // Output dependences (write-after-write).
+      addDepend(I, parent);
     } else {
       // Flow dependences (read-after-write).
-      addDepend(I, MSSA.getWalker()->getClobberingMemoryAccess(ma));
+      if (MSSA.getWalker()->getClobberingMemoryAccess(ma))
+        addDepend(I, MSSA.getWalker()->getClobberingMemoryAccess(ma));
     }
   }
 
@@ -812,7 +833,9 @@ OutliningDependenceAnalysis::run(Function &f, FunctionAnalysisManager &am) {
   auto &dt = am.getResult<DominatorTreeAnalysis>(f);
   auto &pdt = am.getResult<PostDominatorTreeAnalysis>(f);
   auto &mssa = am.getResult<MemorySSAAnalysis>(f);
-  return OutliningDependenceResults(f, dt, pdt, mssa.getMSSA());
+  auto &fmssa = am.getResult<FalseMemorySSAAnalysis>(f);
+  return OutliningDependenceResults(f, dt, pdt, mssa.getMSSA(),
+                                    fmssa.getMSSA());
 }
 
 PreservedAnalyses
@@ -830,7 +853,8 @@ bool OutliningDependenceWrapperPass::runOnFunction(Function &F) {
   auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto &PDT = getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   auto &MSSA = getAnalysis<MemorySSAWrapperPass>().getMSSA();
-  OutDep.emplace(F, DT, PDT, MSSA);
+  auto &FMSSA = getAnalysis<FalseMemorySSAWrapperPass>().getMSSA();
+  OutDep.emplace(F, DT, PDT, MSSA, FMSSA);
   return false;
 }
 
@@ -844,6 +868,7 @@ void OutliningDependenceWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequiredTransitive<DominatorTreeWrapperPass>();
   AU.addRequiredTransitive<PostDominatorTreeWrapperPass>();
   AU.addRequiredTransitive<MemorySSAWrapperPass>();
+  AU.addRequiredTransitive<FalseMemorySSAWrapperPass>();
 }
 
 void OutliningDependenceWrapperPass::releaseMemory() { OutDep.reset(); }

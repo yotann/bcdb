@@ -45,7 +45,7 @@ define void @volatile_only(i32* %arg1, i32* %arg2) {
 ; CHECK-NEXT: load i32, i32* %a
   load i32, i32* %a
 
-; CHECK: node 6 arg [0] dominating [0-1, 3]
+; CHECK: node 6 arg [0] dominating [0-5]
 ; CHECK-NEXT: load volatile i32, i32* %arg1
   load volatile i32, i32* %arg1
 
