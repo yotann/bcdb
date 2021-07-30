@@ -924,8 +924,9 @@ void FalseMemorySSA::renameSuccessorPhis(BasicBlock *BB,
         }
       (void)ReplacementDone;
       assert(ReplacementDone && "Incomplete phi during partial rename");
-    } else
+    } else {
       Phi->addIncoming(IncomingVal, BB);
+    }
   }
 }
 
@@ -996,8 +997,9 @@ void FalseMemorySSA::renamePass(DomTreeNode *Root, MemoryAccess *IncomingVal,
         // case, it's the last block def in the list.
         if (auto *BlockDefs = getWritableBlockDefs(BB))
           IncomingVal = &*BlockDefs->rbegin();
-      } else
+      } else {
         IncomingVal = renameBlock(BB, IncomingVal, RenameAllUses);
+      }
       renameSuccessorPhis(BB, IncomingVal, RenameAllUses);
       WorkStack.push_back({Child, Child->begin(), IncomingVal});
     }
@@ -1110,21 +1112,21 @@ private:
   struct MemlocStackInfo {
     // This essentially is keeping track of versions of the stack. Whenever
     // the stack changes due to pushes or pops, these versions increase.
-    unsigned long StackEpoch;
-    unsigned long PopEpoch;
+    size_t StackEpoch;
+    size_t PopEpoch;
     // This is the lower bound of places on the stack to check. It is equal to
     // the place the last stack walk ended.
     // Note: Correctness depends on this being initialized to 0, which densemap
     // does
-    unsigned long LowerBound;
+    size_t LowerBound;
     const BasicBlock *LowerBoundBlock;
     // This is where the last walk for this memory location ended.
-    unsigned long LastKill;
+    size_t LastKill;
     bool LastKillValid;
     Optional<AliasResult> AR;
   };
 
-  void optimizeUsesInBlock(const BasicBlock *, unsigned long &, unsigned long &,
+  void optimizeUsesInBlock(const BasicBlock *, size_t &, size_t &,
                            SmallVectorImpl<MemoryAccess *> &,
                            DenseMap<MemoryLocOrCall, MemlocStackInfo> &);
 
@@ -1149,7 +1151,7 @@ private:
 /// things like this, and if they start, we can modify MemoryLocOrCall to
 /// include relevant data)
 void FalseMemorySSA::OptimizeUses::optimizeUsesInBlock(
-    const BasicBlock *BB, unsigned long &StackEpoch, unsigned long &PopEpoch,
+    const BasicBlock *BB, size_t &StackEpoch, size_t &PopEpoch,
     SmallVectorImpl<MemoryAccess *> &VersionStack,
     DenseMap<MemoryLocOrCall, MemlocStackInfo> &LocStackInfo) {
 
@@ -1233,7 +1235,7 @@ void FalseMemorySSA::OptimizeUses::optimizeUsesInBlock(
     assert(LocInfo.LastKill < VersionStack.size() &&
            "Last kill info out of range");
     // In any case, the new upper bound is the top of the stack.
-    unsigned long UpperBound = VersionStack.size() - 1;
+    size_t UpperBound = VersionStack.size() - 1;
 
     if (UpperBound - LocInfo.LowerBound > MaxCheckLimit) {
       LLVM_DEBUG(dbgs() << "FalseMemorySSA skipping optimization of " << *MU
@@ -1298,8 +1300,8 @@ void FalseMemorySSA::OptimizeUses::optimizeUses() {
   DenseMap<MemoryLocOrCall, MemlocStackInfo> LocStackInfo;
   VersionStack.push_back(MSSA->getLiveOnEntryDef());
 
-  unsigned long StackEpoch = 1;
-  unsigned long PopEpoch = 1;
+  size_t StackEpoch = 1;
+  size_t PopEpoch = 1;
   // We perform a non-recursive top-down dominator tree walk.
   for (const auto *DomNode : depth_first(DT->getRootNode()))
     optimizeUsesInBlock(DomNode->getBlock(), StackEpoch, PopEpoch, VersionStack,
@@ -1564,7 +1566,7 @@ LLVM_DUMP_METHOD void FalseMemorySSA::dump() const { print(dbgs()); }
 /// the numbering.
 void FalseMemorySSA::renumberBlock(const BasicBlock *B) const {
   // The pre-increment ensures the numbers really start at 1.
-  unsigned long CurrentNumber = 0;
+  size_t CurrentNumber = 0;
   const AccessList *AL = getBlockAccesses(B);
   assert(AL != nullptr && "Asking to renumber an empty block");
   for (const auto &I : *AL)
@@ -1598,10 +1600,10 @@ bool FalseMemorySSA::locallyDominates(const MemoryAccess *Dominator,
   if (!BlockNumberingValid.count(DominatorBlock))
     renumberBlock(DominatorBlock);
 
-  unsigned long DominatorNum = BlockNumbering.lookup(Dominator);
+  size_t DominatorNum = BlockNumbering.lookup(Dominator);
   // All numbers start with 1
   assert(DominatorNum != 0 && "Block was not numbered properly");
-  unsigned long DominateeNum = BlockNumbering.lookup(Dominatee);
+  size_t DominateeNum = BlockNumbering.lookup(Dominatee);
   assert(DominateeNum != 0 && "Block was not numbered properly");
   return DominatorNum < DominateeNum;
 }
@@ -1789,8 +1791,9 @@ MemoryAccess *FalseMemorySSA::ClobberWalkerBase<
       StartingAccess->setOptimizedAccessType(None);
     else if (Q.AR == MustAlias)
       StartingAccess->setOptimizedAccessType(MustAlias);
-  } else
+  } else {
     OptimizedAccess = StartingAccess->getOptimized();
+  }
 
   LLVM_DEBUG(dbgs() << "Starting Memory SSA clobber for " << *I << " is ");
   LLVM_DEBUG(dbgs() << *StartingAccess << "\n");
@@ -1803,8 +1806,9 @@ MemoryAccess *FalseMemorySSA::ClobberWalkerBase<
     assert(isa<MemoryDef>(Q.OriginalAccess));
     Q.SkipSelfAccess = true;
     Result = Walker.findClobber(OptimizedAccess, Q, UpwardWalkLimit);
-  } else
+  } else {
     Result = OptimizedAccess;
+  }
 
   LLVM_DEBUG(dbgs() << "Result Memory SSA clobber [SkipSelf = " << SkipSelf);
   LLVM_DEBUG(dbgs() << "] for " << *I << " is " << *Result << "\n");

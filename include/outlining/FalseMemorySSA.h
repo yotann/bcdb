@@ -222,7 +222,7 @@ private:
   // Note that the numbering is local to a block, even though the map is
   // global.
   mutable SmallPtrSet<const BasicBlock *, 16> BlockNumberingValid;
-  mutable DenseMap<const MemoryAccess *, unsigned long> BlockNumbering;
+  mutable DenseMap<const MemoryAccess *, size_t> BlockNumbering;
 
   // Memory SSA building info
   std::unique_ptr<ClobberWalkerBase<AliasAnalysis>> WalkerBase;
