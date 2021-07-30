@@ -6,6 +6,7 @@
 #include "outlining/Candidates.h"
 #include "outlining/Dependence.h"
 #include "outlining/Extractor.h"
+#include "outlining/FalseMemorySSA.h"
 #include "outlining/SizeModel.h"
 
 using namespace bcdb;
@@ -17,6 +18,7 @@ llvmGetPassPluginInfo() {
           [](PassBuilder &builder) {
             builder.registerAnalysisRegistrationCallback(
                 [](FunctionAnalysisManager &am) {
+                  am.registerPass([] { return FalseMemorySSAAnalysis(); });
                   am.registerPass([] { return OutliningCandidatesAnalysis(); });
                   am.registerPass([] { return OutliningDependenceAnalysis(); });
                   am.registerPass([] { return SizeModelAnalysis(); });
@@ -24,6 +26,10 @@ llvmGetPassPluginInfo() {
             builder.registerPipelineParsingCallback(
                 [](StringRef name, FunctionPassManager &fpm,
                    ArrayRef<PassBuilder::PipelineElement>) {
+                  if (name == "print<false-memory-ssa>") {
+                    fpm.addPass(FalseMemorySSAPrinterPass(dbgs()));
+                    return true;
+                  }
                   if (name == "print<outlining-candidates>") {
                     fpm.addPass(OutliningCandidatesPrinterPass(dbgs()));
                     return true;
