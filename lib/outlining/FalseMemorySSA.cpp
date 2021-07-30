@@ -224,7 +224,8 @@ struct ClobberAlias {
 template <typename AliasAnalysisType>
 static ClobberAlias
 instructionClobbersQuery(const MemoryDef *MD, const MemoryLocation &UseLoc,
-                         const Instruction *UseInst, AliasAnalysisType &AA) {
+                         const Instruction *UseInst, AliasAnalysisType &AA,
+                         bool treat_loads_as_defs = true) {
   Instruction *DefInst = MD->getMemoryInst();
   assert(DefInst && "Defining instruction not actually an instruction");
   Optional<AliasResult> AR;
@@ -261,13 +262,14 @@ instructionClobbersQuery(const MemoryDef *MD, const MemoryLocation &UseLoc,
     return {isModOrRefSet(I), AR};
   }
 
-  if (auto *DefLoad = dyn_cast<LoadInst>(DefInst))
-    if (auto *UseLoad = dyn_cast_or_null<LoadInst>(UseInst))
-      return {!areLoadsReorderable(UseLoad, DefLoad), MayAlias};
+  if (!treat_loads_as_defs)
+    if (auto *DefLoad = dyn_cast<LoadInst>(DefInst))
+      if (auto *UseLoad = dyn_cast_or_null<LoadInst>(UseInst))
+        return {!areLoadsReorderable(UseLoad, DefLoad), MayAlias};
 
   ModRefInfo I = AA.getModRefInfo(DefInst, UseLoc);
   AR = isMustSet(I) ? MustAlias : MayAlias;
-  return {isModSet(I), AR};
+  return {isModSet(I) || (isRefSet(I) && true), AR};
 }
 
 template <typename AliasAnalysisType>
@@ -311,8 +313,12 @@ struct UpwardsMemoryQuery {
 } // end anonymous namespace
 
 template <typename AliasAnalysisType>
-static bool isUseTriviallyOptimizableToLiveOnEntry(AliasAnalysisType &AA,
-                                                   const Instruction *I) {
+static bool
+isUseTriviallyOptimizableToLiveOnEntry(AliasAnalysisType &AA,
+                                       const Instruction *I,
+                                       bool treat_loads_as_defs = true) {
+  if (treat_loads_as_defs)
+    return false;
   // If the memory can't be changed, then loads of the memory can't be
   // clobbered.
   if (auto *LI = dyn_cast<LoadInst>(I))
@@ -1485,6 +1491,8 @@ template <typename AliasAnalysisType>
 MemoryUseOrDef *
 FalseMemorySSA::createNewAccess(Instruction *I, AliasAnalysisType *AAP,
                                 const MemoryUseOrDef *Template) {
+  const bool treat_loads_as_defs = true;
+
   // The assume intrinsic has a control dependency which we model by claiming
   // that it writes arbitrarily. Debuginfo intrinsics may be considered
   // clobbers when we have a nonstandard AA pipeline. Ignore these fake memory
@@ -1513,13 +1521,6 @@ FalseMemorySSA::createNewAccess(Instruction *I, AliasAnalysisType *AAP,
   if (Template) {
     Def = isa<MemoryDef>(Template);
     Use = isa<MemoryUse>(Template);
-#if !defined(NDEBUG)
-    ModRefInfo ModRef = AAP->getModRefInfo(I, None);
-    bool DefCheck, UseCheck;
-    DefCheck = isModSet(ModRef) || isOrdered(I);
-    UseCheck = isRefSet(ModRef);
-    assert(Def == DefCheck && (Def || Use == UseCheck) && "Invalid template");
-#endif
   } else {
     // Find out what affect this instruction has on memory.
     ModRefInfo ModRef = AAP->getModRefInfo(I, None);
@@ -1531,7 +1532,8 @@ FalseMemorySSA::createNewAccess(Instruction *I, AliasAnalysisType *AAP,
     // Separate memory aliasing and ordering into two different chains so that
     // we can precisely represent both "what memory will this read/write/is
     // clobbered by" and "what instructions can I move this past".
-    Def = isModSet(ModRef) || isOrdered(I);
+    Def = isModSet(ModRef) || isOrdered(I) ||
+          (isRefSet(ModRef) && treat_loads_as_defs);
     Use = isRefSet(ModRef);
   }
 

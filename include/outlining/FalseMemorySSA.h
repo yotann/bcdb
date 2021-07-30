@@ -6,6 +6,7 @@
 //   This means it can be used to identify write-after-read dependences
 //   (antidependences), where the original MemorySSA focuses on
 //   read-after-write dependences ("true" dependences).
+//   Search for "treat_loads_as_defs" to see these changes.
 // - It has been changed to build successfully with multiple versions of LLVM.
 // - Some unneeded code has been removed.
 // - TODO: Can we also make it more precise? Can we apply OptimizeUses to defs
