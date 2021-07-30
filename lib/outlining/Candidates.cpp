@@ -312,8 +312,7 @@ struct RegisterPassX : RegisterPass<OutliningCandidatesWrapperPass> {
     initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
     initializePostDominatorTreeWrapperPassPass(
         *PassRegistry::getPassRegistry());
-    initializeDependenceAnalysisWrapperPassPass(
-        *PassRegistry::getPassRegistry());
+    initializeMemorySSAWrapperPassPass(*PassRegistry::getPassRegistry());
   }
 };
 } // end anonymous namespace

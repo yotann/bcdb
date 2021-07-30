@@ -15,10 +15,11 @@
 namespace llvm {
 class AnalysisUsage;
 class BasicBlock;
-class DependenceInfo;
 class DominatorTree;
 class Function;
 class Instruction;
+class MemoryPhi;
+class MemorySSA;
 class Module;
 class PostDominatorTree;
 class Value;
@@ -37,7 +38,7 @@ using namespace llvm;
 class OutliningDependenceResults {
 public:
   OutliningDependenceResults(Function &F, DominatorTree &DT,
-                             PostDominatorTree &PDT, DependenceInfo &DI);
+                             PostDominatorTree &PDT, MemorySSA &MSSA);
 
   OutliningDependenceResults(OutliningDependenceResults &&rhs) = default;
 
@@ -57,6 +58,7 @@ public:
   // Each node must be one of the following types:
   // - Instruction
   // - BasicBlock, used before instructions to represent control dependencies
+  // - MemoryPhi, used immediately after BasicBlock
   std::vector<Value *> Nodes;
 
   // We guarantee Nodes[NodeIndices[V]] == V.
@@ -102,7 +104,7 @@ public:
   PostDominatorTree &PDT;
   // Wrapped in unique_ptr so OutliningDependenceResults can be moved.
   std::unique_ptr<CorrectPostDominatorTree> CPDT;
-  DependenceInfo &DI;
+  MemorySSA &MSSA;
 
 private:
   std::optional<size_t> lookupNode(Value *V);
@@ -110,6 +112,7 @@ private:
   void addForcedDepend(Value *User, Value *Def);
   void numberNodes();
   void analyzeBlock(BasicBlock *BB);
+  void analyzeMemoryPhi(MemoryPhi *MPhi);
   void analyzeInstruction(Instruction *I);
   void finalizeDepends();
 };
