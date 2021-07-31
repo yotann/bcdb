@@ -4,6 +4,8 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
+#include <memory>
+#include <mutex>
 #include <optional>
 
 #include "CID.h"
@@ -13,6 +15,8 @@
 #include "URI.h"
 
 namespace memodb {
+
+class DeferredRequestInfo;
 
 // A single request for the MemoDB server to respond to.
 // This class is intended to work not only for HTTP requests but also CoAP
@@ -32,6 +36,38 @@ public:
     CBOR,
     HTML,
     ProblemJSON,
+  };
+
+  // All Request objects start in the New state, and eventually reach the Done
+  // or Cancelled state. Allowed transitions are as follows:
+  //
+  // New -> Done
+  // - The event loop calls Server::handleRequest(), which calls
+  //   Request::send...().
+  //
+  // New -> Waiting
+  // - The event loop calls Server::handleRequest(), which calls
+  //   Request::deferWithTimeout().
+  //
+  // Waiting -> Done
+  // - While handling a different Request, the Server calls Request::send...()
+  //   on this Request.
+  //
+  // Waiting -> Cancelled
+  // - The event loop detects that the client has disconnected. The event loop
+  //   must call Server::handleRequest() after changing the state.
+  //
+  // Waiting -> TimedOut -> Done
+  // - The event loop detects that the timeout given to
+  //   Request::deferWithTimeout() has elapsed. The event loop must call
+  //   Server::handleRequest() after changing the state to TimedOut, which in
+  //   turn must call Request::send...().
+  enum class State {
+    New,
+    Waiting,
+    TimedOut,
+    Cancelled,
+    Done,
   };
 
   enum class Status {
@@ -69,14 +105,30 @@ public:
                          const std::optional<llvm::Twine> &detail) = 0;
 
   virtual void sendMethodNotAllowed(llvm::StringRef allow) = 0;
+
+  virtual void deferWithTimeout(unsigned seconds) = 0;
+
+  // Must be locked before any member function is called or any other member
+  // variable is accessed.
+  std::mutex mutex;
+
+  State state = State::New;
+
+  DeferredRequestInfo *deferred_info = nullptr;
 };
 
 class Server {
 public:
   Server(Evaluator &evaluator);
-  void handleRequest(Request &request);
+
+  // When this is called, request->mutex must already be locked. If the Server
+  // calls Request::deferWithTimeout(), it may keep a copy of the shared_ptr
+  // around indefinitely. This function will always cause request->state to
+  // change (unless it's State::Cancelled).
+  void handleRequest(const std::shared_ptr<Request> &request);
 
 private:
+  void handleNewRequest(Request &request);
   void handleRequestCID(Request &request,
                         std::optional<llvm::StringRef> cid_str);
   void handleRequestHead(Request &request,

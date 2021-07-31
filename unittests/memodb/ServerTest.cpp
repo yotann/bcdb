@@ -1,6 +1,7 @@
 #include "memodb/Server.h"
 
 #include <llvm/ADT/StringRef.h>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -39,6 +40,8 @@ public:
 
   void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
                        CacheControl cache_control) override {
+    ASSERT_TRUE(state != State::Cancelled && state != State::Done);
+    state = State::Done;
     EXPECT_EQ(response_type, std::nullopt);
     response_type = ResponseType::Content;
     response_content_node = node;
@@ -47,18 +50,24 @@ public:
   }
 
   void sendCreated(const std::optional<URI> &path) override {
+    ASSERT_TRUE(state != State::Cancelled && state != State::Done);
+    state = State::Done;
     EXPECT_EQ(response_type, std::nullopt);
     response_type = ResponseType::Created;
     response_location = path;
   }
 
   void sendDeleted() override {
+    ASSERT_TRUE(state != State::Cancelled && state != State::Done);
+    state = State::Done;
     EXPECT_EQ(response_type, std::nullopt);
     response_type = ResponseType::Deleted;
   }
 
   void sendError(Status status, std::optional<StringRef> type, StringRef title,
                  const std::optional<llvm::Twine> &detail) override {
+    ASSERT_TRUE(state != State::Cancelled && state != State::Done);
+    state = State::Done;
     EXPECT_EQ(response_type, std::nullopt);
     response_type = ResponseType::Error;
     error_status = status;
@@ -71,14 +80,24 @@ public:
   }
 
   void sendMethodNotAllowed(StringRef allow) override {
+    ASSERT_TRUE(state != State::Cancelled && state != State::Done);
+    state = State::Done;
     EXPECT_EQ(response_type, std::nullopt);
     response_type = ResponseType::MethodNotAllowed;
     error_allowed_methods = allow;
   }
 
+  void deferWithTimeout(unsigned seconds) override {
+    ASSERT_TRUE(state == State::New);
+    timeout = seconds;
+    state = State::Waiting;
+  }
+
   std::optional<Method> request_method;
   std::optional<URI> request_uri;
   std::optional<Node> request_content_node;
+
+  unsigned timeout = 0;
 
   std::optional<ResponseType> response_type;
 
@@ -97,48 +116,57 @@ public:
 TEST(ServerTest, UnknownMethod) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(std::nullopt, "/cid/uAXEAB2Zjb29raWU");
+  auto request =
+      std::make_shared<TestRequest>(std::nullopt, "/cid/uAXEAB2Zjb29raWU");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Error);
-  EXPECT_EQ(request.error_status, Request::Status::NotImplemented);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Error);
+  EXPECT_EQ(request->error_status, Request::Status::NotImplemented);
 }
 
 TEST(ServerTest, MethodNotAllowed) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::DELETE, "/cid");
+  auto request = std::make_shared<TestRequest>(Request::Method::DELETE, "/cid");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::MethodNotAllowed);
-  EXPECT_EQ(request.error_allowed_methods, "POST");
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::MethodNotAllowed);
+  EXPECT_EQ(request->error_allowed_methods, "POST");
 }
 
 TEST(ServerTest, DotSegmentsInURI) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::GET, "/cid/./uAXEAB2Zjb29raWU");
+  auto request = std::make_shared<TestRequest>(Request::Method::GET,
+                                               "/cid/./uAXEAB2Zjb29raWU");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Error);
-  EXPECT_EQ(request.error_status, Request::Status::BadRequest);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Error);
+  EXPECT_EQ(request->error_status, Request::Status::BadRequest);
 }
 
 TEST(ServerTest, GetCID) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::GET, "/cid/uAXEAB2Zjb29raWU");
+  auto request = std::make_shared<TestRequest>(Request::Method::GET,
+                                               "/cid/uAXEAB2Zjb29raWU");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node, Node("cookie"));
-  EXPECT_EQ(request.response_content_cid, *CID::parse("uAXEAB2Zjb29raWU"));
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Immutable);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node, Node("cookie"));
+  EXPECT_EQ(request->response_content_cid, *CID::parse("uAXEAB2Zjb29raWU"));
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Immutable);
 }
 
 TEST(ServerTest, PostCID) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::POST, "/cid", Node("cookie"));
+  auto request = std::make_shared<TestRequest>(Request::Method::POST, "/cid",
+                                               Node("cookie"));
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Created);
-  EXPECT_EQ(request.response_location->encode(), "/cid/uAXEAB2Zjb29raWU");
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Created);
+  EXPECT_EQ(request->response_location->encode(), "/cid/uAXEAB2Zjb29raWU");
 }
 
 TEST(ServerTest, PostCIDLarge) {
@@ -147,10 +175,12 @@ TEST(ServerTest, PostCIDLarge) {
     node.push_back(i);
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::POST, "/cid", node);
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::POST, "/cid", node);
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Created);
-  EXPECT_EQ(request.response_location->encode(),
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Created);
+  EXPECT_EQ(request->response_location->encode(),
             "/cid/uAXGg5AIg6aa9gvagXHAJtTCI5l_QXWbIMNnQN6905en1kSnHNPo");
   EXPECT_EQ(evaluator.getStore().get(*CID::parse(
                 "uAXGg5AIg6aa9gvagXHAJtTCI5l_QXWbIMNnQN6905en1kSnHNPo")),
@@ -160,12 +190,13 @@ TEST(ServerTest, PostCIDLarge) {
 TEST(ServerTest, ListHeadsEmpty) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::GET, "/head");
+  auto request = std::make_shared<TestRequest>(Request::Method::GET, "/head");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node, Node(node_list_arg));
-  EXPECT_EQ(request.response_content_cid, std::nullopt);
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node, Node(node_list_arg));
+  EXPECT_EQ(request->response_content_cid, std::nullopt);
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Mutable);
 }
 
 TEST(ServerTest, ListHeads) {
@@ -173,36 +204,41 @@ TEST(ServerTest, ListHeads) {
   Server server(evaluator);
   evaluator.getStore().set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
   evaluator.getStore().set(Head("empty"), *CID::parse("uAXEAAaA"));
-  TestRequest request(Request::Method::GET, "/head");
+  auto request = std::make_shared<TestRequest>(Request::Method::GET, "/head");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node,
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node,
             Node(node_list_arg, {"/head/cookie", "/head/empty"}));
-  EXPECT_EQ(request.response_content_cid, std::nullopt);
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+  EXPECT_EQ(request->response_content_cid, std::nullopt);
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Mutable);
 }
 
 TEST(ServerTest, GetHead) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
   evaluator.getStore().set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
-  TestRequest request(Request::Method::GET, "/head/cookie");
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::GET, "/head/cookie");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node,
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node,
             Node(*CID::parse("uAXEAB2Zjb29raWU")));
-  EXPECT_EQ(request.response_content_cid, std::nullopt);
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+  EXPECT_EQ(request->response_content_cid, std::nullopt);
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Mutable);
 }
 
 TEST(ServerTest, PutHead) {
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::PUT, "/head/cookie",
-                      Node(*CID::parse("uAXEAB2Zjb29raWU")));
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::PUT, "/head/cookie",
+                                    Node(*CID::parse("uAXEAB2Zjb29raWU")));
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Created);
-  EXPECT_EQ(request.response_location, std::nullopt);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Created);
+  EXPECT_EQ(request->response_location, std::nullopt);
   EXPECT_EQ(evaluator.getStore().resolve(Head("cookie")),
             CID::parse("uAXEAB2Zjb29raWU"));
 }
@@ -215,13 +251,14 @@ TEST(ServerTest, ListFuncs) {
   evaluator.getStore().set(Call("identity", {cookie_cid}), cookie_cid);
   evaluator.getStore().set(Call("identity", {empty_cid}), empty_cid);
   evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
-  TestRequest request(Request::Method::GET, "/call");
+  auto request = std::make_shared<TestRequest>(Request::Method::GET, "/call");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node,
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node,
             Node(node_list_arg, {"/call/const_empty", "/call/identity"}));
-  EXPECT_EQ(request.response_content_cid, std::nullopt);
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+  EXPECT_EQ(request->response_content_cid, std::nullopt);
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Mutable);
 }
 
 TEST(ServerTest, InvalidateFunc) {
@@ -232,9 +269,11 @@ TEST(ServerTest, InvalidateFunc) {
   evaluator.getStore().set(Call("identity", {cookie_cid}), cookie_cid);
   evaluator.getStore().set(Call("identity", {empty_cid}), empty_cid);
   evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
-  TestRequest request(Request::Method::DELETE, "/call/identity");
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::DELETE, "/call/identity");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Deleted);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Deleted);
   EXPECT_TRUE(
       !evaluator.getStore().resolveOptional(Call("identity", {cookie_cid})));
   EXPECT_TRUE(
@@ -253,14 +292,16 @@ TEST(ServerTest, ListCalls) {
                            cookie_cid);
   evaluator.getStore().set(Call("transmute", {cookie_cid}), empty_cid);
   evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
-  TestRequest request(Request::Method::GET, "/call/transmute");
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::GET, "/call/transmute");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node,
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node,
             Node(node_list_arg, {"/call/transmute/uAXEAAaA,uAXEAAaA",
                                  "/call/transmute/uAXEAB2Zjb29raWU"}));
-  EXPECT_EQ(request.response_content_cid, std::nullopt);
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+  EXPECT_EQ(request->response_content_cid, std::nullopt);
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Mutable);
 }
 
 TEST(ServerTest, GetCall) {
@@ -270,13 +311,14 @@ TEST(ServerTest, GetCall) {
   Server server(evaluator);
   evaluator.getStore().set(Call("transmute", {empty_cid, empty_cid}),
                            cookie_cid);
-  TestRequest request(Request::Method::GET,
-                      "/call/transmute/uAXEAAaA,uAXEAAaA");
+  auto request = std::make_shared<TestRequest>(
+      Request::Method::GET, "/call/transmute/uAXEAAaA,uAXEAAaA");
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Content);
-  EXPECT_EQ(request.response_content_node, Node(cookie_cid));
-  EXPECT_EQ(request.response_content_cid, std::nullopt);
-  EXPECT_EQ(request.response_cache_control, Request::CacheControl::Mutable);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node, Node(cookie_cid));
+  EXPECT_EQ(request->response_content_cid, std::nullopt);
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Mutable);
 }
 
 TEST(ServerTest, PutCall) {
@@ -284,14 +326,46 @@ TEST(ServerTest, PutCall) {
   const CID empty_cid = *CID::parse("uAXEAAaA");
   Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
   Server server(evaluator);
-  TestRequest request(Request::Method::PUT, "/call/transmute/uAXEAAaA,uAXEAAaA",
-                      Node(cookie_cid));
+  auto request = std::make_shared<TestRequest>(
+      Request::Method::PUT, "/call/transmute/uAXEAAaA,uAXEAAaA",
+      Node(cookie_cid));
   server.handleRequest(request);
-  ASSERT_EQ(request.response_type, ResponseType::Created);
-  EXPECT_EQ(request.response_location, std::nullopt);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Created);
+  EXPECT_EQ(request->response_location, std::nullopt);
   EXPECT_EQ(
       evaluator.getStore().resolve(Call("transmute", {empty_cid, empty_cid})),
       cookie_cid);
+}
+
+TEST(ServerTest, Timeout) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::GET, "/debug/timeout");
+  server.handleRequest(request);
+  ASSERT_EQ(request->state, Request::State::Waiting);
+  EXPECT_EQ(request->timeout, 2);
+  request->state = Request::State::TimedOut;
+  server.handleRequest(request);
+  ASSERT_EQ(request->state, Request::State::Done);
+  ASSERT_EQ(request->response_type, ResponseType::Content);
+  EXPECT_EQ(request->response_content_node, Node("timed out"));
+  EXPECT_EQ(request->response_cache_control, Request::CacheControl::Ephemeral);
+}
+
+TEST(ServerTest, Cancel) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  auto request =
+      std::make_shared<TestRequest>(Request::Method::GET, "/debug/timeout");
+  server.handleRequest(request);
+  ASSERT_EQ(request->state, Request::State::Waiting);
+  EXPECT_EQ(request->timeout, 2);
+  request->state = Request::State::Cancelled;
+  server.handleRequest(request);
+  EXPECT_EQ(request->state, Request::State::Cancelled);
+  EXPECT_EQ(request->response_type, std::nullopt);
 }
 
 } // end anonymous namespace

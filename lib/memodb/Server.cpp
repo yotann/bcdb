@@ -22,6 +22,8 @@ static bool isLegalUTF8(llvm::StringRef str) {
   return llvm::isLegalUTF8String(&source, sourceEnd);
 }
 
+class memodb::DeferredRequestInfo {};
+
 void Request::sendContentURIs(const llvm::ArrayRef<URI> uris,
                               CacheControl cache_control) {
   Node node(node_list_arg);
@@ -34,7 +36,29 @@ void Request::sendContentURIs(const llvm::ArrayRef<URI> uris,
 Server::Server(Evaluator &evaluator)
     : evaluator(evaluator), store(evaluator.getStore()) {}
 
-void Server::handleRequest(Request &request) {
+void Server::handleRequest(const std::shared_ptr<Request> &request) {
+  switch (request->state) {
+  case Request::State::New:
+    handleNewRequest(*request);
+    assert(request->state == Request::State::Done ||
+           request->state == Request::State::Waiting);
+    break;
+  case Request::State::TimedOut:
+    request->sendContentNode("timed out", std::nullopt,
+                             Request::CacheControl::Ephemeral);
+    assert(request->state == Request::State::Done);
+    break;
+  case Request::State::Cancelled:
+    assert(request->state == Request::State::Cancelled);
+    break;
+  case Request::State::Waiting:
+  case Request::State::Done:
+    llvm_unreachable("impossible request state");
+    break;
+  }
+}
+
+void Server::handleNewRequest(Request &request) {
   if (request.getMethod() == std::nullopt)
     return request.sendError(Request::Status::NotImplemented, std::nullopt,
                              "Not Implemented", std::nullopt);
@@ -66,6 +90,11 @@ void Server::handleRequest(Request &request) {
     if (uri.path_segments.size() == 3)
       return handleRequestCall(request, uri.path_segments[1],
                                uri.path_segments[2]);
+  }
+  if (uri.path_segments.size() == 2 && uri.path_segments[0] == "debug" &&
+      uri.path_segments[1] == "timeout") {
+    request.deferWithTimeout(2);
+    return;
   }
 
   return request.sendError(Request::Status::NotFound, std::nullopt, "Not Found",

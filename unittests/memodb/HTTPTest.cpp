@@ -63,6 +63,10 @@ public:
     response_body = "";
   }
 
+  void deferWithTimeout(unsigned seconds) override {
+    FAIL() << "should not be used by HTTPTest";
+  }
+
   std::string request_method_str;
   std::optional<URI> request_uri;
   llvm::StringMap<std::string> request_headers;
