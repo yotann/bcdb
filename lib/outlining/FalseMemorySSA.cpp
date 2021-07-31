@@ -269,7 +269,7 @@ instructionClobbersQuery(const MemoryDef *MD, const MemoryLocation &UseLoc,
 
   ModRefInfo I = AA.getModRefInfo(DefInst, UseLoc);
   AR = isMustSet(I) ? MustAlias : MayAlias;
-  return {isModSet(I) || (isRefSet(I) && true), AR};
+  return {isModSet(I) || (treat_loads_as_defs && isRefSet(I)), AR};
 }
 
 template <typename AliasAnalysisType>
@@ -1533,7 +1533,7 @@ FalseMemorySSA::createNewAccess(Instruction *I, AliasAnalysisType *AAP,
     // we can precisely represent both "what memory will this read/write/is
     // clobbered by" and "what instructions can I move this past".
     Def = isModSet(ModRef) || isOrdered(I) ||
-          (isRefSet(ModRef) && treat_loads_as_defs);
+          (treat_loads_as_defs && isRefSet(ModRef));
     Use = isRefSet(ModRef);
   }
 
