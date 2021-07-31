@@ -26,6 +26,9 @@ public:
   // Encode the URI using normal form.
   std::string encode() const;
 
+  bool operator==(const URI &other) const;
+  bool operator!=(const URI &other) const;
+
   // If input is "x:/y/foo%2Fbar", path_segments will be ["y", "foo/bar"].
   std::string scheme, host, fragment;
   unsigned port = 0;

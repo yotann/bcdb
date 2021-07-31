@@ -185,3 +185,13 @@ std::string URI::encode() const {
   }
   return result;
 }
+
+bool URI::operator==(const URI &other) const {
+  // XXX: ignoring escape_slashes_in_segments.
+  return scheme == other.scheme && host == other.host &&
+         fragment == other.fragment && port == other.port &&
+         rootless == other.rootless && path_segments == other.path_segments &&
+         query_params == other.query_params;
+}
+
+bool URI::operator!=(const URI &other) const { return !(*this == other); }
