@@ -12,6 +12,16 @@
 
 using namespace memodb;
 
+bool Call::operator<(const Call &other) const {
+  return Name != other.Name ? Name < other.Name : Args < other.Args;
+}
+
+bool Call::operator==(const Call &other) const {
+  return Name == other.Name && Args == other.Args;
+}
+
+bool Call::operator!=(const Call &other) const { return !(*this == other); }
+
 NodeRef::NodeRef(Store &store, const NodeRef &other)
     : store(store), cid(other.cid), node(other.node) {}
 

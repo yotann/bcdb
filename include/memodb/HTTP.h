@@ -23,6 +23,8 @@ public:
   void sendContentURIs(const llvm::ArrayRef<URI> uris,
                        CacheControl cache_control) override;
 
+  void sendAccepted() override;
+
   void sendCreated(const std::optional<URI> &path) override;
 
   void sendDeleted() override;

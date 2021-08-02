@@ -153,6 +153,8 @@ std::optional<Node> HTTPRequest::getContentNode() {
       type_str_or_null ? type_str_or_null->split(';').first.trim(" \t") : "";
   llvm::StringRef body_str = getBody();
 
+  // FIXME: distinguish between a missing body and an invalid body.
+
   if (type_str.equals_lower("application/cbor")) {
     BytesRef body_bytes(reinterpret_cast<const std::uint8_t *>(body_str.data()),
                         body_str.size());
@@ -409,6 +411,11 @@ void HTTPRequest::sendContentURIs(const llvm::ArrayRef<URI> uris,
   html += "</ul>\n";
 
   sendContent(cache_control, "html+" + etag, "text/html", html);
+}
+
+void HTTPRequest::sendAccepted() {
+  startResponse(202, CacheControl::Ephemeral);
+  sendEmptyBody();
 }
 
 void HTTPRequest::sendCreated(const std::optional<URI> &path) {

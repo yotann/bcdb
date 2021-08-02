@@ -44,6 +44,7 @@ public:
   MOCK_METHOD(void, sendContentURIs,
               (const ArrayRef<URI> uris, CacheControl cache_control),
               (override));
+  MOCK_METHOD(void, sendAccepted, (), (override));
   MOCK_METHOD(void, sendCreated, (const std::optional<URI> &path), (override));
   MOCK_METHOD(void, sendDeleted, (), (override));
   MOCK_METHOD(void, sendError,
@@ -65,6 +66,10 @@ public:
           ASSERT_TRUE(state != State::Cancelled && state != State::Done);
           state = State::Done;
         });
+    ON_CALL(*this, sendAccepted).WillByDefault([this]() {
+      ASSERT_TRUE(state != State::Cancelled && state != State::Done);
+      state = State::Done;
+    });
     ON_CALL(*this, sendCreated)
         .WillByDefault([this](const std::optional<URI> &) {
           ASSERT_TRUE(state != State::Cancelled && state != State::Done);
@@ -342,5 +347,175 @@ TEST(ServerTest, Cancel) {
   server.handleRequest(request);
   EXPECT_EQ(request->state, Request::State::Cancelled);
 }
+
+TEST(ServerTest, EvaluateTimeout) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  auto request = std::make_shared<MockRequest>();
+  request->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                      std::nullopt);
+  EXPECT_CALL(*request, deferWithTimeout(_));
+  EXPECT_CALL(*request, sendError(Request::Status::ServiceUnavailable, _,
+                                  Eq("Service Unavailable"), _));
+  server.handleRequest(request);
+  request->state = Request::State::TimedOut;
+  server.handleRequest(request);
+}
+
+TEST(ServerTest, EvaluateCancel) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  auto request = std::make_shared<MockRequest>();
+  request->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                      std::nullopt);
+  EXPECT_CALL(*request, deferWithTimeout(_));
+  EXPECT_CALL(*request, sendContentNode).Times(0);
+  EXPECT_CALL(*request, sendError).Times(0);
+  server.handleRequest(request);
+  request->state = Request::State::Cancelled;
+  server.handleRequest(request);
+}
+
+TEST(ServerTest, EvaluateCached) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  evaluator.getStore().set(Call("inc", {*CID::parse("uAXEAAQA")}),
+                           *CID::parse("uAXEAAQE"));
+  Server server(evaluator);
+  auto evaluate_req = std::make_shared<MockRequest>();
+  evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                           std::nullopt);
+  EXPECT_CALL(*evaluate_req, deferWithTimeout).Times(0);
+  EXPECT_CALL(*evaluate_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+  server.handleRequest(evaluate_req);
+}
+
+TEST(ServerTest, EvaluateSuccessWithoutWorker) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  auto evaluate_req = std::make_shared<MockRequest>();
+  evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                           std::nullopt);
+  EXPECT_CALL(*evaluate_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+  server.handleRequest(evaluate_req);
+
+  auto put_req = std::make_shared<MockRequest>();
+  put_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                      Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*put_req, sendCreated(Eq(std::nullopt)));
+  server.handleRequest(put_req);
+}
+
+TEST(ServerTest, EvaluateTimeoutBeforeSuccessWithoutWorker) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+  auto evaluate_req = std::make_shared<MockRequest>();
+  evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                           std::nullopt);
+  EXPECT_CALL(*evaluate_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate_req, sendError(Request::Status::ServiceUnavailable, _,
+                                       Eq("Service Unavailable"), _));
+  server.handleRequest(evaluate_req);
+  evaluate_req->state = Request::State::TimedOut;
+  server.handleRequest(evaluate_req);
+
+  auto put_req = std::make_shared<MockRequest>();
+  put_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                      Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*put_req, sendCreated(Eq(std::nullopt)));
+  server.handleRequest(put_req);
+}
+
+TEST(ServerTest, EvaluateMultiSuccessWithoutWorker) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+
+  auto evaluate0_req = std::make_shared<MockRequest>();
+  evaluate0_req->expectGets(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate", std::nullopt);
+  EXPECT_CALL(*evaluate0_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate0_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+
+  auto evaluate1_req = std::make_shared<MockRequest>();
+  evaluate1_req->expectGets(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate", std::nullopt);
+  EXPECT_CALL(*evaluate1_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate1_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+
+  server.handleRequest(evaluate0_req);
+  server.handleRequest(evaluate1_req);
+
+  auto put_req = std::make_shared<MockRequest>();
+  put_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                      Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*put_req, sendCreated(Eq(std::nullopt)));
+  server.handleRequest(put_req);
+}
+
+TEST(ServerTest, EvaluateMixedTimeoutAndSuccessWithoutWorker) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+
+  auto evaluate0_req = std::make_shared<MockRequest>();
+  evaluate0_req->expectGets(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate", std::nullopt);
+  EXPECT_CALL(*evaluate0_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate0_req, sendError(Request::Status::ServiceUnavailable, _,
+                                        Eq("Service Unavailable"), _));
+
+  auto evaluate1_req = std::make_shared<MockRequest>();
+  evaluate1_req->expectGets(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate", std::nullopt);
+  EXPECT_CALL(*evaluate1_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate1_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+
+  server.handleRequest(evaluate0_req);
+  server.handleRequest(evaluate1_req);
+  evaluate0_req->state = Request::State::TimedOut;
+  server.handleRequest(evaluate0_req);
+
+  auto put_req = std::make_shared<MockRequest>();
+  put_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                      Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*put_req, sendCreated(Eq(std::nullopt)));
+  server.handleRequest(put_req);
+}
+
+TEST(ServerTest, EvaluateTimeoutThenSuccessWithoutWorker) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  Server server(evaluator);
+
+  auto evaluate0_req = std::make_shared<MockRequest>();
+  evaluate0_req->expectGets(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate", std::nullopt);
+  EXPECT_CALL(*evaluate0_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate0_req, sendError(Request::Status::ServiceUnavailable, _,
+                                        Eq("Service Unavailable"), _));
+
+  auto evaluate1_req = std::make_shared<MockRequest>();
+  evaluate1_req->expectGets(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate", std::nullopt);
+  EXPECT_CALL(*evaluate1_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate1_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+
+  server.handleRequest(evaluate0_req);
+  evaluate0_req->state = Request::State::TimedOut;
+  server.handleRequest(evaluate0_req);
+  server.handleRequest(evaluate1_req);
+
+  auto put_req = std::make_shared<MockRequest>();
+  put_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                      Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*put_req, sendCreated(Eq(std::nullopt)));
+  server.handleRequest(put_req);
+}
+
+// TODO: find a way to test interaction between threads.
 
 } // end anonymous namespace

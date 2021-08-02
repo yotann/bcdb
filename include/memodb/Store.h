@@ -41,6 +41,10 @@ struct Call {
 
   Call(llvm::StringRef Name, llvm::ArrayRef<CID> Args)
       : Name(Name), Args(Args) {}
+
+  bool operator<(const Call &other) const;
+  bool operator==(const Call &other) const;
+  bool operator!=(const Call &other) const;
 };
 
 std::ostream &operator<<(std::ostream &os, const Call &call);
