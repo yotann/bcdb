@@ -448,7 +448,7 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
 
   // Memory dependences.
   if (MemoryAccess *ma = MSSA.getMemoryAccess(I)) {
-    if (MemoryDef *def = dyn_cast<MemoryDef>(ma)) {
+    if (isa<MemoryDef>(ma)) {
       MemoryDef *fdef = cast<MemoryDef>(FMSSA.getMemoryAccess(I));
       MemoryAccess *parent = fdef;
 
