@@ -59,8 +59,7 @@ void Request::sendContentURIs(const llvm::ArrayRef<URI> uris,
   return sendContentNode(node, std::nullopt, cache_control);
 }
 
-Server::Server(Evaluator &evaluator)
-    : evaluator(evaluator), store(evaluator.getStore()) {}
+Server::Server(Store &store) : store(store) {}
 
 void Server::handleRequest(const std::shared_ptr<Request> &request) {
   switch (request->state) {

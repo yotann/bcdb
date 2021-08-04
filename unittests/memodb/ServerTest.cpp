@@ -121,8 +121,8 @@ public:
 // TODO: use a mock for Store instead of using sqlite:test?mode=memory.
 
 TEST(ServerTest, UnknownMethod) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->setWillByDefault();
   EXPECT_CALL(*request, getMethod).WillOnce(Return(std::nullopt));
@@ -133,8 +133,8 @@ TEST(ServerTest, UnknownMethod) {
 }
 
 TEST(ServerTest, MethodNotAllowed) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::DELETE, "/cid");
   EXPECT_CALL(*request, sendMethodNotAllowed(Eq("POST"))).Times(1);
@@ -142,8 +142,8 @@ TEST(ServerTest, MethodNotAllowed) {
 }
 
 TEST(ServerTest, DotSegmentsInURI) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/cid/./uAXEAB2Zjb29raWU");
   EXPECT_CALL(*request,
@@ -152,8 +152,8 @@ TEST(ServerTest, DotSegmentsInURI) {
 }
 
 TEST(ServerTest, GetCID) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/cid/uAXEAB2Zjb29raWU");
   EXPECT_CALL(*request, sendContentNode(Node("cookie"),
@@ -163,8 +163,8 @@ TEST(ServerTest, GetCID) {
 }
 
 TEST(ServerTest, PostCID) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::POST, "/cid", Node("cookie"));
   EXPECT_CALL(*request, sendCreated(Eq(URI::parse("/cid/uAXEAB2Zjb29raWU"))));
@@ -175,8 +175,8 @@ TEST(ServerTest, PostCIDLarge) {
   Node node(node_list_arg);
   for (size_t i = 0; i < 1024; ++i)
     node.push_back(i);
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::POST, "/cid", node);
   EXPECT_CALL(
@@ -184,14 +184,14 @@ TEST(ServerTest, PostCIDLarge) {
       sendCreated(Eq(URI::parse(
           "/cid/uAXGg5AIg6aa9gvagXHAJtTCI5l_QXWbIMNnQN6905en1kSnHNPo"))));
   server.handleRequest(request);
-  EXPECT_EQ(evaluator.getStore().get(*CID::parse(
+  EXPECT_EQ(store->get(*CID::parse(
                 "uAXGg5AIg6aa9gvagXHAJtTCI5l_QXWbIMNnQN6905en1kSnHNPo")),
             node);
 }
 
 TEST(ServerTest, ListHeadsEmpty) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/head");
   EXPECT_CALL(*request,
@@ -200,10 +200,10 @@ TEST(ServerTest, ListHeadsEmpty) {
 }
 
 TEST(ServerTest, ListHeads) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
-  evaluator.getStore().set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
-  evaluator.getStore().set(Head("empty"), *CID::parse("uAXEAAaA"));
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
+  store->set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
+  store->set(Head("empty"), *CID::parse("uAXEAAaA"));
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/head");
   EXPECT_CALL(*request,
@@ -216,9 +216,9 @@ TEST(ServerTest, ListHeads) {
 }
 
 TEST(ServerTest, GetHead) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
-  evaluator.getStore().set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
+  store->set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/head/cookie");
   EXPECT_CALL(*request, sendContentNode(Node(*CID::parse("uAXEAB2Zjb29raWU")),
@@ -228,25 +228,24 @@ TEST(ServerTest, GetHead) {
 }
 
 TEST(ServerTest, PutHead) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::PUT, "/head/cookie",
                       Node(*CID::parse("uAXEAB2Zjb29raWU")));
   EXPECT_CALL(*request, sendCreated(Eq(std::nullopt)));
   server.handleRequest(request);
-  EXPECT_EQ(evaluator.getStore().resolve(Head("cookie")),
-            CID::parse("uAXEAB2Zjb29raWU"));
+  EXPECT_EQ(store->resolve(Head("cookie")), CID::parse("uAXEAB2Zjb29raWU"));
 }
 
 TEST(ServerTest, ListFuncs) {
   const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
   const CID empty_cid = *CID::parse("uAXEAAaA");
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
-  evaluator.getStore().set(Call("identity", {cookie_cid}), cookie_cid);
-  evaluator.getStore().set(Call("identity", {empty_cid}), empty_cid);
-  evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
+  store->set(Call("identity", {cookie_cid}), cookie_cid);
+  store->set(Call("identity", {empty_cid}), empty_cid);
+  store->set(Call("const_empty", {cookie_cid}), empty_cid);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/call");
   EXPECT_CALL(*request,
@@ -261,33 +260,29 @@ TEST(ServerTest, ListFuncs) {
 TEST(ServerTest, InvalidateFunc) {
   const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
   const CID empty_cid = *CID::parse("uAXEAAaA");
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
-  evaluator.getStore().set(Call("identity", {cookie_cid}), cookie_cid);
-  evaluator.getStore().set(Call("identity", {empty_cid}), empty_cid);
-  evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
+  store->set(Call("identity", {cookie_cid}), cookie_cid);
+  store->set(Call("identity", {empty_cid}), empty_cid);
+  store->set(Call("const_empty", {cookie_cid}), empty_cid);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::DELETE, "/call/identity");
   EXPECT_CALL(*request, sendDeleted());
   server.handleRequest(request);
-  EXPECT_TRUE(
-      !evaluator.getStore().resolveOptional(Call("identity", {cookie_cid})));
-  EXPECT_TRUE(
-      !evaluator.getStore().resolveOptional(Call("identity", {empty_cid})));
-  EXPECT_EQ(
-      evaluator.getStore().resolveOptional(Call("const_empty", {cookie_cid})),
-      empty_cid);
+  EXPECT_TRUE(!store->resolveOptional(Call("identity", {cookie_cid})));
+  EXPECT_TRUE(!store->resolveOptional(Call("identity", {empty_cid})));
+  EXPECT_EQ(store->resolveOptional(Call("const_empty", {cookie_cid})),
+            empty_cid);
 }
 
 TEST(ServerTest, ListCalls) {
   const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
   const CID empty_cid = *CID::parse("uAXEAAaA");
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
-  evaluator.getStore().set(Call("transmute", {empty_cid, empty_cid}),
-                           cookie_cid);
-  evaluator.getStore().set(Call("transmute", {cookie_cid}), empty_cid);
-  evaluator.getStore().set(Call("const_empty", {cookie_cid}), empty_cid);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
+  store->set(Call("transmute", {empty_cid, empty_cid}), cookie_cid);
+  store->set(Call("transmute", {cookie_cid}), empty_cid);
+  store->set(Call("const_empty", {cookie_cid}), empty_cid);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/call/transmute");
   EXPECT_CALL(
@@ -304,10 +299,9 @@ TEST(ServerTest, ListCalls) {
 TEST(ServerTest, GetCall) {
   const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
   const CID empty_cid = *CID::parse("uAXEAAaA");
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
-  evaluator.getStore().set(Call("transmute", {empty_cid, empty_cid}),
-                           cookie_cid);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
+  store->set(Call("transmute", {empty_cid, empty_cid}), cookie_cid);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET,
                       "/call/transmute/uAXEAAaA,uAXEAAaA");
@@ -319,21 +313,20 @@ TEST(ServerTest, GetCall) {
 TEST(ServerTest, PutCall) {
   const CID cookie_cid = *CID::parse("uAXEAB2Zjb29raWU");
   const CID empty_cid = *CID::parse("uAXEAAaA");
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::PUT, "/call/transmute/uAXEAAaA,uAXEAAaA",
                       Node(cookie_cid));
   EXPECT_CALL(*request, sendCreated(Eq(std::nullopt)));
   server.handleRequest(request);
-  EXPECT_EQ(
-      evaluator.getStore().resolve(Call("transmute", {empty_cid, empty_cid})),
-      cookie_cid);
+  EXPECT_EQ(store->resolve(Call("transmute", {empty_cid, empty_cid})),
+            cookie_cid);
 }
 
 TEST(ServerTest, Timeout) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/debug/timeout");
   EXPECT_CALL(*request, deferWithTimeout(_));
@@ -344,8 +337,8 @@ TEST(ServerTest, Timeout) {
 }
 
 TEST(ServerTest, Cancel) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::GET, "/debug/timeout");
   EXPECT_CALL(*request, deferWithTimeout(_));
@@ -356,8 +349,8 @@ TEST(ServerTest, Cancel) {
 }
 
 TEST(ServerTest, EvaluateTimeout) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
                       std::nullopt);
@@ -370,8 +363,8 @@ TEST(ServerTest, EvaluateTimeout) {
 }
 
 TEST(ServerTest, EvaluateCancel) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto request = std::make_shared<MockRequest>();
   request->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
                       std::nullopt);
@@ -384,10 +377,9 @@ TEST(ServerTest, EvaluateCancel) {
 }
 
 TEST(ServerTest, EvaluateCached) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  evaluator.getStore().set(Call("inc", {*CID::parse("uAXEAAQA")}),
-                           *CID::parse("uAXEAAQE"));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  store->set(Call("inc", {*CID::parse("uAXEAAQA")}), *CID::parse("uAXEAAQE"));
+  Server server(*store);
   auto evaluate_req = std::make_shared<MockRequest>();
   evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
                            std::nullopt);
@@ -398,8 +390,8 @@ TEST(ServerTest, EvaluateCached) {
 }
 
 TEST(ServerTest, EvaluateSuccessWithoutWorker) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto evaluate_req = std::make_shared<MockRequest>();
   evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
                            std::nullopt);
@@ -416,8 +408,8 @@ TEST(ServerTest, EvaluateSuccessWithoutWorker) {
 }
 
 TEST(ServerTest, EvaluateTimeoutBeforeSuccessWithoutWorker) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
   auto evaluate_req = std::make_shared<MockRequest>();
   evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
                            std::nullopt);
@@ -436,8 +428,8 @@ TEST(ServerTest, EvaluateTimeoutBeforeSuccessWithoutWorker) {
 }
 
 TEST(ServerTest, EvaluateMultiSuccessWithoutWorker) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
 
   auto evaluate0_req = std::make_shared<MockRequest>();
   evaluate0_req->expectGets(Request::Method::POST,
@@ -464,8 +456,8 @@ TEST(ServerTest, EvaluateMultiSuccessWithoutWorker) {
 }
 
 TEST(ServerTest, EvaluateMixedTimeoutAndSuccessWithoutWorker) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
 
   auto evaluate0_req = std::make_shared<MockRequest>();
   evaluate0_req->expectGets(Request::Method::POST,
@@ -494,8 +486,8 @@ TEST(ServerTest, EvaluateMixedTimeoutAndSuccessWithoutWorker) {
 }
 
 TEST(ServerTest, EvaluateTimeoutThenSuccessWithoutWorker) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  Server server(evaluator);
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  Server server(*store);
 
   auto evaluate0_req = std::make_shared<MockRequest>();
   evaluate0_req->expectGets(Request::Method::POST,
@@ -524,10 +516,10 @@ TEST(ServerTest, EvaluateTimeoutThenSuccessWithoutWorker) {
 }
 
 TEST(ServerTest, WorkerTimeout) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  CID worker_cid = evaluator.getStore().put(
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  CID worker_cid = store->put(
       Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
-  Server server(evaluator);
+  Server server(*store);
 
   auto worker_req = std::make_shared<MockRequest>();
   worker_req->expectGets(Request::Method::POST, "/worker", Node(worker_cid));
@@ -541,10 +533,10 @@ TEST(ServerTest, WorkerTimeout) {
 }
 
 TEST(ServerTest, WorkerBeforeEvaluate) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  CID worker_cid = evaluator.getStore().put(
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  CID worker_cid = store->put(
       Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
-  Server server(evaluator);
+  Server server(*store);
 
   auto worker_req = std::make_shared<MockRequest>();
   worker_req->expectGets(Request::Method::POST, "/worker", Node(worker_cid));
@@ -575,10 +567,10 @@ TEST(ServerTest, WorkerBeforeEvaluate) {
 }
 
 TEST(ServerTest, EvaluateBeforeWorker) {
-  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
-  CID worker_cid = evaluator.getStore().put(
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  CID worker_cid = store->put(
       Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
-  Server server(evaluator);
+  Server server(*store);
 
   auto worker_req = std::make_shared<MockRequest>();
   worker_req->expectGets(Request::Method::POST, "/worker", Node(worker_cid));

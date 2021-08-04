@@ -13,7 +13,6 @@
 #include <nng/supplemental/http/http.h>
 #include <nng/supplemental/util/platform.h>
 
-#include "memodb/Evaluator.h"
 #include "memodb/HTTP.h"
 #include "memodb/Server.h"
 #include "memodb/Store.h"
@@ -278,8 +277,8 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Server");
 
   llvm::ExitOnError Err("memodb-server: ");
-  auto evaluator = Evaluator(Store::open(GetStoreUri()));
-  Server server(evaluator);
+  auto store = Store::open(GetStoreUri());
+  Server server(*store);
   g_server = &server;
   auto url = parse_url(listen_url);
   auto http_server = http_server_hold(url.get());

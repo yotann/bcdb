@@ -14,7 +14,6 @@
 #include <llvm/ADT/Twine.h>
 
 #include "CID.h"
-#include "Evaluator.h"
 #include "Node.h"
 #include "Store.h"
 #include "URI.h"
@@ -204,7 +203,7 @@ public:
 
 class Server {
 public:
-  Server(Evaluator &evaluator);
+  Server(Store &store);
 
   // When this is called, request->mutex must already be locked. If the Server
   // calls Request::deferWithTimeout(), it may keep a copy of the shared_ptr
@@ -230,7 +229,6 @@ private:
   void sendCallToWorker(PendingCall &pending_call,
                         std::shared_ptr<Request> worker);
 
-  Evaluator &evaluator;
   Store &store;
 
   // All variables below are protected by the mutex.
