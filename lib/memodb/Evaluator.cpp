@@ -20,6 +20,8 @@
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "memodb_internal.h"
+
 using namespace memodb;
 
 NodeRef &Future::get() {
@@ -200,6 +202,8 @@ std::unique_ptr<Evaluator> Evaluator::createLocal(std::unique_ptr<Store> store,
 
 std::unique_ptr<Evaluator> Evaluator::create(llvm::StringRef uri,
                                              unsigned num_threads) {
+  if (uri.startswith("http:") || uri.startswith("https:"))
+    return createClientEvaluator(uri, num_threads);
   auto store = Store::open(uri);
   return std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
 }

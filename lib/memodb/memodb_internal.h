@@ -2,10 +2,17 @@
 #define MEMODB_INTERNAL_H_INCLUDED
 
 #include <llvm/ADT/StringRef.h>
-#include <llvm/Support/Error.h>
 #include <memory>
 
-#include "memodb/Store.h"
+namespace memodb {
+
+class Evaluator;
+class Store;
+
+std::unique_ptr<Evaluator> createClientEvaluator(llvm::StringRef path,
+                                                 unsigned num_threads);
+
+}; // namespace memodb
 
 std::unique_ptr<memodb::Store> memodb_car_open(llvm::StringRef path,
                                                bool create_if_missing);

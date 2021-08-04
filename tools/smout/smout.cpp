@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -36,6 +37,10 @@ static cl::SubCommand OptimizeCommand("optimize",
 
 static cl::SubCommand SolveGreedyCommand(
     "solve-greedy", "Calculate greedy solution to optimal outlining problem");
+
+static cl::SubCommand
+    WorkerCommand("worker",
+                  "Start worker threads to evaluate jobs provided by server");
 
 static cl::opt<std::string> Threads("j",
                                     cl::desc("Number of threads, or \"all\""),
@@ -151,6 +156,18 @@ static int SolveGreedy() {
   return 0;
 }
 
+// smout worker
+
+static int Worker() {
+  using namespace std::chrono_literals;
+  auto evaluator = createEvaluator();
+  llvm::errs() << "connected\n";
+  while (true) {
+    std::this_thread::sleep_for(1s);
+  }
+  return 0;
+}
+
 // main
 
 int main(int argc, char **argv) {
@@ -178,6 +195,8 @@ int main(int argc, char **argv) {
     return Optimize();
   } else if (SolveGreedyCommand) {
     return SolveGreedy();
+  } else if (WorkerCommand) {
+    return Worker();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;
