@@ -26,6 +26,7 @@
 #include "outlining/Candidates.h"
 #include "outlining/Dependence.h"
 #include "outlining/Extractor.h"
+#include "outlining/FalseMemorySSA.h"
 #include "outlining/LinearProgram.h"
 #include "outlining/SizeModel.h"
 
@@ -221,6 +222,7 @@ NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
   FunctionAnalysisManager am;
   // TODO: Would it be faster to just register the analyses we need?
   PassBuilder().registerFunctionAnalyses(am);
+  am.registerPass([] { return FalseMemorySSAAnalysis(); });
   am.registerPass([] { return OutliningCandidatesAnalysis(); });
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   am.registerPass([] { return SizeModelAnalysis(); });
@@ -269,6 +271,7 @@ NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
   FunctionAnalysisManager am;
   // TODO: Would it be faster to just register the analyses we need?
   PassBuilder().registerFunctionAnalyses(am);
+  am.registerPass([] { return FalseMemorySSAAnalysis(); });
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
@@ -634,6 +637,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   FunctionAnalysisManager am;
   // TODO: Would it be faster to just register the analyses we need?
   PassBuilder().registerFunctionAnalyses(am);
+  am.registerPass([] { return FalseMemorySSAAnalysis(); });
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
