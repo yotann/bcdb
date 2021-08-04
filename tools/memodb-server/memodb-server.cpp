@@ -229,6 +229,8 @@ struct NNGRequest : public HTTPRequest,
     self = std::move(self_if_deferred);
 
     // We can't free wait_aio in this function because NNG would deadlock.
+    // FIXME: this leaks the aio. Need to think of a better solution.
+    nng_aio *tmp_aio = wait_aio.release();
 
     if (state == State::Done) {
       // Nothing to do. The Server must have responded to this request while we
@@ -237,7 +239,7 @@ struct NNGRequest : public HTTPRequest,
     }
 
     assert(state == State::Waiting);
-    int result = nng_aio_result(wait_aio.get());
+    int result = nng_aio_result(tmp_aio);
     state = result == 0 ? State::TimedOut : State::Cancelled;
     g_server->handleRequest(self);
     assert(state == (result == 0 ? State::Done : State::Cancelled));

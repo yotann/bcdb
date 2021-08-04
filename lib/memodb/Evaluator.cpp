@@ -162,7 +162,6 @@ NodeRef ThreadPoolEvaluator::evaluateDeferred(const Call &call) {
           std::unique_lock<std::mutex>(stderr_mutex, std::try_to_lock)) {
     printProgress();
     llvm::errs() << " starting " << call << "\n";
-    stderr_lock.unlock();
   }
 
   auto result = evaluate(call);
@@ -172,7 +171,6 @@ NodeRef ThreadPoolEvaluator::evaluateDeferred(const Call &call) {
           std::unique_lock<std::mutex>(stderr_mutex, std::try_to_lock)) {
     printProgress();
     llvm::errs() << " finished " << call << "\n";
-    stderr_lock.unlock();
   }
 
   return result;

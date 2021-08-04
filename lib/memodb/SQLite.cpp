@@ -11,6 +11,8 @@
 #include <sqlite3.h>
 #include <vector>
 
+#include "memodb/Store.h"
+
 using namespace memodb;
 
 /* NOTE: we allow thread-safe access to sqlite_db by creating a separate

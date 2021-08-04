@@ -75,7 +75,9 @@ public:
     return evaluateAsync(Call(name, {NodeRef(getStore(), args).getCID()...}));
   }
 
-  // Register a function that can be evaluated locally and cached.
+  // Register a function that can be evaluated locally and cached. This
+  // function is not thread-safe, and must be called before any calls of
+  // evaluate() or evaluateAsync().
   virtual void
   registerFunc(llvm::StringRef name,
                std::function<NodeOrCID(Evaluator &, const Call &)> func) = 0;
