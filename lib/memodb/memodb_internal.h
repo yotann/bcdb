@@ -10,6 +10,9 @@
 std::unique_ptr<memodb::Store> memodb_car_open(llvm::StringRef path,
                                                bool create_if_missing);
 
+std::unique_ptr<memodb::Store> memodb_http_open(llvm::StringRef path,
+                                                bool create_if_missing);
+
 std::unique_ptr<memodb::Store> memodb_rocksdb_open(llvm::StringRef path,
                                                    bool create_if_missing);
 

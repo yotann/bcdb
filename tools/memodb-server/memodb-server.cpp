@@ -81,7 +81,7 @@ struct URLDeleter {
 
 }; // end anonymous namespace
 
-std::unique_ptr<nng_url, URLDeleter> parse_url(const Twine &str) {
+static std::unique_ptr<nng_url, URLDeleter> parse_url(const Twine &str) {
   SmallVector<char, 0> buffer;
   nng_url *result;
   checkErr(
@@ -89,14 +89,14 @@ std::unique_ptr<nng_url, URLDeleter> parse_url(const Twine &str) {
   return std::unique_ptr<nng_url, URLDeleter>(result);
 }
 
-std::unique_ptr<nng_http_server, HTTPServerDeleter>
+static std::unique_ptr<nng_http_server, HTTPServerDeleter>
 http_server_hold(nng_url *url) {
   nng_http_server *result;
   checkErr(nng_http_server_hold(&result, url));
   return std::unique_ptr<nng_http_server, HTTPServerDeleter>(result);
 }
 
-std::unique_ptr<nng_http_handler, HTTPHandlerDeleter>
+static std::unique_ptr<nng_http_handler, HTTPHandlerDeleter>
 http_handler_alloc(const Twine &path, void (*func)(nng_aio *)) {
   nng_http_handler *result;
   SmallVector<char, 0> buffer;
@@ -105,7 +105,7 @@ http_handler_alloc(const Twine &path, void (*func)(nng_aio *)) {
   return std::unique_ptr<nng_http_handler, HTTPHandlerDeleter>(result);
 }
 
-void cancelHandler(nng_aio *http_aio, void *arg, int err) {
+static void cancelHandler(nng_aio *http_aio, void *arg, int err) {
   // Just cancel the timeout, and handle everything in the timeout handler.
   nng_aio_cancel(static_cast<nng_aio *>(arg));
 }
