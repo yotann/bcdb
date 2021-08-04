@@ -36,7 +36,8 @@ class MockRequest : public Request {
 public:
   MOCK_METHOD(std::optional<Method>, getMethod, (), (const, override));
   MOCK_METHOD(std::optional<URI>, getURI, (), (const, override));
-  MOCK_METHOD(std::optional<Node>, getContentNode, (), (override));
+  MOCK_METHOD(std::optional<Node>, getContentNode,
+              (const std::optional<Node> &default_node), (override));
   MOCK_METHOD(void, sendContentNode,
               (const Node &node, const std::optional<CID> &cid_if_known,
                CacheControl cache_control),
@@ -107,10 +108,16 @@ public:
     setWillByDefault();
     EXPECT_CALL(*this, getMethod).WillRepeatedly(Return(method));
     EXPECT_CALL(*this, getURI).WillOnce(Return(URI::parse(uri_str)));
-    EXPECT_CALL(*this, getContentNode).WillOnce(Return(content_node));
+    EXPECT_CALL(*this, getContentNode)
+        .WillOnce([=](const std::optional<Node> &default_node) {
+          return content_node ? content_node : default_node;
+        });
   }
 };
 
+// FIXME: because all these tests reuse the same SQLite database, they don't
+// work when run in the same process.
+//
 // TODO: use a mock for Store instead of using sqlite:test?mode=memory.
 
 TEST(ServerTest, UnknownMethod) {
@@ -514,6 +521,91 @@ TEST(ServerTest, EvaluateTimeoutThenSuccessWithoutWorker) {
                       Node(*CID::parse("uAXEAAQE")));
   EXPECT_CALL(*put_req, sendCreated(Eq(std::nullopt)));
   server.handleRequest(put_req);
+}
+
+TEST(ServerTest, WorkerTimeout) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  CID worker_cid = evaluator.getStore().put(
+      Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
+  Server server(evaluator);
+
+  auto worker_req = std::make_shared<MockRequest>();
+  worker_req->expectGets(Request::Method::POST, "/worker", Node(worker_cid));
+  EXPECT_CALL(*worker_req, deferWithTimeout(_));
+  EXPECT_CALL(*worker_req, sendContentNode(Node(nullptr), _,
+                                           Request::CacheControl::Ephemeral));
+
+  server.handleRequest(worker_req);
+  worker_req->state = Request::State::TimedOut;
+  server.handleRequest(worker_req);
+}
+
+TEST(ServerTest, WorkerBeforeEvaluate) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  CID worker_cid = evaluator.getStore().put(
+      Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
+  Server server(evaluator);
+
+  auto worker_req = std::make_shared<MockRequest>();
+  worker_req->expectGets(Request::Method::POST, "/worker", Node(worker_cid));
+  EXPECT_CALL(*worker_req, deferWithTimeout(_));
+  EXPECT_CALL(
+      *worker_req,
+      sendContentNode(
+          Node(node_map_arg,
+               {{"args", Node(node_list_arg, {Node(*CID::parse("uAXEAAQA"))})},
+                {"func", "inc"}}),
+          _, Request::CacheControl::Ephemeral));
+
+  auto evaluate_req = std::make_shared<MockRequest>();
+  evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                           std::nullopt);
+  EXPECT_CALL(*evaluate_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+
+  auto result_req = std::make_shared<MockRequest>();
+  result_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                         Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*result_req, sendCreated(Eq(std::nullopt)));
+
+  server.handleRequest(worker_req);
+  server.handleRequest(evaluate_req);
+  server.handleRequest(result_req);
+}
+
+TEST(ServerTest, EvaluateBeforeWorker) {
+  Evaluator evaluator(Store::open("sqlite:test?mode=memory", true));
+  CID worker_cid = evaluator.getStore().put(
+      Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
+  Server server(evaluator);
+
+  auto worker_req = std::make_shared<MockRequest>();
+  worker_req->expectGets(Request::Method::POST, "/worker", Node(worker_cid));
+  EXPECT_CALL(*worker_req, deferWithTimeout).Times(0);
+  EXPECT_CALL(
+      *worker_req,
+      sendContentNode(
+          Node(node_map_arg,
+               {{"args", Node(node_list_arg, {Node(*CID::parse("uAXEAAQA"))})},
+                {"func", "inc"}}),
+          _, Request::CacheControl::Ephemeral));
+
+  auto evaluate_req = std::make_shared<MockRequest>();
+  evaluate_req->expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
+                           std::nullopt);
+  EXPECT_CALL(*evaluate_req, deferWithTimeout(_));
+  EXPECT_CALL(*evaluate_req,
+              sendContentNode(Node(*CID::parse("uAXEAAQE")), _, _));
+
+  auto result_req = std::make_shared<MockRequest>();
+  result_req->expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
+                         Node(*CID::parse("uAXEAAQE")));
+  EXPECT_CALL(*result_req, sendCreated(Eq(std::nullopt)));
+
+  server.handleRequest(evaluate_req);
+  server.handleRequest(worker_req);
+  server.handleRequest(result_req);
 }
 
 // TODO: find a way to test interaction between threads.

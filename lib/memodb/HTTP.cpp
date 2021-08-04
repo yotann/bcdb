@@ -147,13 +147,20 @@ unsigned HTTPRequest::getAcceptQuality(ContentType content_type) const {
   return any_type_q;
 }
 
-std::optional<Node> HTTPRequest::getContentNode() {
+std::optional<Node>
+HTTPRequest::getContentNode(const std::optional<Node> &default_node) {
+  llvm::StringRef body_str = getBody();
+  if (body_str.empty()) {
+    if (default_node)
+      return default_node;
+    sendError(Status::BadRequest, "/problems/missing-body",
+              "Missing request Body", std::nullopt);
+    return std::nullopt;
+  }
+
   auto type_str_or_null = getHeader("Content-Type");
   llvm::StringRef type_str =
       type_str_or_null ? type_str_or_null->split(';').first.trim(" \t") : "";
-  llvm::StringRef body_str = getBody();
-
-  // FIXME: distinguish between a missing body and an invalid body.
 
   if (type_str.equals_lower("application/cbor")) {
     BytesRef body_bytes(reinterpret_cast<const std::uint8_t *>(body_str.data()),

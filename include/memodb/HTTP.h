@@ -15,7 +15,8 @@ namespace memodb {
 class HTTPRequest : public Request {
 public:
   std::optional<Method> getMethod() const override;
-  std::optional<Node> getContentNode() override;
+  std::optional<Node> getContentNode(
+      const std::optional<Node> &default_node = std::nullopt) override;
 
   void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
                        CacheControl cache_control) override;

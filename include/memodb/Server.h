@@ -22,6 +22,7 @@
 namespace memodb {
 
 class PendingCall;
+class WorkerGroup;
 
 // A single request for the MemoDB server to respond to.
 // This class is intended to work not only for HTTP requests but also CoAP
@@ -95,7 +96,13 @@ public:
   virtual ~Request() {}
   virtual std::optional<Method> getMethod() const = 0;
   virtual std::optional<URI> getURI() const = 0;
-  virtual std::optional<Node> getContentNode() = 0;
+
+  // Decode the Node that was submitted as the body of the request. If there's
+  // no body, default_node should be returned if it is given; otherwise, or if
+  // there's some other error reading the body, this function should send an
+  // error response and return std::nullopt.
+  virtual std::optional<Node>
+  getContentNode(const std::optional<Node> &default_node = std::nullopt) = 0;
 
   virtual void sendContentNode(const Node &node,
                                const std::optional<CID> &cid_if_known,
@@ -125,6 +132,7 @@ public:
   State state = State::New;
 
   PendingCall *pending_call = nullptr;
+  WorkerGroup *worker_group = nullptr;
 };
 
 // Keeps track of all calls of a single function we need to evaluate. A
@@ -142,6 +150,9 @@ public:
 
   // The actual PendingCalls.
   std::map<Call, PendingCall> calls;
+
+  // All the WorkerGroups for workers that can evaluate this func.
+  llvm::SmallVector<WorkerGroup *, 0> worker_groups;
 
   // Delete all PendingCalls from the start of unstarted_calls that have no
   // waiting requests.
@@ -162,7 +173,8 @@ public:
   std::atomic<bool> started = false;
 
   // The list of all requests that asked to evaluate this call. Some of these
-  // requests may already have timed out.
+  // requests may already have timed out. It is illegal to lock CallGroup::mutex
+  // after locking one of these Requests' mutexes.
   llvm::SmallVector<std::shared_ptr<Request>, 1> requests;
 
   PendingCall(CallGroup *call_group, const Call &call)
@@ -170,6 +182,24 @@ public:
 
   // Delete this PendingCall from the parent CallGroup if possible.
   void deleteIfPossible();
+};
+
+// Keeps track of all workers with a single worker information CID. A
+// WorkerGroup is never deleted, and has a fixed location in memory. All member
+// variables and functions are protected by WorkerGroup::mutex, except
+// call_groups (which is read-only after creation).
+class WorkerGroup {
+public:
+  // It is illegal to lock CallGroup::mutex after locking this mutex.
+  std::mutex mutex;
+
+  // The queue of workers waiting for jobs. May include requests that have
+  // already timed out. It is illegal to lock CallGroup::mutex or
+  // WorkerGroup::mutex after locking one of these Requests' mutexes.
+  std::deque<std::shared_ptr<Request>> workers;
+
+  // All the CallGroups for funcs that these workers can handle.
+  llvm::SmallVector<CallGroup *, 0> call_groups;
 };
 
 class Server {
@@ -193,9 +223,12 @@ private:
                          std::optional<llvm::StringRef> func_str,
                          std::optional<llvm::StringRef> args_str,
                          std::optional<llvm::StringRef> sub_str);
+  void handleRequestWorker(const std::shared_ptr<Request> &request);
   void handleEvaluateCall(const std::shared_ptr<Request> &request, Call call,
                           unsigned timeout);
   void handleCallResult(const Call &call, NodeRef result);
+  void sendCallToWorker(PendingCall &pending_call,
+                        std::shared_ptr<Request> worker);
 
   Evaluator &evaluator;
   Store &store;
@@ -203,6 +236,7 @@ private:
   // All variables below are protected by the mutex.
   std::mutex mutex;
   llvm::StringMap<CallGroup> call_groups;
+  llvm::StringMap<WorkerGroup> worker_groups;
 };
 
 } // end namespace memodb
