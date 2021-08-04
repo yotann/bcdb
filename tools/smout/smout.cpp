@@ -72,12 +72,17 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  Optional<ThreadPoolStrategy> strategy_or_none =
-      get_threadpool_strategy(Threads);
-  if (!strategy_or_none)
-    report_fatal_error("invalid number of threads");
-  auto evaluator = std::make_unique<Evaluator>(
-      Store::open(GetStoreUri()), strategy_or_none->compute_thread_count());
+  unsigned thread_count;
+  if (Threads == "0") {
+    thread_count = 0;
+  } else {
+    Optional<ThreadPoolStrategy> strategy_or_none =
+        get_threadpool_strategy(Threads);
+    if (!strategy_or_none)
+      report_fatal_error("invalid number of threads");
+    thread_count = strategy_or_none->compute_thread_count();
+  }
+  auto evaluator = Evaluator::create(GetStoreUri(), thread_count);
   evaluator->registerFunc("smout.candidates", &smout::candidates);
   evaluator->registerFunc("smout.candidates_total", &smout::candidates_total);
   evaluator->registerFunc("smout.extracted.callee", &smout::extracted_callee);

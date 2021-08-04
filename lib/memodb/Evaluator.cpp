@@ -1,13 +1,20 @@
 #include "memodb/Evaluator.h"
 
+#include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <future>
+#include <memory>
+#include <mutex>
+#include <queue>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <llvm/ADT/SmallString.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FormatVariadic.h>
@@ -41,14 +48,49 @@ void Future::freeNode() { get().freeNode(); }
 Future::Future(std::shared_future<NodeRef> &&future)
     : future(std::move(future)) {}
 
-Evaluator::Evaluator(std::unique_ptr<Store> store, unsigned num_threads)
+namespace {
+class ThreadPoolEvaluator : public Evaluator {
+public:
+  ThreadPoolEvaluator(std::unique_ptr<Store> store, unsigned num_threads = 0);
+  ~ThreadPoolEvaluator() override;
+  Store &getStore() override;
+  NodeRef evaluate(const Call &call) override;
+  Future evaluateAsync(const Call &call) override;
+  void registerFunc(
+      llvm::StringRef name,
+      std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
+
+private:
+  std::unique_ptr<Store> store;
+  llvm::StringMap<std::function<NodeOrCID(Evaluator &, const Call &)>> funcs;
+
+  std::vector<std::thread> threads;
+  std::mutex work_mutex;
+  std::condition_variable work_cv;
+  std::queue<std::shared_future<NodeRef>> work_queue;
+  bool work_done = false;
+
+  // These counters only increase, never decrease.
+  std::atomic<unsigned> num_queued = 0, num_started = 0, num_finished = 0;
+  std::mutex stderr_mutex;
+
+  void workerThreadImpl();
+
+  NodeRef evaluateDeferred(const Call &call);
+
+  void printProgress();
+};
+} // end anonymous namespace
+
+ThreadPoolEvaluator::ThreadPoolEvaluator(std::unique_ptr<Store> store,
+                                         unsigned num_threads)
     : store(std::move(store)) {
   threads.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i)
-    threads.emplace_back(&Evaluator::workerThreadImpl, this);
+    threads.emplace_back(&ThreadPoolEvaluator::workerThreadImpl, this);
 }
 
-Evaluator::~Evaluator() {
+ThreadPoolEvaluator::~ThreadPoolEvaluator() {
   {
     std::lock_guard<std::mutex> lock(work_mutex);
     work_done = true;
@@ -58,7 +100,9 @@ Evaluator::~Evaluator() {
     thread.join();
 }
 
-NodeRef Evaluator::evaluate(const Call &call) {
+Store &ThreadPoolEvaluator::getStore() { return *store; }
+
+NodeRef ThreadPoolEvaluator::evaluate(const Call &call) {
   auto cid_or_null = getStore().resolveOptional(call);
   if (cid_or_null)
     return NodeRef(getStore(), *cid_or_null);
@@ -71,10 +115,11 @@ NodeRef Evaluator::evaluate(const Call &call) {
   return result;
 }
 
-Future Evaluator::evaluateAsync(const Call &call) {
+Future ThreadPoolEvaluator::evaluateAsync(const Call &call) {
   num_queued++;
-  std::shared_future<NodeRef> future = std::async(
-      std::launch::deferred, &Evaluator::evaluateDeferred, this, call);
+  std::shared_future<NodeRef> future =
+      std::async(std::launch::deferred, &ThreadPoolEvaluator::evaluateDeferred,
+                 this, call);
 
   if (!threads.empty()) {
     {
@@ -83,17 +128,17 @@ Future Evaluator::evaluateAsync(const Call &call) {
     }
     work_cv.notify_one();
   }
-  return Future(std::move(future));
+  return makeFuture(std::move(future));
 }
 
-void Evaluator::registerFunc(
+void ThreadPoolEvaluator::registerFunc(
     llvm::StringRef name,
     std::function<NodeOrCID(Evaluator &, const Call &)> func) {
   assert(!funcs.count(name) && "duplicate func");
   funcs[name] = std::move(func);
 }
 
-void Evaluator::workerThreadImpl() {
+void ThreadPoolEvaluator::workerThreadImpl() {
   while (true) {
     std::unique_lock<std::mutex> lock(work_mutex);
     work_cv.wait(lock, [this] { return work_done || !work_queue.empty(); });
@@ -106,7 +151,7 @@ void Evaluator::workerThreadImpl() {
   }
 }
 
-NodeRef Evaluator::evaluateDeferred(const Call &call) {
+NodeRef ThreadPoolEvaluator::evaluateDeferred(const Call &call) {
   num_started++;
 
   // Use try_to_lock so that printing to stderr doesn't become a bottleneck. If
@@ -133,11 +178,30 @@ NodeRef Evaluator::evaluateDeferred(const Call &call) {
   return result;
 }
 
-void Evaluator::printProgress() {
+void ThreadPoolEvaluator::printProgress() {
   // Load atomics in this order to avoid getting negative values.
   unsigned finished = num_finished;
   unsigned started = num_started;
   unsigned queued = num_queued;
   llvm::errs() << (queued - started) << " -> " << (started - finished) << " -> "
                << finished;
+}
+
+Evaluator::Evaluator() {}
+
+Evaluator::~Evaluator() {}
+
+Future Evaluator::makeFuture(std::shared_future<NodeRef> &&future) {
+  return Future(std::move(future));
+}
+
+std::unique_ptr<Evaluator> Evaluator::createLocal(std::unique_ptr<Store> store,
+                                                  unsigned num_threads) {
+  return std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
+}
+
+std::unique_ptr<Evaluator> Evaluator::create(llvm::StringRef uri,
+                                             unsigned num_threads) {
+  auto store = Store::open(uri);
+  return std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
 }
