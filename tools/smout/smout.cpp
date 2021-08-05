@@ -160,7 +160,7 @@ static int Optimize() {
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
   NodeRef result =
       evaluator->evaluate("smout.optimized", getCandidatesOptions(), mod);
-  llvm::outs() << *result;
+  llvm::outs() << Name(result.getCID()) << "\n";
   return 0;
 }
 

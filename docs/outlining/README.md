@@ -19,11 +19,18 @@ the server like this.
 
 #### Problems with the server
 
+- The server probably has security holes, so you should be careful not to
+  expose it to the Internet. (Running it on `http://127.0.0.1:29179` should be
+  safe, but `http://0.0.0.0:29179` is dangerous.)
+- If you're using the same machine as someone else, you need to use different
+  port numbers (you can't both use port 29179 at the same time).
 - The server and client have some known memory leaks.
-- If a worker crashes while it's processing a job, the job will never be
-  finished. (The server doesn't have a timeout while waiting for results.) You
-  can fix this by restarting the server and then all the programs connected to
-  it.
+- If you kill a worker while it's processing a job, the job will never be
+  finished. (The server will keep waiting for results forever.) You can fix
+  this by restarting the server. You'll also have to restart all the programs
+  connect to it.
+  - This isn't a problem for `alive-worker`, which is designed to send a result
+    to the server even when it crashes.
 
 ### 1. Obtain bitcode for the desired package
 
@@ -100,8 +107,9 @@ smout extract-callees --name=ppmtomitsu
 #### Find greedy solution
 
 This step decides which candidates should actually be outlined, avoiding
-overlaps. When it finishes, it prints the estimated code size savings for the
-whole module. Func name: `smout.greedy_solution`.
+overlaps. When it finishes, it prints the chosen solution, including a
+`total_benefit` item that gives the estimated code size savings for the whole
+module. Func name: `smout.greedy_solution`.
 
 ```sh
 smout solve-greedy --name=ppmtomitsu
@@ -113,7 +121,37 @@ This step uses the greedy solution to actually perform outlining and link
 everything together into one module. When it finishes, it prints the CID of the
 optimized module. Func name: `smout.greedy_solution`.
 
-FIXME
+```sh
+smout optimize --name=ppmtomitsu
+
+# you should copy the CID from the output of smout optimize
+bcdb get /cid/uAXG... > ppmtomitsu-optimized.bc
+
+# compile both versions to object files
+llc --filetype=obj ppmtomitsu.bc -o ppmtomitsu.o
+llc --filetype=obj ppmtomitsu-optimized.bc -o ppmtomitsu-optimized.o
+
+# compare the sizes
+size ppmtomitsu.o ppmtomitsu-optimized.o
+
+# compile both versions to executables
+bc-imitate clang ppmtomitsu.bc -o ppmtomitsu
+bc-imitate clang ppmtomitsu-optimized.bc -o ppmtomitsu-optimized
+
+# compare the sizes
+size ppmtomitsu ppmtomitsu-optimized
+```
+
+Hopefully the optimized version has a small `.text` section. You can compare
+the actual size savings from the `size` command against the estimating savings
+from the `smout solve-greedy` command.
+
+You can also run the optimized command and make sure its behavior is correct:
+
+```sh
+./ppmtomitsu </dev/null
+./ppmtomitsu-optimized </dev/null
+```
 
 ### Other analyses
 
