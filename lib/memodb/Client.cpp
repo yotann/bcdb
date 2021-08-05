@@ -368,6 +368,10 @@ std::unique_ptr<Store> memodb_http_open(llvm::StringRef path,
   return store;
 }
 
+// TODO: deadlock is possible if all workers are waiting for subtasks to
+// complete. Fix it by starting new threads when the existing ones are waiting
+// for Futures.
+
 namespace {
 class ClientEvaluator : public Evaluator {
 public:
@@ -582,6 +586,9 @@ Future ClientEvaluator::evaluateAsync(const Call &call) {
   // Each request uses its own TCP connection, and if we try to open too many
   // connections at once we'll get an error. So we limit ourselves to 900
   // outstanding requests.
+  //
+  // TODO: use a connection pool so we don't have to start a new connection for
+  // every request. Also make an nng_aio pool so we don't leak those.
   while (true) {
     // Load atomics in this order to avoid getting negative values.
     unsigned finished = num_finished;

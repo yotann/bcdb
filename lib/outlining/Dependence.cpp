@@ -171,6 +171,8 @@ std::optional<size_t> OutliningDependenceResults::lookupNode(Value *V) {
 
 void OutliningDependenceResults::addDepend(Value *User, Value *Def,
                                            bool is_data_dependency) {
+  // TODO: It's too expensive to call lookupNode() every time. Have the caller
+  // do it instead.
   auto UserI = lookupNode(User);
   if (!UserI)
     return;
@@ -190,6 +192,8 @@ void OutliningDependenceResults::addDepend(Value *User, Value *Def,
 }
 
 void OutliningDependenceResults::addForcedDepend(Value *User, Value *Def) {
+  // TODO: It's too expensive to call lookupNode() every time. Have the caller
+  // do it instead.
   auto UserI = lookupNode(User);
   auto DefI = lookupNode(Def);
   if (!UserI || !DefI)
@@ -245,6 +249,8 @@ void OutliningDependenceResults::numberNodes() {
             Dominators[NodeIndices[IDom->getBlock()->getTerminator()]];
     } else {
       // Inherit dominators from the previous node.
+      // TODO: This is a hotspot. Is it worth it? Should we use
+      // CoalescingBitVector instead?
       Dominators[i] = Dominators[i - 1];
     }
     // Each node dominates itself.
@@ -376,8 +382,10 @@ void OutliningDependenceResults::analyzeBlock(BasicBlock *BB) {
   // fake node that doesn't correspond to any instruction, but ensures the
   // outlining point is in the right place.
   //
-  // TODO: Should we use llvm::isControlFlowEquivalent() instead? This is
+  // TODO: Should we use llvm::isControlFlowEquivalent() instead? This may be
   // faster, but it is equivalent?
+  //
+  // TODO: The contains() call is a hotspot. Find a faster way.
   for (auto dom = DT[BB]->getIDom(); dom; dom = dom->getIDom()) {
     if (ControlDepends[NodeIndices[BB]].contains(
             ControlDepends[NodeIndices[dom->getBlock()]])) {

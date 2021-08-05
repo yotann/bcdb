@@ -258,6 +258,10 @@ NodeOrCID smout::candidates_total(Evaluator &evaluator, NodeRef options,
   return Node(total);
 }
 
+// FIXME: This func recalculates the OutliningDependenceAnalysis for every
+// candidate. It would be much, much faster to batch together candidates from
+// the same function and only calculate the OutliningDependenceAnalysis once
+// per batch.
 NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
                                   NodeRef nodes) {
   ExitOnError Err("smout.extracted.callee: ");

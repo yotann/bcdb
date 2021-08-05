@@ -38,12 +38,16 @@
 - ✔️ Optional encryption.
 - ✔️ Optional authentication.
 - ✔️ Range requests.
+- :x: No push support.
+- :x: Only one request per connection.
 - :x: Text-based format is inefficient.
 
 ### HTTP/2
 
 - ✔️ Same features as HTTP/1.
 - ✔️ More efficient.
+- ✔️ Supports simultaneous requests over one connection.
+- :x: Susceptible to TCP head-of-line blocking.
 - :x: Complicated.
 - :x: Few server implementations.
 - :x: Many REST clients lack support.
@@ -51,7 +55,10 @@
 ### HTTP/3
 
 - ✔️ Same features as HTTP/1 and HTTP/2.
+- ✔️ Supports simultaneous requests over one connection.
 - :x: Not yet standardized.
+- :x: Complicated.
+- :x: Encryption is mandatory.
 - :x: Few server implementations.
 - :x: Many REST clients lack support.
 
@@ -70,6 +77,9 @@ to implement it in the future. (For instance, redirects are never used.)
 - ✔️ Optional authentication.
 - ✔️ Range requests.
 - ✔️ Supports UDP, TCP, and WebSockets.
+- ✔️ Supports many simultaneous requests over one connection.
+- ✔️ Supports publish/subscribe via the
+  [OBSERVE](https://datatracker.ietf.org/doc/html/rfc7641) extension.
 - :x: Not widely supported.
 
 ### MQTT
@@ -82,8 +92,13 @@ to implement it in the future. (For instance, redirects are never used.)
   requests, etc.
 - :x: Mainly designed for publish/subscribe, but MemoDB is mainly
   request/reply.
+  - Then again, maybe it's easier to implement request/reply on top of
+    publish/subscribe than the other way around.
   - MQTT 5 adds some support for request/reply, but many client libraries don't
-    support it yet.
+    support it yet. Older versions don't have a good way to say "publish this
+    to one subscriber only", which is needed to submit jobs without a broker.
+  - A worker will have to constantly subscribe and unsubscribe, to make sure
+    it's only subscribed while it has threads available to do work.
 
 ### Minimalist request/reply (NNG, ZeroMQ, or custom)
 

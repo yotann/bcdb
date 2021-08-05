@@ -75,6 +75,8 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
           external_outputs.set(NodeIndices.lookup(*phi_incoming.begin()));
       }
     } else {
+      // TODO: this line is hot. Should change it to only check bits that are
+      // in (bv & ~external_outputs).
       external_outputs |= deps.DataDepends[i];
     }
   }
