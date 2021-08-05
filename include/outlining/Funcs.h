@@ -20,6 +20,9 @@ NodeOrCID ilp_problem(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID greedy_solution(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID extracted_caller(Evaluator &evaluator, NodeRef func, NodeRef callees);
 NodeOrCID optimized(Evaluator &evaluator, NodeRef options, NodeRef mod);
+NodeOrCID equivalent_pairs_in_group(Evaluator &evaluator, NodeRef options,
+                                    NodeRef mod, NodeRef group);
+NodeOrCID equivalent_pairs(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
 } // end namespace smout
 

@@ -28,6 +28,10 @@ static cl::SubCommand
     CreateILPProblemCommand("create-ilp-problem",
                             "Create ILP problem for optimal outlining");
 
+static cl::SubCommand EquivalenceCommand(
+    "equivalence",
+    "Check candidates for semantic equivalence (requires alive-worker)");
+
 static cl::SubCommand
     ExtractCalleesCommand("extract-callees",
                           "Extract all outlinable callee functions");
@@ -50,8 +54,9 @@ static cl::opt<std::string> Threads("j",
 static cl::opt<std::string>
     ModuleName("name", cl::Required, cl::desc("Name of the head to work on"),
                cl::cat(SmoutCategory), cl::sub(CandidatesCommand),
-               cl::sub(CreateILPProblemCommand), cl::sub(ExtractCalleesCommand),
-               cl::sub(OptimizeCommand), cl::sub(SolveGreedyCommand));
+               cl::sub(CreateILPProblemCommand), cl::sub(EquivalenceCommand),
+               cl::sub(ExtractCalleesCommand), cl::sub(OptimizeCommand),
+               cl::sub(SolveGreedyCommand));
 
 static cl::opt<std::string>
     StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
@@ -96,6 +101,9 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   evaluator->registerFunc("smout.greedy_solution", &smout::greedy_solution);
   evaluator->registerFunc("smout.extracted.caller", &smout::extracted_caller);
   evaluator->registerFunc("smout.optimized", &smout::optimized);
+  evaluator->registerFunc("smout.equivalent_pairs_in_group",
+                          &smout::equivalent_pairs_in_group);
+  evaluator->registerFunc("smout.equivalent_pairs", &smout::equivalent_pairs);
   return evaluator;
 }
 
@@ -120,6 +128,17 @@ static int CreateILPProblem() {
   NodeRef result =
       evaluator->evaluate("smout.ilp_problem", getCandidatesOptions(), mod);
   llvm::outs() << result->as<StringRef>();
+  return 0;
+}
+
+// smout equivalence
+
+static int Equivalence() {
+  auto evaluator = createEvaluator();
+  CID mod = evaluator->getStore().resolve(Head(ModuleName));
+  NodeRef result = evaluator->evaluate("smout.equivalent_pairs",
+                                       getCandidatesOptions(), mod);
+  llvm::outs() << "\nEquivalent pairs: " << *result << "\n";
   return 0;
 }
 
@@ -189,6 +208,8 @@ int main(int argc, char **argv) {
     return Candidates();
   } else if (CreateILPProblemCommand) {
     return CreateILPProblem();
+  } else if (EquivalenceCommand) {
+    return Equivalence();
   } else if (ExtractCalleesCommand) {
     return ExtractCallees();
   } else if (OptimizeCommand) {

@@ -741,3 +741,87 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
 
   return mod_node;
 }
+
+NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
+                                           NodeRef options, NodeRef mod,
+                                           NodeRef group) {
+  std::vector<std::pair<CID, Future>> func_candidates;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    func_candidates.emplace_back(
+        func_cid,
+        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+  }
+  std::vector<Future> callees;
+  for (auto &future : func_candidates) {
+    const CID &func_cid = future.first;
+    Future &result = future.second;
+    for (auto &item : result->map_range())
+      for (auto &candidate : item.value().list_range())
+        callees.emplace_back(evaluator.evaluateAsync(
+            "smout.extracted.callee", func_cid, candidate["nodes"]));
+    result.freeNode();
+  }
+  func_candidates.clear();
+  StringSet unique_set;
+  for (auto &result : callees) {
+    result.freeNode();
+    unique_set.insert(cid_key(result.getCID()));
+  }
+  callees.clear();
+  std::vector<CID> unique;
+  for (const auto &item : unique_set) {
+    const auto &key = item.getKey();
+    unique.emplace_back(*CID::fromBytes(
+        ArrayRef(reinterpret_cast<const uint8_t *>(key.data()), key.size())));
+  }
+  std::vector<Future> pairs;
+  for (size_t i = 0; i < unique.size(); ++i) {
+    for (size_t j = 0; j < unique.size(); ++j) {
+      if (i == j)
+        continue;
+      pairs.emplace_back(evaluator.evaluateAsync("alive.tv", Node(node_map_arg),
+                                                 unique[i], unique[j]));
+    }
+  }
+  unsigned total = 0;
+  for (auto &future : pairs)
+    if ((*future)["valid"] == true)
+      total++;
+  return Node(total);
+}
+
+NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
+                                  NodeRef mod) {
+  // TODO: have a separate func that groups candidates and stores a separate
+  // Node for each group. Actually, maybe smout.candidates should generate a
+  // map from group name to CID, and another func should combine these maps for
+  // all functions.
+  std::vector<std::pair<CID, Future>> func_candidates;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    func_candidates.emplace_back(
+        func_cid,
+        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+  }
+  StringMap<unsigned> group_count;
+  for (auto &future : func_candidates) {
+    Future &result = future.second;
+    for (auto &item : result->map_range())
+      group_count[item.key()]++;
+    result.freeNode();
+  }
+  // TODO: not using evaluateAsync for smout.equivalent_pairs_in_group because
+  // there would be too many simultaneous calls, leaving no threads to evaluate
+  // smout.extracted.callee.
+  unsigned total = 0;
+  for (const auto &item : group_count) {
+    if (item.getValue() >= 2) {
+      auto group_pairs =
+          evaluator.evaluate("smout.equivalent_pairs_in_group", options, mod,
+                             Node(utf8_string_arg, item.getKey()));
+      total += group_pairs->as<unsigned>();
+    }
+  }
+  return Node(total);
+}
