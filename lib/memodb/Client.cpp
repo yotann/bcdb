@@ -483,6 +483,7 @@ namespace {
 struct AsyncRequest {
   AsyncRequest(ClientEvaluator *evaluator, Call call);
   void start();
+  void transact();
   void callback();
 
   ClientEvaluator *evaluator;
@@ -509,11 +510,13 @@ AsyncRequest::AsyncRequest(ClientEvaluator *evaluator, Call call)
   aio = aio_alloc(requestHandler, this);
   req = evaluator->store->buildRequest("POST", os.str());
   res = http_res_alloc();
-
-  nng_http_client_connect(evaluator->store->client.get(), aio.get());
 }
 
 void AsyncRequest::start() {
+  nng_http_client_connect(evaluator->store->client.get(), aio.get());
+}
+
+void AsyncRequest::transact() {
   nng_http_conn_transact(conn.get(), req.get(), res.get(), aio.get());
 }
 
@@ -527,7 +530,7 @@ void AsyncRequest::callback() {
       evaluator->printProgress();
       llvm::errs() << " starting " << call << "\n";
     }
-    start();
+    transact();
     return;
   }
   auto response = evaluator->store->getResponse(res.get());
@@ -542,7 +545,7 @@ void AsyncRequest::callback() {
       evaluator->printProgress();
       llvm::errs() << " awaiting " << call << "\n";
     }
-    start();
+    transact();
   } else if (response.status == 503) {
     // Service Unavailable
     if (auto stderr_lock =
@@ -550,7 +553,7 @@ void AsyncRequest::callback() {
       evaluator->printProgress();
       llvm::errs() << " retrying " << call << "\n";
     }
-    start();
+    transact();
   } else if (response.status == 200) {
     // OK
     if (!accepted) {
@@ -575,8 +578,24 @@ void AsyncRequest::callback() {
 
 Future ClientEvaluator::evaluateAsync(const Call &call) {
   // TODO: we need some way to set the timeout parameter.
+
+  // Each request uses its own TCP connection, and if we try to open too many
+  // connections at once we'll get an error. So we limit ourselves to 900
+  // outstanding requests.
+  while (true) {
+    // Load atomics in this order to avoid getting negative values.
+    unsigned finished = num_finished;
+    unsigned requested = num_requested;
+    if (requested - finished < 900)
+      break;
+    nng_msleep(1000);
+  }
   AsyncRequest *request = new AsyncRequest(this, call);
-  return makeFuture(request->promise.get_future().share());
+  // We need to get the future *before* calling request->start(). Otherwise,
+  // the request could complete and delete itself before we access it!
+  auto result = makeFuture(request->promise.get_future().share());
+  request->start();
+  return result;
 }
 
 void ClientEvaluator::registerFunc(
