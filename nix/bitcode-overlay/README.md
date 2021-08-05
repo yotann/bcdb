@@ -3,7 +3,7 @@
 This Nixpkgs overlay can automatically build many Linux packages with LLVM bitcode included. Use it like this:
 
 ```shell
-# Build the "hello" program with embedded bitcode.
+# Build the "lz4" program with embedded bitcode.
 cd bcdb/nix/bitcode-overlay
 nix-build -A pkgsBitcode.lz4
 
