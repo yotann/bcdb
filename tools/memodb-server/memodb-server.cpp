@@ -154,6 +154,7 @@ struct NNGRequest : public HTTPRequest,
   }
 
   void sendStatus(std::uint16_t status) override {
+    sent_status = status;
     checkErr(nng_http_res_set_status(res.get(), status));
   }
 
@@ -195,6 +196,11 @@ struct NNGRequest : public HTTPRequest,
 
   void writeLog(size_t body_size) {
     // https://en.wikipedia.org/wiki/Common_Log_Format
+
+    // There are so many successful requests, writing the log is actually a
+    // bottleneck. So let's only log failures.
+    if (sent_status >= 200 && sent_status <= 299)
+      return;
 
     StringRef ip_address = "-"; // TODO: NNG doesn't seem to expose this.
 
@@ -262,6 +268,8 @@ struct NNGRequest : public HTTPRequest,
 
     nng_aio_defer(http_aio, cancelHandler, wait_aio.get());
   }
+
+  std::uint16_t sent_status = 0;
 };
 } // end anonymous namespace
 
