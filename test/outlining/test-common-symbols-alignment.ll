@@ -1,4 +1,4 @@
-; RUN: %outliningtest -- -O0 %s
+; RUN: %outliningtest %s
 
 ; This test checks that common symbols have been allocated addresses honouring
 ; the alignment requirement.

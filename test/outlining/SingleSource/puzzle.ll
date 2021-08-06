@@ -1,6 +1,7 @@
 ; RUN: %outliningtest %s
 
 ; REQUIRES: llvm12
+; REQUIRES: x86_64
 
 source_filename = "build-llvm12/SingleSource/Benchmarks/BenchmarkGame/puzzle"
 

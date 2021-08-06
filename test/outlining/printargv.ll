@@ -1,4 +1,4 @@
-; RUN: %outliningtest -- -jit-kind=orc-lazy %s a b c
+; RUN: %outliningtest %s a b c
 
 @.str = private unnamed_addr constant [11 x i8] c"argc = %i\0A\00", align 1
 @.str.1 = private unnamed_addr constant [9 x i8] c"argv = [\00", align 1
