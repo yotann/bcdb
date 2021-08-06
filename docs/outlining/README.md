@@ -54,11 +54,13 @@ nix-env -f . -iA bcdb
 # it has lots of repeated code sequences for outlining.
 cd ~/bcdb/nix/bitcode-overlay
 nix-build -A pkgsBitcode.netpbm
-bc-imitate extract result*/bin/ppmtomitsu > ppmtomitsu.bc
+bc-imitate extract result*/bin/ppmtomitsu | opt -Oz --strip-debug > ppmtomitsu.bc
 ```
 
 See [nix/bitcode-overlay](../../nix/bitcode-overlay/README.md) for
-more instructions.
+more instructions. The outliner doesn't support debugging info, and it doesn't
+make much sense to run it on an unoptimized program, so you should run `opt -Oz
+--strip-debug` if necessary.
 
 ### 3. Initialize the MemoDB store
 
