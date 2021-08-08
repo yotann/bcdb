@@ -214,7 +214,7 @@ static int Export() {
   for (StringRef NameURI : NamesToExport)
     names.emplace_back(GetNameFromURI(NameURI));
   auto store = Store::open(GetStoreUri());
-  CID RootRef = exportToCARFile(OutputFile->os(), *store);
+  CID RootRef = exportToCARFile(OutputFile->os(), *store, names);
   OutputFile->keep();
   llvm::errs() << "Exported with Root CID: " << RootRef << "\n";
   return 0;
