@@ -42,7 +42,6 @@ using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 
 const char *smout::candidates_version = "smout.candidates_v0";
-const char *smout::candidates_total_version = "smout.candidates_total_v0";
 const char *smout::grouped_candidates_version = "smout.grouped_candidates_v0";
 const char *smout::extracted_callees_version = "smout.extracted_callees_v0";
 const char *smout::grouped_callees_for_function_version =
@@ -271,20 +270,6 @@ NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
                            }));
   }
   return result;
-}
-
-NodeOrCID smout::candidates_total(Evaluator &evaluator, NodeRef options,
-                                  NodeRef mod) {
-  std::vector<Future> func_candidates;
-  for (auto &item : (*mod)["functions"].map_range())
-    func_candidates.emplace_back(evaluator.evaluateAsync(
-        candidates_version, options, item.value().as<CID>()));
-  std::size_t total = 0;
-  for (auto &future : func_candidates) {
-    for (auto &item : future->map_range())
-      total += item.value().size();
-  }
-  return Node(total);
 }
 
 NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
@@ -988,7 +973,6 @@ NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
 
 void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(candidates_version, &candidates);
-  evaluator.registerFunc(candidates_total_version, &candidates_total);
   evaluator.registerFunc(grouped_candidates_version, &grouped_candidates);
   evaluator.registerFunc(extracted_callees_version, &extracted_callees);
   evaluator.registerFunc(grouped_callees_for_function_version,

@@ -104,9 +104,35 @@ static Node getCandidatesOptions() { return Node(node_map_arg); }
 static int Candidates() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::candidates_total_version,
+  NodeRef result = evaluator->evaluate(smout::grouped_candidates_version,
                                        getCandidatesOptions(), mod);
-  llvm::outs() << "\nTotal candidates: " << *result << "\n";
+  unsigned total = 0, total_maybe_profitable = 0;
+  unsigned group_count = result->size();
+  unsigned group_count_maybe_profitable = 0;
+  unsigned largest_group_size = 0;
+  std::string largest_group_name;
+  for (const auto &item : result->map_range()) {
+    size_t min_callee_size = item.value()["min_callee_size"].as<size_t>();
+    size_t total_caller_savings =
+        item.value()["total_caller_savings"].as<size_t>();
+    unsigned num_members = item.value()["num_members"].as<unsigned>();
+    total += num_members;
+    if (num_members > largest_group_size) {
+      largest_group_size = num_members;
+      largest_group_name = item.key().str();
+    }
+    if (total_caller_savings > min_callee_size) {
+      group_count_maybe_profitable += 1;
+      total_maybe_profitable += num_members;
+    }
+  }
+  llvm::outs() << "\nTotal candidates: " << total << " in " << group_count
+               << " groups.\n";
+  llvm::outs() << "Candidates that might be profitable: "
+               << total_maybe_profitable << " in "
+               << group_count_maybe_profitable << " groups.\n";
+  llvm::outs() << "Largest group (" << largest_group_size
+               << " candidates): " << largest_group_name << "\n";
   return 0;
 }
 

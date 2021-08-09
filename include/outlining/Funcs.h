@@ -12,7 +12,6 @@ using memodb::NodeOrCID;
 using memodb::NodeRef;
 
 NodeOrCID candidates(Evaluator &evaluator, NodeRef options, NodeRef func);
-NodeOrCID candidates_total(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID grouped_candidates(Evaluator &evaluator, NodeRef options,
                              NodeRef mod);
 NodeOrCID extracted_callees(Evaluator &evaluator, NodeRef func,
@@ -32,7 +31,6 @@ NodeOrCID equivalent_pairs_in_group(Evaluator &evaluator, NodeRef options,
 NodeOrCID equivalent_pairs(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
 extern const char *candidates_version;
-extern const char *candidates_total_version;
 extern const char *grouped_candidates_version;
 extern const char *extracted_callees_version;
 extern const char *grouped_callees_for_function_version;
