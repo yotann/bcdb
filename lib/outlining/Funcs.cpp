@@ -41,6 +41,29 @@ using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 
+const char *smout::candidates_version = "smout.candidates_v0";
+const char *smout::candidates_total_version = "smout.candidates_total";
+const char *smout::extracted_callee_version = "smout.extracted.callee";
+const char *smout::unique_callees_version = "smout.unique_callees";
+const char *smout::ilp_problem_version = "smout.ilp_problem";
+const char *smout::greedy_solution_version = "smout.greedy_solution";
+const char *smout::extracted_caller_version = "smout.extracted.caller";
+const char *smout::optimized_version = "smout.optimized";
+const char *smout::equivalent_pairs_in_group_version =
+    "smout.equivalent_pairs_in_group";
+const char *smout::equivalent_pairs_version = "smout.equivalent_pairs";
+
+static FunctionAnalysisManager makeFAM() {
+  FunctionAnalysisManager am;
+  // TODO: Would it be faster to just register the analyses we need?
+  PassBuilder().registerFunctionAnalyses(am);
+  am.registerPass([] { return FalseMemorySSAAnalysis(); });
+  am.registerPass([] { return OutliningCandidatesAnalysis(); });
+  am.registerPass([] { return OutliningDependenceAnalysis(); });
+  am.registerPass([] { return SizeModelAnalysis(); });
+  return am;
+}
+
 static StringRef cid_key(const CID &cid) {
   auto bytes = cid.asBytes();
   return StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
@@ -213,8 +236,6 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
   return Multibase::base64pad.encodeWithoutPrefix(bytes);
 }
 
-const char *smout::candidates_version = "smout.candidates_v0";
-
 NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
                             NodeRef func) {
   ExitOnError Err("smout.candidates: ");
@@ -223,13 +244,7 @@ NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
 
-  FunctionAnalysisManager am;
-  // TODO: Would it be faster to just register the analyses we need?
-  PassBuilder().registerFunctionAnalyses(am);
-  am.registerPass([] { return FalseMemorySSAAnalysis(); });
-  am.registerPass([] { return OutliningCandidatesAnalysis(); });
-  am.registerPass([] { return OutliningDependenceAnalysis(); });
-  am.registerPass([] { return SizeModelAnalysis(); });
+  FunctionAnalysisManager am = makeFAM();
   auto &candidates = am.getResult<OutliningCandidatesAnalysis>(f);
 
   Node result(node_map_arg);
@@ -276,11 +291,7 @@ NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
 
   SparseBitVector<> bv = decodeBitVector(*nodes);
 
-  FunctionAnalysisManager am;
-  // TODO: Would it be faster to just register the analyses we need?
-  PassBuilder().registerFunctionAnalyses(am);
-  am.registerPass([] { return FalseMemorySSAAnalysis(); });
-  am.registerPass([] { return OutliningDependenceAnalysis(); });
+  FunctionAnalysisManager am = makeFAM();
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
   OutliningCalleeExtractor extractor(f, deps, bv);
@@ -311,7 +322,7 @@ NodeOrCID smout::unique_callees(Evaluator &evaluator,
     for (auto &item : result->map_range())
       for (auto &candidate : item.value().list_range())
         callees.emplace_back(evaluator.evaluateAsync(
-            "smout.extracted.callee", func_cid, candidate["nodes"]));
+            extracted_callee_version, func_cid, candidate["nodes"]));
     result.freeNode();
   }
   StringSet unique;
@@ -354,7 +365,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
           overlaps[i].push_back(m);
         }
         callees.emplace_back(evaluator.evaluateAsync(
-            "smout.extracted.callee", func_cid, candidate["nodes"]));
+            extracted_callee_version, func_cid, candidate["nodes"]));
       }
     }
     result.freeNode();
@@ -523,7 +534,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
             func_overlaps.resize(i + 1);
           func_overlaps[i].push_back(m);
         }
-        callees.emplace_back(evaluator.evaluateAsync("smout.extracted.callee",
+        callees.emplace_back(evaluator.evaluateAsync(extracted_callee_version,
                                                      func_cid, nodes_m[m]));
       }
     }
@@ -642,11 +653,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   for (const auto &callee : callees->list_range())
     bvs.emplace_back(decodeBitVector(callee["nodes"]));
 
-  FunctionAnalysisManager am;
-  // TODO: Would it be faster to just register the analyses we need?
-  PassBuilder().registerFunctionAnalyses(am);
-  am.registerPass([] { return FalseMemorySSAAnalysis(); });
-  am.registerPass([] { return OutliningDependenceAnalysis(); });
+  FunctionAnalysisManager am = makeFAM();
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
   OutliningCallerExtractor extractor(f, deps, bvs);
@@ -672,7 +679,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
 }
 
 NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
-  NodeRef solution = evaluator.evaluate("smout.greedy_solution", options, mod);
+  NodeRef solution = evaluator.evaluate(greedy_solution_version, options, mod);
   Node mod_node = *mod;
 
   ExitOnError err("smout.optimized: ");
@@ -725,7 +732,7 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
     }
     auto cid = function["function"].as<CID>();
     callers.insert_or_assign(cid_key(cid),
-                             evaluator.evaluateAsync("smout.extracted.caller",
+                             evaluator.evaluateAsync(extracted_caller_version,
                                                      cid, std::move(callees)));
   }
 
@@ -763,7 +770,7 @@ NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
     for (auto &item : result->map_range())
       for (auto &candidate : item.value().list_range())
         callees.emplace_back(evaluator.evaluateAsync(
-            "smout.extracted.callee", func_cid, candidate["nodes"]));
+            extracted_callee_version, func_cid, candidate["nodes"]));
     result.freeNode();
   }
   func_candidates.clear();
@@ -822,7 +829,7 @@ NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
   for (const auto &item : group_count) {
     if (item.getValue() >= 2) {
       auto group_pairs =
-          evaluator.evaluate("smout.equivalent_pairs_in_group", options, mod,
+          evaluator.evaluate(equivalent_pairs_in_group_version, options, mod,
                              Node(utf8_string_arg, item.getKey()));
       total += group_pairs->as<unsigned>();
     }

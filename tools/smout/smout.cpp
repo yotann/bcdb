@@ -94,16 +94,22 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   }
   auto evaluator = Evaluator::create(GetStoreUri(), thread_count);
   evaluator->registerFunc(smout::candidates_version, &smout::candidates);
-  evaluator->registerFunc("smout.candidates_total", &smout::candidates_total);
-  evaluator->registerFunc("smout.extracted.callee", &smout::extracted_callee);
-  evaluator->registerFunc("smout.unique_callees", &smout::unique_callees);
-  evaluator->registerFunc("smout.ilp_problem", &smout::ilp_problem);
-  evaluator->registerFunc("smout.greedy_solution", &smout::greedy_solution);
-  evaluator->registerFunc("smout.extracted.caller", &smout::extracted_caller);
-  evaluator->registerFunc("smout.optimized", &smout::optimized);
-  evaluator->registerFunc("smout.equivalent_pairs_in_group",
+  evaluator->registerFunc(smout::candidates_total_version,
+                          &smout::candidates_total);
+  evaluator->registerFunc(smout::extracted_callee_version,
+                          &smout::extracted_callee);
+  evaluator->registerFunc(smout::unique_callees_version,
+                          &smout::unique_callees);
+  evaluator->registerFunc(smout::ilp_problem_version, &smout::ilp_problem);
+  evaluator->registerFunc(smout::greedy_solution_version,
+                          &smout::greedy_solution);
+  evaluator->registerFunc(smout::extracted_caller_version,
+                          &smout::extracted_caller);
+  evaluator->registerFunc(smout::optimized_version, &smout::optimized);
+  evaluator->registerFunc(smout::equivalent_pairs_in_group_version,
                           &smout::equivalent_pairs_in_group);
-  evaluator->registerFunc("smout.equivalent_pairs", &smout::equivalent_pairs);
+  evaluator->registerFunc(smout::equivalent_pairs_version,
+                          &smout::equivalent_pairs);
   return evaluator;
 }
 
@@ -114,7 +120,7 @@ static Node getCandidatesOptions() { return Node(node_map_arg); }
 static int Candidates() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate("smout.candidates_total",
+  NodeRef result = evaluator->evaluate(smout::candidates_total_version,
                                        getCandidatesOptions(), mod);
   llvm::outs() << "\nTotal candidates: " << *result << "\n";
   return 0;
@@ -125,8 +131,8 @@ static int Candidates() {
 static int CreateILPProblem() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result =
-      evaluator->evaluate("smout.ilp_problem", getCandidatesOptions(), mod);
+  NodeRef result = evaluator->evaluate(smout::ilp_problem_version,
+                                       getCandidatesOptions(), mod);
   llvm::outs() << result->as<StringRef>();
   return 0;
 }
@@ -136,7 +142,7 @@ static int CreateILPProblem() {
 static int Equivalence() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate("smout.equivalent_pairs",
+  NodeRef result = evaluator->evaluate(smout::equivalent_pairs_version,
                                        getCandidatesOptions(), mod);
   llvm::outs() << "\nEquivalent pairs: " << *result << "\n";
   return 0;
@@ -147,8 +153,8 @@ static int Equivalence() {
 static int ExtractCallees() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result =
-      evaluator->evaluate("smout.unique_callees", getCandidatesOptions(), mod);
+  NodeRef result = evaluator->evaluate(smout::unique_callees_version,
+                                       getCandidatesOptions(), mod);
   llvm::outs() << "\nUnique callee functions: " << *result << "\n";
   return 0;
 }
@@ -158,8 +164,8 @@ static int ExtractCallees() {
 static int Optimize() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result =
-      evaluator->evaluate("smout.optimized", getCandidatesOptions(), mod);
+  NodeRef result = evaluator->evaluate(smout::optimized_version,
+                                       getCandidatesOptions(), mod);
   llvm::outs() << Name(result.getCID()) << "\n";
   return 0;
 }
@@ -169,8 +175,8 @@ static int Optimize() {
 static int SolveGreedy() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result =
-      evaluator->evaluate("smout.greedy_solution", getCandidatesOptions(), mod);
+  NodeRef result = evaluator->evaluate(smout::greedy_solution_version,
+                                       getCandidatesOptions(), mod);
   llvm::outs() << *result;
   return 0;
 }

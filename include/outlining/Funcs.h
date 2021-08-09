@@ -25,6 +25,15 @@ NodeOrCID equivalent_pairs_in_group(Evaluator &evaluator, NodeRef options,
 NodeOrCID equivalent_pairs(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
 extern const char *candidates_version;
+extern const char *candidates_total_version;
+extern const char *extracted_callee_version;
+extern const char *unique_callees_version;
+extern const char *ilp_problem_version;
+extern const char *greedy_solution_version;
+extern const char *extracted_caller_version;
+extern const char *optimized_version;
+extern const char *equivalent_pairs_in_group_version;
+extern const char *equivalent_pairs_version;
 
 } // end namespace smout
 
