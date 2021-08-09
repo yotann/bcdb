@@ -622,6 +622,44 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::cttz:
     case Intrinsic::exp:
     case Intrinsic::exp2:
+    case Intrinsic::experimental_constrained_ceil:
+    case Intrinsic::experimental_constrained_cos:
+    case Intrinsic::experimental_constrained_exp:
+    case Intrinsic::experimental_constrained_exp2:
+    case Intrinsic::experimental_constrained_fadd:
+    case Intrinsic::experimental_constrained_fcmp:
+    case Intrinsic::experimental_constrained_fcmps:
+    case Intrinsic::experimental_constrained_fdiv:
+    case Intrinsic::experimental_constrained_floor:
+    case Intrinsic::experimental_constrained_fma:
+    case Intrinsic::experimental_constrained_fmul:
+    case Intrinsic::experimental_constrained_fpext:
+    case Intrinsic::experimental_constrained_fptosi:
+    case Intrinsic::experimental_constrained_fptoui:
+    case Intrinsic::experimental_constrained_fptrunc:
+    case Intrinsic::experimental_constrained_frem:
+    case Intrinsic::experimental_constrained_fsub:
+    case Intrinsic::experimental_constrained_llrint:
+    case Intrinsic::experimental_constrained_llround:
+    case Intrinsic::experimental_constrained_log:
+    case Intrinsic::experimental_constrained_log10:
+    case Intrinsic::experimental_constrained_log2:
+    case Intrinsic::experimental_constrained_lrint:
+    case Intrinsic::experimental_constrained_lround:
+    case Intrinsic::experimental_constrained_maximum:
+    case Intrinsic::experimental_constrained_maxnum:
+    case Intrinsic::experimental_constrained_minimum:
+    case Intrinsic::experimental_constrained_minnum:
+    case Intrinsic::experimental_constrained_nearbyint:
+    case Intrinsic::experimental_constrained_pow:
+    case Intrinsic::experimental_constrained_powi:
+    case Intrinsic::experimental_constrained_rint:
+    case Intrinsic::experimental_constrained_round:
+    case Intrinsic::experimental_constrained_sin:
+    case Intrinsic::experimental_constrained_sitofp:
+    case Intrinsic::experimental_constrained_sqrt:
+    case Intrinsic::experimental_constrained_trunc:
+    case Intrinsic::experimental_constrained_uitofp:
     case Intrinsic::fabs:
     case Intrinsic::floor:
     case Intrinsic::fma:
@@ -664,6 +702,8 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::usub_sat:
     case Intrinsic::usub_with_overflow:
 #if LLVM_VERSION_MAJOR >= 11
+    case Intrinsic::experimental_constrained_fmuladd:
+    case Intrinsic::experimental_constrained_roundeven:
     case Intrinsic::roundeven:
     case Intrinsic::sdiv_fix_sat:
     case Intrinsic::udiv_fix_sat:
