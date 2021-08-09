@@ -294,6 +294,9 @@ int main(int argc, char **argv) {
   auto http_server = http_server_hold(url.get());
 
   auto handler = http_handler_alloc("/", httpHandler);
+  // Accept unlimited amounts of data.
+  checkErr(nng_http_handler_collect_body(handler.get(), true,
+                                         static_cast<size_t>(-1)));
   checkErr(nng_http_handler_set_method(handler.get(), nullptr));
   checkErr(nng_http_handler_set_tree(handler.get()));
   checkErr(nng_http_server_add_handler(http_server.get(), handler.release()));
