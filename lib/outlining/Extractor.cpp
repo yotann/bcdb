@@ -182,16 +182,22 @@ unsigned OutliningCalleeExtractor::getNumReturnValues() const {
   return output_values.size();
 }
 
+static Type *simplifyType(Type *type) {
+  if (!type->isPointerTy())
+    return type;
+  return Type::getInt8PtrTy(type->getContext(), type->getPointerAddressSpace());
+}
+
 void OutliningCalleeExtractor::getArgTypes(
     SmallVectorImpl<Type *> &types) const {
   for (Value *value : input_values)
-    types.push_back(value->getType());
+    types.push_back(simplifyType(value->getType()));
 }
 
 void OutliningCalleeExtractor::getResultTypes(
     SmallVectorImpl<Type *> &types) const {
   for (Value *value : output_values)
-    types.push_back(value->getType());
+    types.push_back(simplifyType(value->getType()));
 }
 
 Function *OutliningCalleeExtractor::createDeclaration() {
@@ -201,7 +207,6 @@ Function *OutliningCalleeExtractor::createDeclaration() {
   const auto &nodes = deps.Nodes;
 
   // Determine the type of the outlined function.
-  // FIXME: Make all pointers opaque.
   SmallVector<Type *, 8> result_types, arg_types;
   getResultTypes(result_types);
   Type *result_type = StructType::get(function.getContext(), result_types);
@@ -274,13 +279,16 @@ Function *OutliningCalleeExtractor::createDefinition() {
   // Map the callee's arguments to input values.
   Function::arg_iterator new_arg_iter = new_callee->arg_begin();
   for (Value *orig_value : input_values) {
-    Argument &new_value = *new_arg_iter++;
+    Value *new_value = &(*new_arg_iter++);
+    new_value->setName(orig_value->getName());
+    if (orig_value->getType() != new_value->getType())
+      new_value =
+          new BitCastInst(new_value, orig_value->getType(), "", EntryBlock);
     if (NodeIndices.count(orig_value) &&
         input_phis.test(NodeIndices.lookup(orig_value)))
-      input_phi_map[orig_value] = &new_value;
+      input_phi_map[orig_value] = new_value;
     else
-      VMap[orig_value] = &new_value;
-    new_value.setName(orig_value->getName());
+      VMap[orig_value] = new_value;
   }
   assert(new_arg_iter == new_callee->arg_end());
 
@@ -410,9 +418,14 @@ Function *OutliningCalleeExtractor::createDefinition() {
   // Set up the return instruction.
   Value *ResultValue = UndefValue::get(new_callee->getReturnType());
   unsigned ResultI = 0;
-  for (Value *value : output_values)
-    ResultValue = InsertValueInst::Create(ResultValue, VMap[value], {ResultI++},
+  for (Value *orig_value : output_values) {
+    Value *new_value = VMap[orig_value];
+    Type *new_type = simplifyType(new_value->getType());
+    if (new_value->getType() != new_type)
+      new_value = new BitCastInst(new_value, new_type, "", ExitBlock);
+    ResultValue = InsertValueInst::Create(ResultValue, new_value, {ResultI++},
                                           "", ExitBlock);
+  }
   ReturnInst::Create(new_callee->getContext(), ResultValue, ExitBlock);
 
   // If we're outlining an infinite loop, we shouldn't have an exit block.
@@ -512,16 +525,27 @@ void OutliningCallerExtractor::handleSingleCallee(
 
   // Construct the call.
   Function *new_callee = callee.createDeclaration();
+  std::vector<Value *> input_values;
+  for (Value *value : callee.input_values) {
+    Type *type = simplifyType(value->getType());
+    if (type != value->getType())
+      value = new BitCastInst(value, type, "", insertion_point);
+    input_values.push_back(value);
+  }
   CallInst *call_inst =
-      CallInst::Create(new_callee->getFunctionType(), new_callee,
-                       callee.input_values, "", insertion_point);
+      CallInst::Create(new_callee->getFunctionType(), new_callee, input_values,
+                       "", insertion_point);
   call_inst->setCallingConv(new_callee->getCallingConv());
 
   // Extract outputs.
   unsigned result_i = 0;
-  for (Value *value : callee.output_values)
+  for (Value *value : callee.output_values) {
     replacements[value] =
         ExtractValueInst::Create(call_inst, {result_i++}, "", insertion_point);
+    if (value->getType() != replacements[value]->getType())
+      replacements[value] = new BitCastInst(
+          replacements[value], value->getType(), "", insertion_point);
+  }
 
   // Handle PHI nodes in the caller that depend on control flow within the
   // callee. Other phi values will be rewritten by replaceAllUsesWith.
