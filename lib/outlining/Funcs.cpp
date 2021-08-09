@@ -47,7 +47,6 @@ const char *smout::extracted_callees_version = "smout.extracted_callees_v0";
 const char *smout::grouped_callees_for_function_version =
     "smout.grouped_callees_for_function_v0";
 const char *smout::grouped_callees_version = "smout.grouped_callees_v0";
-const char *smout::unique_callees_version = "smout.unique_callees";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution";
 const char *smout::extracted_caller_version = "smout.extracted.caller";
@@ -331,7 +330,6 @@ NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
     SparseBitVector<> bv = decodeBitVector(nodes);
     OutliningCalleeExtractor extractor(f, deps, bv);
     callees.push_back(extractor.createDefinition());
-    // FIXME: run at least SimplifyCFG, and infer function attributes.
   }
 
   bcdb::Splitter splitter(*m);
@@ -438,33 +436,6 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
     result[item.getKey()] = group;
   }
   return result;
-}
-
-NodeOrCID smout::unique_callees(Evaluator &evaluator,
-                                NodeRef candidates_options, NodeRef mod) {
-  std::vector<std::pair<CID, Future>> func_candidates;
-  for (auto &item : (*mod)["functions"].map_range()) {
-    auto func_cid = item.value().as<CID>();
-    func_candidates.emplace_back(
-        func_cid, evaluator.evaluateAsync(candidates_version,
-                                          candidates_options, func_cid));
-  }
-  std::vector<Future> callees;
-  for (auto &future : func_candidates) {
-    const CID &func_cid = future.first;
-    Future &result = future.second;
-    for (auto &item : result->map_range())
-      for (auto &candidate : item.value().list_range())
-        callees.emplace_back(evaluator.evaluateAsync(
-            extracted_callees_version, func_cid, candidate["nodes"]));
-    result.freeNode();
-  }
-  StringSet unique;
-  for (auto &result : callees) {
-    result.freeNode();
-    unique.insert(cid_key(result.getCID()));
-  }
-  return Node(unique.size());
 }
 
 NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
@@ -978,7 +949,6 @@ void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(grouped_callees_for_function_version,
                          &grouped_callees_for_function);
   evaluator.registerFunc(grouped_callees_version, &grouped_callees);
-  evaluator.registerFunc(unique_callees_version, &unique_callees);
   evaluator.registerFunc(ilp_problem_version, &ilp_problem);
   evaluator.registerFunc(greedy_solution_version, &greedy_solution);
   evaluator.registerFunc(extracted_caller_version, &extracted_caller);

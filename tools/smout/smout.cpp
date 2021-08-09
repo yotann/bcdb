@@ -163,9 +163,19 @@ static int Equivalence() {
 static int ExtractCallees() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::unique_callees_version,
+  NodeRef result = evaluator->evaluate(smout::grouped_callees_version,
                                        getCandidatesOptions(), mod);
-  llvm::outs() << "\nUnique callee functions: " << *result << "\n";
+  unsigned total = 0, unique = 0;
+  unsigned group_count = result->size();
+  for (const auto &item : result->map_range()) {
+    unsigned num_members = item.value()["num_members"].as<unsigned>();
+    unsigned num_unique_callees =
+        item.value()["num_unique_callees"].as<unsigned>();
+    total += num_members;
+    unique += num_unique_callees;
+  }
+  llvm::outs() << "\nTotal callees: " << unique << " unique of " << total
+               << " total in " << group_count << " groups.\n";
   return 0;
 }
 
