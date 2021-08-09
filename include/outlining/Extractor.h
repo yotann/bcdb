@@ -21,6 +21,7 @@ class Function;
 class IntegerType;
 class Module;
 class Type;
+class Value;
 class raw_ostream;
 } // end namespace llvm
 
@@ -50,7 +51,7 @@ private:
 
   Function *new_callee = nullptr;
   SparseBitVector<> outlined_blocks;
-  SparseBitVector<> arg_inputs, external_inputs, external_outputs;
+  std::vector<Value *> input_values, output_values;
 
   // PHI nodes that were chosen for outlining, but which depend on control flow
   // outside the outlined set.

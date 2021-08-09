@@ -1,5 +1,8 @@
 #include "outlining/Extractor.h"
 
+#include <algorithm>
+
+#include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Dominators.h>
@@ -14,6 +17,29 @@
 
 using namespace bcdb;
 using namespace llvm;
+
+static bool compareTypes(Type *t0, Type *t1) {
+  if (t0->getTypeID() != t1->getTypeID())
+    return t0->getTypeID() < t1->getTypeID();
+  if (t0->getNumContainedTypes() != t1->getNumContainedTypes())
+    return t0->getNumContainedTypes() < t1->getNumContainedTypes();
+  for (size_t i = 0; i < t0->getNumContainedTypes(); ++i) {
+    bool lt = compareTypes(t0->getContainedType(i), t1->getContainedType(i));
+    bool gt = compareTypes(t1->getContainedType(i), t0->getContainedType(i));
+    if (lt)
+      return true;
+    if (gt)
+      return false;
+  }
+  if (t0->isIntegerTy())
+    return t0->getIntegerBitWidth() < t1->getIntegerBitWidth();
+  if (t0->isPointerTy())
+    return t0->getPointerAddressSpace() < t1->getPointerAddressSpace();
+  // TODO: make use of other fields (function vararg, vector number of
+  // elements). This doesn't affect correctness, but it could prevent
+  // duplicates from being found.
+  return false;
+}
 
 OutliningCalleeExtractor::OutliningCalleeExtractor(
     Function &function, const OutliningDependenceResults &deps,
@@ -32,17 +58,21 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
                        /* gen_crash_diag */ false);
   }
 
+  SetVector<Value *> input_set;
   auto addInputValue = [&](Value *v) {
-    if (Argument *arg = dyn_cast<Argument>(v))
-      arg_inputs.set(arg->getArgNo());
-    else if (NodeIndices.count(v))
-      external_inputs.set(NodeIndices.lookup(v));
-    else
+    if (isa<Argument>(v)) {
+      input_set.insert(v);
+    } else if (NodeIndices.count(v)) {
+      if (!bv.test(NodeIndices.lookup(v)))
+        input_set.insert(v);
+    } else {
       assert(isa<Constant>(v) && "impossible");
+    }
   };
 
   // Determine which nodes inside the new callee will need to have their
   // results passed back to the new caller.
+  SparseBitVector<> external_outputs;
   for (size_t i = 0; i < Nodes.size(); i++) {
     if (bv.test(i))
       continue;
@@ -103,19 +133,38 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
         // caller, so we need to leave part or all of the phi in the caller,
         // and provide its value to the callee.
         input_phis.set(i);
+        // Don't use addInputValue() here; we need to add an input even though
+        // i is in bv.
+        input_set.insert(Nodes[i]);
       } else if (!phi_incoming.empty()) {
         // The phi value only depends on control flow within the outlined
         // callee, but there's one value we need from the caller.
         addInputValue(*phi_incoming.begin());
       }
     } else {
-      external_inputs |= deps.DataDepends[i];
-      arg_inputs |= deps.ArgDepends[i];
+      for (auto j : deps.DataDepends[i])
+        addInputValue(Nodes[j]);
+      for (auto j : deps.ArgDepends[i])
+        addInputValue(function.arg_begin() + j);
     }
   }
-  // The next statement must be executed after all calls to addInputValue().
-  external_inputs.intersectWithComplement(bv);
-  external_inputs |= input_phis;
+
+  // Sort input values by type. Values with the same type remain sorted in the
+  // order they are used.
+  input_values = input_set.takeVector();
+  std::stable_sort(input_values.begin(), input_values.end(),
+                   [](Value *v0, Value *v1) {
+                     return compareTypes(v0->getType(), v1->getType());
+                   });
+
+  // Sort output values by type. Values with the same type remain sorted in the
+  // order they are defined.
+  for (auto i : external_outputs)
+    output_values.push_back(Nodes[i]);
+  std::stable_sort(output_values.begin(), output_values.end(),
+                   [](Value *v0, Value *v1) {
+                     return compareTypes(v0->getType(), v1->getType());
+                   });
 
   for (auto i : bv) {
     if (isa<BasicBlock>(Nodes[i]))
@@ -126,25 +175,23 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
 }
 
 unsigned OutliningCalleeExtractor::getNumArgs() const {
-  return arg_inputs.count() + external_inputs.count();
+  return input_values.size();
 }
 
 unsigned OutliningCalleeExtractor::getNumReturnValues() const {
-  return external_outputs.count();
+  return output_values.size();
 }
 
 void OutliningCalleeExtractor::getArgTypes(
     SmallVectorImpl<Type *> &types) const {
-  for (auto i : arg_inputs)
-    types.push_back((function.arg_begin() + i)->getType());
-  for (auto i : external_inputs)
-    types.push_back(deps.Nodes[i]->getType());
+  for (Value *value : input_values)
+    types.push_back(value->getType());
 }
 
 void OutliningCalleeExtractor::getResultTypes(
     SmallVectorImpl<Type *> &types) const {
-  for (auto i : external_outputs)
-    types.push_back(deps.Nodes[i]->getType());
+  for (Value *value : output_values)
+    types.push_back(value->getType());
 }
 
 Function *OutliningCalleeExtractor::createDeclaration() {
@@ -154,16 +201,11 @@ Function *OutliningCalleeExtractor::createDeclaration() {
   const auto &nodes = deps.Nodes;
 
   // Determine the type of the outlined function.
-  // FIXME: Canonicalize arguments and return values by reordering them. Also
-  // make all pointers opaque.
+  // FIXME: Make all pointers opaque.
   SmallVector<Type *, 8> result_types, arg_types;
-  for (auto i : external_outputs)
-    result_types.push_back(nodes[i]->getType());
+  getResultTypes(result_types);
   Type *result_type = StructType::get(function.getContext(), result_types);
-  for (auto i : arg_inputs)
-    arg_types.push_back((function.arg_begin() + i)->getType());
-  for (auto i : external_inputs)
-    arg_types.push_back(nodes[i]->getType());
+  getArgTypes(arg_types);
   FunctionType *callee_type =
       FunctionType::get(result_type, arg_types, /* isVarArg */ false);
 
@@ -231,20 +273,14 @@ Function *OutliningCalleeExtractor::createDefinition() {
 
   // Map the callee's arguments to input values.
   Function::arg_iterator new_arg_iter = new_callee->arg_begin();
-  for (auto i : arg_inputs) {
-    Argument &orig_arg = *(function.arg_begin() + i);
-    Argument &new_arg = *new_arg_iter++;
-    VMap[&orig_arg] = &new_arg;
-    new_arg.setName(orig_arg.getName());
-  }
-  for (auto i : external_inputs) {
-    Value &orig_value = *Nodes[i];
+  for (Value *orig_value : input_values) {
     Argument &new_value = *new_arg_iter++;
-    if (input_phis.test(i))
-      input_phi_map[&orig_value] = &new_value;
+    if (NodeIndices.count(orig_value) &&
+        input_phis.test(NodeIndices.lookup(orig_value)))
+      input_phi_map[orig_value] = &new_value;
     else
-      VMap[&orig_value] = &new_value;
-    new_value.setName(orig_value.getName());
+      VMap[orig_value] = &new_value;
+    new_value.setName(orig_value->getName());
   }
   assert(new_arg_iter == new_callee->arg_end());
 
@@ -374,9 +410,9 @@ Function *OutliningCalleeExtractor::createDefinition() {
   // Set up the return instruction.
   Value *ResultValue = UndefValue::get(new_callee->getReturnType());
   unsigned ResultI = 0;
-  for (auto i : external_outputs)
-    ResultValue = InsertValueInst::Create(ResultValue, VMap[Nodes[i]],
-                                          {ResultI++}, "", ExitBlock);
+  for (Value *value : output_values)
+    ResultValue = InsertValueInst::Create(ResultValue, VMap[value], {ResultI++},
+                                          "", ExitBlock);
   ReturnInst::Create(new_callee->getContext(), ResultValue, ExitBlock);
 
   // If we're outlining an infinite loop, we shouldn't have an exit block.
@@ -475,31 +511,29 @@ void OutliningCallerExtractor::handleSingleCallee(
   }
 
   // Construct the call.
-  SmallVector<Value *, 8> args;
-  for (auto i : callee.arg_inputs)
-    args.push_back(function.arg_begin() + i);
-  for (auto i : callee.external_inputs)
-    args.push_back(nodes[i]);
   Function *new_callee = callee.createDeclaration();
-  CallInst *call_inst = CallInst::Create(new_callee->getFunctionType(),
-                                         new_callee, args, "", insertion_point);
+  CallInst *call_inst =
+      CallInst::Create(new_callee->getFunctionType(), new_callee,
+                       callee.input_values, "", insertion_point);
   call_inst->setCallingConv(new_callee->getCallingConv());
 
   // Extract outputs.
-  DenseMap<size_t, Value *> output_values;
   unsigned result_i = 0;
-  for (auto i : callee.external_outputs)
-    output_values[i] =
+  for (Value *value : callee.output_values)
+    replacements[value] =
         ExtractValueInst::Create(call_inst, {result_i++}, "", insertion_point);
 
   // Handle PHI nodes in the caller that depend on control flow within the
-  // callee. Other phi values will be rewritten by replaceAllUsesWith below.
+  // callee. Other phi values will be rewritten by replaceAllUsesWith.
   for (size_t i : callee.output_phis) {
     PHINode *phi = cast<PHINode>(nodes[i]);
     for (unsigned j = 0; j < phi->getNumIncomingValues(); ++j)
       if (bv.test(
               node_indices.lookup(phi->getIncomingBlock(j)->getTerminator())))
-        phi->setIncomingValue(j, output_values[i]);
+        phi->setIncomingValue(j, replacements[phi]);
+    // Part of the PHI is staying in the caller, and we don't want to replace
+    // its uses.
+    replacements.erase(phi);
   }
 
   // Prepare to delete outlined instructions. We don't actually delete any
@@ -555,14 +589,6 @@ void OutliningCallerExtractor::handleSingleCallee(
         }
       }
     }
-  }
-
-  for (auto i : callee.external_outputs) {
-    if (!bv.test(i)) {
-      // PHI node in the block after the call; handled separately.
-      continue;
-    }
-    replacements[nodes[i]] = output_values[i];
   }
 }
 
