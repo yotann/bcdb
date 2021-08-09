@@ -39,6 +39,8 @@ extern const char *optimized_version;
 extern const char *equivalent_pairs_in_group_version;
 extern const char *equivalent_pairs_version;
 
+void registerFuncs(Evaluator &evaluator);
+
 } // end namespace smout
 
 #endif // BCDB_OUTLINING_FUNCS_H

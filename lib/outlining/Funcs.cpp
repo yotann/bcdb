@@ -880,3 +880,18 @@ NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
   }
   return Node(total);
 }
+
+void smout::registerFuncs(Evaluator &evaluator) {
+  evaluator.registerFunc(candidates_version, &candidates);
+  evaluator.registerFunc(candidates_total_version, &candidates_total);
+  evaluator.registerFunc(grouped_candidates_version, &grouped_candidates);
+  evaluator.registerFunc(extracted_callees_version, &extracted_callees);
+  evaluator.registerFunc(unique_callees_version, &unique_callees);
+  evaluator.registerFunc(ilp_problem_version, &ilp_problem);
+  evaluator.registerFunc(greedy_solution_version, &greedy_solution);
+  evaluator.registerFunc(extracted_caller_version, &extracted_caller);
+  evaluator.registerFunc(optimized_version, &optimized);
+  evaluator.registerFunc(equivalent_pairs_in_group_version,
+                         &equivalent_pairs_in_group);
+  evaluator.registerFunc(equivalent_pairs_version, &equivalent_pairs);
+}
