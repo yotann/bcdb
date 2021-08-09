@@ -893,7 +893,10 @@ OutliningDependenceResults::getGlobalsUsed() {
       Value *value = worklist.pop_back_val();
       // Note that recursive references (to the same function) are handled the
       // same as other references.
-      if (GlobalValue *gv = dyn_cast<GlobalValue>(value)) {
+      if (Function *f = dyn_cast<Function>(value)) {
+        if (!f->getIntrinsicID())
+          used_set.insert(f);
+      } else if (GlobalValue *gv = dyn_cast<GlobalValue>(value)) {
         used_set.insert(gv);
       } else if (Constant *con = dyn_cast<Constant>(value)) {
         for (auto &op : con->operands())
