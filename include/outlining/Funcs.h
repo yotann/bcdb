@@ -24,6 +24,8 @@ NodeOrCID equivalent_pairs_in_group(Evaluator &evaluator, NodeRef options,
                                     NodeRef mod, NodeRef group);
 NodeOrCID equivalent_pairs(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
+extern const char *candidates_version;
+
 } // end namespace smout
 
 #endif // BCDB_OUTLINING_FUNCS_H

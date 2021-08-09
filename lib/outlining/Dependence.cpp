@@ -834,6 +834,37 @@ void OutliningDependenceResults::computeTransitiveClosures() {
   }
 }
 
+const std::vector<SmallPtrSet<GlobalValue *, 1>> &
+OutliningDependenceResults::getGlobalsUsed() {
+  if (globals_used_ready)
+    return globals_used;
+  globals_used.resize(Nodes.size());
+  for (size_t i = 0; i < Nodes.size(); ++i) {
+    Instruction *ins = dyn_cast<Instruction>(Nodes[i]);
+    if (!ins)
+      continue;
+    auto &used_set = globals_used[i];
+    SmallVector<Value *, 8> worklist;
+    for (auto &op : ins->operands())
+      worklist.push_back(op.get());
+    if (F.hasPersonalityFn() && ins->isEHPad())
+      worklist.push_back(F.getPersonalityFn());
+    while (!worklist.empty()) {
+      Value *value = worklist.pop_back_val();
+      // Note that recursive references (to the same function) are handled the
+      // same as other references.
+      if (GlobalValue *gv = dyn_cast<GlobalValue>(value)) {
+        used_set.insert(gv);
+      } else if (Constant *con = dyn_cast<Constant>(value)) {
+        for (auto &op : con->operands())
+          worklist.push_back(op);
+      }
+    }
+  }
+  globals_used_ready = true;
+  return globals_used;
+}
+
 AnalysisKey OutliningDependenceAnalysis::Key;
 
 OutliningDependenceResults

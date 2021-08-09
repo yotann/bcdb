@@ -93,7 +93,7 @@ static std::unique_ptr<Evaluator> createEvaluator() {
     thread_count = strategy_or_none->compute_thread_count();
   }
   auto evaluator = Evaluator::create(GetStoreUri(), thread_count);
-  evaluator->registerFunc("smout.candidates", &smout::candidates);
+  evaluator->registerFunc(smout::candidates_version, &smout::candidates);
   evaluator->registerFunc("smout.candidates_total", &smout::candidates_total);
   evaluator->registerFunc("smout.extracted.callee", &smout::extracted_callee);
   evaluator->registerFunc("smout.unique_callees", &smout::unique_callees);

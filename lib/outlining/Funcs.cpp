@@ -196,20 +196,24 @@ static Node getTypeName(const Type *type) {
 
 static std::string
 getGroupName(const OutliningCandidates::Candidate &candidate) {
-  Node node(node_list_arg, {Node(node_list_arg), Node(node_list_arg)});
+  Node node(node_list_arg,
+            {Node(node_list_arg), Node(node_list_arg), Node(node_map_arg)});
   Node &args = node[0];
   Node &results = node[1];
+  Node &globals = node[2];
   for (Type *type : candidate.arg_types)
     args.emplace_back(getTypeName(type));
   for (Type *type : candidate.result_types)
     results.emplace_back(getTypeName(type));
-
-  // FIXME: also consider the names of accessed globals.
+  for (GlobalValue *gv : candidate.globals_used)
+    globals[gv->getName()] = nullptr;
 
   std::vector<std::uint8_t> bytes;
   node.save_cbor(bytes);
   return Multibase::base64pad.encodeWithoutPrefix(bytes);
 }
+
+const char *smout::candidates_version = "smout.candidates_v0";
 
 NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
                             NodeRef func) {
@@ -249,7 +253,7 @@ NodeOrCID smout::candidates_total(Evaluator &evaluator, NodeRef options,
   std::vector<Future> func_candidates;
   for (auto &item : (*mod)["functions"].map_range())
     func_candidates.emplace_back(evaluator.evaluateAsync(
-        "smout.candidates", options, item.value().as<CID>()));
+        candidates_version, options, item.value().as<CID>()));
   std::size_t total = 0;
   for (auto &future : func_candidates) {
     for (auto &item : future->map_range())
@@ -297,7 +301,7 @@ NodeOrCID smout::unique_callees(Evaluator &evaluator,
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
-        func_cid, evaluator.evaluateAsync("smout.candidates",
+        func_cid, evaluator.evaluateAsync(candidates_version,
                                           candidates_options, func_cid));
   }
   std::vector<Future> callees;
@@ -325,7 +329,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
         func_cid,
-        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+        evaluator.evaluateAsync(candidates_version, options, func_cid));
   }
 
   std::vector<Future> callees;
@@ -491,7 +495,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
         func_cid,
-        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+        evaluator.evaluateAsync(candidates_version, options, func_cid));
   }
 
   // Get candidates.
@@ -750,7 +754,7 @@ NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
         func_cid,
-        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+        evaluator.evaluateAsync(candidates_version, options, func_cid));
   }
   std::vector<Future> callees;
   for (auto &future : func_candidates) {
@@ -802,7 +806,7 @@ NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
     auto func_cid = item.value().as<CID>();
     func_candidates.emplace_back(
         func_cid,
-        evaluator.evaluateAsync("smout.candidates", options, func_cid));
+        evaluator.evaluateAsync(candidates_version, options, func_cid));
   }
   StringMap<unsigned> group_count;
   for (auto &future : func_candidates) {

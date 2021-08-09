@@ -61,7 +61,7 @@ OutliningCandidates::OutliningCandidates(Function &F,
         size_t last = first;
         last_str.getAsInteger(10, last);
         for (size_t i = first; i <= last; ++i)
-          candidate.bv.set(i);
+          addNode(candidate, i);
       }
       if (!OutDep.isOutlinable(candidate.bv))
         report_fatal_error("Specified nodes cannot be outlined",
@@ -97,8 +97,9 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
   // in candidate.bv.
   Candidate candidate;
   SparseBitVector<> deps;
-  candidate.bv.set(i);
-  candidate.bv |= OutDep.ForcedDepends[i];
+  addNode(candidate, i);
+  for (auto j : OutDep.ForcedDepends[i])
+    addNode(candidate, j);
   for (auto j : candidate.bv)
     deps |= OutDep.DominatingDepends[j];
   deps.intersectWithComplement(candidate.bv);
@@ -129,7 +130,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
     bool redundant = false;
     do {
       // Add the node and its dependences.
-      assert(candidate.bv.test_and_set(next_dep));
+      assert(addNode(candidate, next_dep));
       deps |= OutDep.DominatingDepends[next_dep];
       for (auto j : OutDep.ForcedDepends[next_dep]) {
         if (j == i) {
@@ -139,7 +140,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
           redundant = true;
           break;
         }
-        if (candidate.bv.test_and_set(j))
+        if (addNode(candidate, j))
           deps |= OutDep.DominatingDepends[j];
       }
       if (redundant)
@@ -150,8 +151,8 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
       // next_dep. These depends, in turn, may have their own forced depends,
       // causing new_op to move again. We need to keep looping until we've
       // handled all dependences up to new_op.
-      deps.intersectWithComplement(candidate.bv);
       new_op = candidate.bv.find_first();
+      deps.intersectWithComplement(candidate.bv);
       next_dep = deps.find_last();
     } while (next_dep >= new_op);
 
@@ -177,7 +178,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
                                               ->getFirstNonPHI()]));
   bool already_in_main_candidate = true;
   for (int j = i; j >= first_contig; j--) {
-    contig_candidate.bv.set(j);
+    addNode(contig_candidate, j);
     if (OutDep.PreventsOutlining.test(j))
       break;
     if (!contig_candidate.bv.contains(OutDep.ForcedDepends[j]))
@@ -235,6 +236,15 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
   }
 
   Candidates.emplace_back(candidate);
+}
+
+bool OutliningCandidates::addNode(Candidate &candidate, size_t i) {
+  bool changed = candidate.bv.test_and_set(i);
+  if (!changed)
+    return false;
+  for (GlobalValue *gv : OutDep.getGlobalsUsed()[i])
+    candidate.globals_used.insert(gv);
+  return true;
 }
 
 void OutliningCandidates::print(raw_ostream &OS) const {

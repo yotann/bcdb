@@ -237,6 +237,7 @@ public:
   Node &operator=(Node &&Other) noexcept = default;
 
   Node(std::nullptr_t);
+  Node &operator=(std::nullptr_t);
 
   Node(bool val);
 

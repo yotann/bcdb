@@ -3,6 +3,7 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
@@ -18,6 +19,7 @@ class BasicBlock;
 class DominatorTree;
 class FalseMemorySSA;
 class Function;
+class GlobalValue;
 class Instruction;
 class MemoryPhi;
 class MemorySSA;
@@ -98,6 +100,8 @@ public:
   // the outlining point.
   std::vector<SparseBitVector<>> DominatingDepends;
 
+  const std::vector<SmallPtrSet<GlobalValue *, 1>> &getGlobalsUsed();
+
   SparseBitVector<> all_allocas;
   bool prevent_outlining_allocas = false;
 
@@ -118,6 +122,9 @@ private:
   void analyzeMemoryPhi(MemoryPhi *MPhi);
   void analyzeInstruction(Instruction *I);
   void finalizeDepends();
+
+  std::vector<SmallPtrSet<GlobalValue *, 1>> globals_used;
+  bool globals_used_ready = false;
 };
 
 class OutliningDependenceAnalysis

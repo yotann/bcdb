@@ -2,6 +2,7 @@
 #define BCDB_OUTLINING_CANDIDATES_H
 
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/IR/Function.h>
@@ -16,6 +17,7 @@
 namespace llvm {
 class AnalysisUsage;
 class Function;
+class GlobalValue;
 class Module;
 class raw_ostream;
 } // end namespace llvm
@@ -32,6 +34,7 @@ public:
     int callee_size = 0;
     SmallVector<Type *, 8> arg_types;
     SmallVector<Type *, 8> result_types;
+    SmallPtrSet<GlobalValue *, 1> globals_used;
   };
 
   // size_model may be nullptr to disable profitability checks.
@@ -49,6 +52,7 @@ public:
 private:
   void generateCandidatesEndingAt(size_t i);
   void emitCandidate(Candidate &candidate);
+  bool addNode(Candidate &candidate, size_t i);
 };
 
 class OutliningCandidatesAnalysis

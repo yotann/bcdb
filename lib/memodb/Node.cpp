@@ -33,6 +33,8 @@ Node::Node() : variant_() {}
 
 Node::Node(std::nullptr_t) : variant_() {}
 
+Node &Node::operator=(std::nullptr_t) { return *this = Node(nullptr); }
+
 Node::Node(bool val) : variant_(val) {}
 
 Node::Node(double Float) : variant_(Float) {}
