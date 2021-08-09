@@ -49,7 +49,7 @@ const char *smout::grouped_callees_for_function_version =
 const char *smout::grouped_callees_version = "smout.grouped_callees_v0";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution";
-const char *smout::extracted_caller_version = "smout.extracted.caller";
+const char *smout::extracted_caller_version = "smout.extracted_caller_v0";
 const char *smout::optimized_version = "smout.optimized";
 const char *smout::equivalent_pairs_in_group_version =
     "smout.equivalent_pairs_in_group";
@@ -410,29 +410,38 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
       futures.back().second.wait();
     }
   }
-  StringMap<StringSet<>> group_unique_callees;
+  StringMap<size_t> group_unique_callees;
+  StringMap<size_t> group_callees_without_duplicates;
   StringMap<Node> groups;
   for (auto &item : futures) {
     const CID &func_cid = item.first;
     Future &callees_for_function = item.second;
     for (auto &item : callees_for_function->map_range()) {
       auto &group = groups[item.key()];
-      auto &unique_callees = group_unique_callees[item.key()];
+      StringSet<> unique_callees;
+      StringSet<> duplicated_callees;
       if (group.is_null())
         group = Node(node_list_arg);
       for (const auto &candidate : item.value().list_range()) {
-        unique_callees.insert(cid_key(candidate["callee"].as<CID>()));
+        auto key = cid_key(candidate["callee"].as<CID>());
+        if (!unique_callees.insert(key).second)
+          duplicated_callees.insert(key);
         Node candidate_changed = candidate;
         candidate_changed["function"] = Node(func_cid);
         group.emplace_back(candidate_changed);
       }
+      group_unique_callees[item.key()] = unique_callees.size();
+      group_callees_without_duplicates[item.key()] =
+          unique_callees.size() - duplicated_callees.size();
     }
   }
   Node result(node_map_arg);
   for (auto &item : groups) {
     Node group = (*grouped_candidates)[item.getKey()];
     group["members"] = Node(evaluator.getStore().put(item.getValue()));
-    group["num_unique_callees"] = group_unique_callees[item.getKey()].size();
+    group["num_unique_callees"] = group_unique_callees[item.getKey()];
+    group["num_callees_without_duplicates"] =
+        group_callees_without_duplicates[item.getKey()];
     result[item.getKey()] = group;
   }
   return result;
@@ -440,6 +449,7 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
 
 NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
                              NodeRef mod) {
+  report_fatal_error("This part of BCDB is broken and needs to be updated!");
   std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
@@ -606,6 +616,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
 
 NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
                                  NodeRef mod) {
+  report_fatal_error("This part of BCDB is broken and needs to be updated!");
   std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
@@ -773,9 +784,6 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
     }
   }
 
-  // FIXME: run at least SimplifyCFG, and infer function attributes (including
-  // on callees).
-
   bcdb::Splitter splitter(*m);
   auto mpart = splitter.SplitGlobal(&f);
   SmallVector<char, 0> buffer;
@@ -784,6 +792,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
 }
 
 NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
+  report_fatal_error("This part of BCDB is broken and needs to be updated!");
   NodeRef solution = evaluator.evaluate(greedy_solution_version, options, mod);
   Node mod_node = *mod;
 
@@ -861,6 +870,7 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
 NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
                                            NodeRef options, NodeRef mod,
                                            NodeRef group) {
+  report_fatal_error("This part of BCDB is broken and needs to be updated!");
   std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
@@ -909,10 +919,7 @@ NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
 
 NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
                                   NodeRef mod) {
-  // TODO: have a separate func that groups candidates and stores a separate
-  // Node for each group. Actually, maybe smout.candidates should generate a
-  // map from group name to CID, and another func should combine these maps for
-  // all functions.
+  report_fatal_error("This part of BCDB is broken and needs to be updated!");
   std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();

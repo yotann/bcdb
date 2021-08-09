@@ -76,20 +76,7 @@ functions, and syntactically identical functions are deduplicated.
 It's okay to add multiple bitcode modules to the same store. You only need to
 do this step once per module.
 
-### 4. Invalidate old cached results
-
-BCDB caches the results of different parts of the outlining process. When you
-upgrade BCDB, sometimes the old cached results will be incompatible with the
-new outlining code. You can delete old cached results like this:
-
-```sh
-# List all funcs that have cached results.
-memodb list-funcs
-# Invalidate some funcs
-memodb invalidate smout.candidates smout.candidates_total smout.greedy_solution smout.optimized
-```
-
-### 5. The main outlining process
+### 4. The main outlining process
 
 It's okay to skip some of these steps; even if you don't explicitly run them,
 they will automatically be evaluated if necessary.
@@ -102,7 +89,7 @@ to access. By default they will use one thread per core, but you can use the
 
 This will identify outlining candidates in every function used in the module.
 When it finishes, it prints the total number of candidates. Func names:
-`smout.candidates` and `smout.candidates_total`.
+`smout.candidates_vN` and `smout.grouped_candidates_vN`.
 
 ```sh
 smout candidates --name=ppmtomitsu
@@ -114,14 +101,14 @@ This will extract the outlined callee function for each candidate. Some of the
 callees will be syntactically identical, so they will be deduplicated by the
 BCDB (they will get the same CID). When it finishes, this command prints the
 number of unique callees, which is normally smaller than the total number of
-candidates because of duplicates. Func names: `smout.extracted.callee` and
-`smout.unique_callees`.
+candidates because of duplicates. Func names: `smout.extracted_callees_vN`,
+`smout.grouped_callees_for_function_vN`, `smout.grouped_callees_vN`.
 
 ```sh
 smout extract-callees --name=ppmtomitsu
 ```
 
-#### Find greedy solution
+#### Find greedy solution (BROKEN)
 
 This step decides which candidates should actually be outlined, avoiding
 overlaps. When it finishes, it prints the chosen solution, including a
@@ -132,7 +119,7 @@ module. Func name: `smout.greedy_solution`.
 smout solve-greedy --name=ppmtomitsu
 ```
 
-#### Perform full outlining
+#### Perform full outlining (BROKEN)
 
 This step uses the greedy solution to actually perform outlining and link
 everything together into one module. When it finishes, it prints the CID of the
@@ -142,7 +129,7 @@ optimized module. Func name: `smout.greedy_solution`.
 smout optimize --name=ppmtomitsu
 
 # you should copy the CID from the output of smout optimize
-bcdb get /cid/uAXG... > ppmtomitsu-optimized.bc
+bcdb get /cid/uAXG... | opt --simplifycfg --function-attrs > ppmtomitsu-optimized.bc
 
 # compile both versions to object files
 llc --filetype=obj ppmtomitsu.bc -o ppmtomitsu.o
@@ -172,7 +159,7 @@ You can also run the optimized command and make sure its behavior is correct:
 
 ### Other analyses
 
-#### Equivalence checking
+#### Equivalence checking (BROKEN)
 
 The equivalence checker uses a specially modified version of Alive2. The Alive2
 checks are done by a separate process, so it needs to connect to
@@ -215,7 +202,7 @@ MEMODB_STORE=http://127.0.0.1:29179 smout equivalence --name=ppmtomitsu
 
 Remember to kill memodb-server and alive-worker when you're done with them.
 
-#### ILP Problem
+#### ILP Problem (BROKEN)
 
 TODO: explain.
 
@@ -233,19 +220,4 @@ curl http://127.0.0.1:29179/call
 ```
 
 You can use the [REST API](../memodb/rest-api.md) to explore the outlining
-results. The important functions are:
-
-- `smout.candidates`: for each original function, a list of all the possible
-  outlining candidates. The candidates are grouped by the expected type of the
-  outlined callee function. Each candidate has these items:
-  - `nodes` indicates which ranges of instructions would be outlined. For
-    example, `[0, 1, 9, 12]` means that instructions 0, 9, 10, and 11 would be
-    outlined.
-  - `callee_size` is the estimated number of bytes added in order to create the
-    outlined callee function.
-  - `caller_savings` is the estimated number of bytes saved in the outlined
-    caller function by performing outlining.
-- `smout.extracted.callee`: for each candidate, the LLVM bitcode of the
-  outlined callee function. If two candidates have the same result for
-  `smout.extracted.callee`, they can both be outlined sharing just one copy of
-  the callee.
+results.

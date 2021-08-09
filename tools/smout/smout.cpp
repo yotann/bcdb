@@ -108,6 +108,7 @@ static int Candidates() {
                                        getCandidatesOptions(), mod);
   unsigned total = 0, total_maybe_profitable = 0;
   unsigned group_count = result->size();
+  unsigned group_count_singleton = 0;
   unsigned group_count_maybe_profitable = 0;
   unsigned largest_group_size = 0;
   std::string largest_group_name;
@@ -121,16 +122,24 @@ static int Candidates() {
       largest_group_size = num_members;
       largest_group_name = item.key().str();
     }
+    if (num_members == 1)
+      group_count_singleton++;
     if (total_caller_savings > min_callee_size) {
       group_count_maybe_profitable += 1;
       total_maybe_profitable += num_members;
     }
   }
-  llvm::outs() << "\nTotal candidates: " << total << " in " << group_count
-               << " groups.\n";
-  llvm::outs() << "Candidates that might be profitable: "
-               << total_maybe_profitable << " in "
-               << group_count_maybe_profitable << " groups.\n";
+  llvm::outs() << "\nTotal groups: " << group_count << ", containing " << total
+               << " candidates\n";
+  llvm::outs() << "- singleton groups: " << group_count_singleton << "\n";
+  llvm::outs() << "- other groups that can't possibly be profitable (according "
+                  "to size estimates): "
+               << (group_count - group_count_maybe_profitable -
+                   group_count_singleton)
+               << "\n";
+  llvm::outs() << "- possibly profitable groups: "
+               << group_count_maybe_profitable << ", containing "
+               << total_maybe_profitable << " candidates\n";
   llvm::outs() << "Largest group (" << largest_group_size
                << " candidates): " << largest_group_name << "\n";
   return 0;
@@ -165,17 +174,23 @@ static int ExtractCallees() {
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
   NodeRef result = evaluator->evaluate(smout::grouped_callees_version,
                                        getCandidatesOptions(), mod);
-  unsigned total = 0, unique = 0;
+  unsigned total = 0, unique = 0, without_duplicates = 0;
   unsigned group_count = result->size();
   for (const auto &item : result->map_range()) {
     unsigned num_members = item.value()["num_members"].as<unsigned>();
     unsigned num_unique_callees =
         item.value()["num_unique_callees"].as<unsigned>();
+    unsigned num_callees_without_duplicates =
+        item.value()["num_callees_without_duplicates"].as<unsigned>();
     total += num_members;
     unique += num_unique_callees;
+    without_duplicates += num_callees_without_duplicates;
   }
-  llvm::outs() << "\nTotal callees: " << unique << " unique of " << total
-               << " total in " << group_count << " groups.\n";
+  llvm::outs() << "\nTotal extracted callees: " << total << " callees in "
+               << group_count << " groups\n";
+  llvm::outs() << "- " << unique << " unique callees\n";
+  llvm::outs() << "- " << without_duplicates
+               << " callees without any duplicates\n";
   return 0;
 }
 
