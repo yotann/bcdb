@@ -42,8 +42,9 @@ using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 
 const char *smout::candidates_version = "smout.candidates_v0";
-const char *smout::candidates_total_version = "smout.candidates_total";
-const char *smout::extracted_callee_version = "smout.extracted.callee";
+const char *smout::candidates_total_version = "smout.candidates_total_v0";
+const char *smout::grouped_candidates_version = "smout.grouped_candidates_v0";
+const char *smout::extracted_callees_version = "smout.extracted_callees_v0";
 const char *smout::unique_callees_version = "smout.unique_callees";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution";
@@ -277,23 +278,66 @@ NodeOrCID smout::candidates_total(Evaluator &evaluator, NodeRef options,
   return Node(total);
 }
 
+NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
+                                    NodeRef mod) {
+  std::vector<std::pair<CID, Future>> func_candidates;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    func_candidates.emplace_back(
+        func_cid,
+        evaluator.evaluateAsync(candidates_version, options, func_cid));
+  }
+  struct Group {
+    size_t total_caller_savings = 0;
+    size_t min_callee_size = 1000000000;
+    Node members = Node(node_list_arg);
+  };
+  StringMap<Group> groups;
+  for (auto &func_item : func_candidates) {
+    const CID &func_cid = func_item.first;
+    Future &result = func_item.second;
+    for (auto &item : result->map_range()) {
+      Group &group = groups[item.key()];
+      for (auto &candidate : item.value().list_range()) {
+        group.total_caller_savings += candidate["caller_savings"].as<size_t>();
+        group.min_callee_size = std::min(group.min_callee_size,
+                                         candidate["callee_size"].as<size_t>());
+        Node candidate_changed = candidate;
+        candidate_changed["function"] = Node(func_cid);
+        group.members.emplace_back(std::move(candidate_changed));
+      }
+    }
+    result.freeNode();
+  }
+  Node groups_node(node_map_arg);
+  for (auto &item : groups) {
+    Group &group = item.getValue();
+    groups_node[item.getKey()] =
+        Node(node_map_arg,
+             {{"total_caller_savings", group.total_caller_savings},
+              {"min_callee_size", group.min_callee_size},
+              {"num_members", group.members.size()},
+              {"members", Node(evaluator.getStore().put(group.members))}});
+  }
+  return groups_node;
+}
+
 // FIXME: This func recalculates the OutliningDependenceAnalysis for every
 // candidate. It would be much, much faster to batch together candidates from
 // the same function and only calculate the OutliningDependenceAnalysis once
 // per batch.
-NodeOrCID smout::extracted_callee(Evaluator &evaluator, NodeRef func,
-                                  NodeRef nodes) {
-  ExitOnError Err("smout.extracted.callee: ");
+NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
+                                   NodeRef node_sets) {
+  ExitOnError Err("smout.extracted_callees: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
 
-  SparseBitVector<> bv = decodeBitVector(*nodes);
-
   FunctionAnalysisManager am = makeFAM();
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
+  SparseBitVector<> bv = decodeBitVector(*node_sets);
   OutliningCalleeExtractor extractor(f, deps, bv);
   Function *callee = extractor.createDefinition();
 
@@ -322,7 +366,7 @@ NodeOrCID smout::unique_callees(Evaluator &evaluator,
     for (auto &item : result->map_range())
       for (auto &candidate : item.value().list_range())
         callees.emplace_back(evaluator.evaluateAsync(
-            extracted_callee_version, func_cid, candidate["nodes"]));
+            extracted_callees_version, func_cid, candidate["nodes"]));
     result.freeNode();
   }
   StringSet unique;
@@ -365,7 +409,7 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
           overlaps[i].push_back(m);
         }
         callees.emplace_back(evaluator.evaluateAsync(
-            extracted_callee_version, func_cid, candidate["nodes"]));
+            extracted_callees_version, func_cid, candidate["nodes"]));
       }
     }
     result.freeNode();
@@ -534,7 +578,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
             func_overlaps.resize(i + 1);
           func_overlaps[i].push_back(m);
         }
-        callees.emplace_back(evaluator.evaluateAsync(extracted_callee_version,
+        callees.emplace_back(evaluator.evaluateAsync(extracted_callees_version,
                                                      func_cid, nodes_m[m]));
       }
     }
@@ -770,7 +814,7 @@ NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
     for (auto &item : result->map_range())
       for (auto &candidate : item.value().list_range())
         callees.emplace_back(evaluator.evaluateAsync(
-            extracted_callee_version, func_cid, candidate["nodes"]));
+            extracted_callees_version, func_cid, candidate["nodes"]));
     result.freeNode();
   }
   func_candidates.clear();

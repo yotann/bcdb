@@ -96,8 +96,10 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   evaluator->registerFunc(smout::candidates_version, &smout::candidates);
   evaluator->registerFunc(smout::candidates_total_version,
                           &smout::candidates_total);
-  evaluator->registerFunc(smout::extracted_callee_version,
-                          &smout::extracted_callee);
+  evaluator->registerFunc(smout::grouped_candidates_version,
+                          &smout::grouped_candidates);
+  evaluator->registerFunc(smout::extracted_callees_version,
+                          &smout::extracted_callees);
   evaluator->registerFunc(smout::unique_callees_version,
                           &smout::unique_callees);
   evaluator->registerFunc(smout::ilp_problem_version, &smout::ilp_problem);

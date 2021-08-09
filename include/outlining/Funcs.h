@@ -13,7 +13,10 @@ using memodb::NodeRef;
 
 NodeOrCID candidates(Evaluator &evaluator, NodeRef options, NodeRef func);
 NodeOrCID candidates_total(Evaluator &evaluator, NodeRef options, NodeRef mod);
-NodeOrCID extracted_callee(Evaluator &evaluator, NodeRef func, NodeRef nodes);
+NodeOrCID grouped_candidates(Evaluator &evaluator, NodeRef options,
+                             NodeRef mod);
+NodeOrCID extracted_callees(Evaluator &evaluator, NodeRef func,
+                            NodeRef node_sets);
 NodeOrCID unique_callees(Evaluator &evaluator, NodeRef candidates_options,
                          NodeRef mod);
 NodeOrCID ilp_problem(Evaluator &evaluator, NodeRef options, NodeRef mod);
@@ -26,7 +29,8 @@ NodeOrCID equivalent_pairs(Evaluator &evaluator, NodeRef options, NodeRef mod);
 
 extern const char *candidates_version;
 extern const char *candidates_total_version;
-extern const char *extracted_callee_version;
+extern const char *grouped_candidates_version;
+extern const char *extracted_callees_version;
 extern const char *unique_callees_version;
 extern const char *ilp_problem_version;
 extern const char *greedy_solution_version;
