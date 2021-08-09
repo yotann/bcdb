@@ -45,6 +45,9 @@ const char *smout::candidates_version = "smout.candidates_v0";
 const char *smout::candidates_total_version = "smout.candidates_total_v0";
 const char *smout::grouped_candidates_version = "smout.grouped_candidates_v0";
 const char *smout::extracted_callees_version = "smout.extracted_callees_v0";
+const char *smout::grouped_callees_for_function_version =
+    "smout.grouped_callees_for_function_v0";
+const char *smout::grouped_callees_version = "smout.grouped_callees_v0";
 const char *smout::unique_callees_version = "smout.unique_callees";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution";
@@ -237,6 +240,12 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
   return Multibase::base64pad.encodeWithoutPrefix(bytes);
 }
 
+static bool isGroupWorthExtracting(NodeRef &options, const Node &group) {
+  size_t min_callee_size = group["min_callee_size"].as<size_t>();
+  size_t total_caller_savings = group["total_caller_savings"].as<size_t>();
+  return total_caller_savings > min_callee_size;
+}
+
 NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
                             NodeRef func) {
   ExitOnError Err("smout.candidates: ");
@@ -322,10 +331,6 @@ NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
   return groups_node;
 }
 
-// FIXME: This func recalculates the OutliningDependenceAnalysis for every
-// candidate. It would be much, much faster to batch together candidates from
-// the same function and only calculate the OutliningDependenceAnalysis once
-// per batch.
 NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
                                    NodeRef node_sets) {
   ExitOnError Err("smout.extracted_callees: ");
@@ -333,21 +338,121 @@ NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
   auto m = Err(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
-
   FunctionAnalysisManager am = makeFAM();
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
-  SparseBitVector<> bv = decodeBitVector(*node_sets);
-  OutliningCalleeExtractor extractor(f, deps, bv);
-  Function *callee = extractor.createDefinition();
-
-  // FIXME: run at least SimplifyCFG, and infer function attributes.
+  std::vector<Function *> callees;
+  for (const auto &nodes : node_sets->list_range()) {
+    SparseBitVector<> bv = decodeBitVector(nodes);
+    OutliningCalleeExtractor extractor(f, deps, bv);
+    callees.push_back(extractor.createDefinition());
+    // FIXME: run at least SimplifyCFG, and infer function attributes.
+  }
 
   bcdb::Splitter splitter(*m);
-  auto mpart = splitter.SplitGlobal(callee);
-  SmallVector<char, 0> buffer;
-  bcdb::WriteAlignedModule(*mpart, buffer);
-  return Node(byte_string_arg, buffer);
+  Node result(node_list_arg);
+  for (Function *callee : callees) {
+    auto mpart = splitter.SplitGlobal(callee);
+    SmallVector<char, 0> buffer;
+    bcdb::WriteAlignedModule(*mpart, buffer);
+    result.emplace_back(
+        Node(evaluator.getStore().put(Node(byte_string_arg, buffer))));
+  }
+  assert(node_sets->size() == result.size());
+  return result;
+}
+
+NodeOrCID smout::grouped_callees_for_function(Evaluator &evaluator,
+                                              NodeRef options,
+                                              NodeRef grouped_candidates,
+                                              NodeRef func) {
+  auto candidates = evaluator.evaluate(candidates_version, options, func);
+  std::vector<std::string> candidate_group;
+  std::vector<Node> candidate_node;
+  for (auto &item : candidates->map_range()) {
+    const auto &group_key = item.key();
+    if (!isGroupWorthExtracting(options, (*grouped_candidates)[group_key]))
+      continue;
+    for (auto &candidate : item.value().list_range()) {
+      candidate_group.emplace_back(group_key);
+      candidate_node.emplace_back(candidate);
+    }
+  }
+  candidates.freeNode();
+
+  // If we only extract one callee at once, we have to run
+  // OutliningDependenceAnalysis each time, which is too slow. Instead, extract
+  // BATCH_SIZE callees at once.
+  static const size_t BATCH_SIZE = 64;
+  std::vector<Future> futures;
+  for (size_t i = 0; i < candidate_node.size(); i += BATCH_SIZE) {
+    Node node_sets(node_list_arg);
+    for (size_t j = 0; j < BATCH_SIZE && i + j < candidate_node.size(); ++j)
+      node_sets.emplace_back(candidate_node[i + j]["nodes"]);
+    futures.emplace_back(
+        evaluator.evaluateAsync(extracted_callees_version, func, node_sets));
+  }
+
+  Node result(node_map_arg);
+  for (size_t i = 0; i < candidate_node.size(); i += BATCH_SIZE) {
+    Future &callees = futures[i / BATCH_SIZE];
+    for (size_t j = 0; j < BATCH_SIZE && i + j < candidate_node.size(); ++j) {
+      Node &group = result[candidate_group[i + j]];
+      if (group.is_null())
+        group = Node(node_list_arg);
+      Node &node = candidate_node[i + j];
+      node["callee"] = (*callees)[j];
+      group.emplace_back(node);
+    }
+  }
+  return result;
+}
+
+NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
+                                 NodeRef mod) {
+  StringSet original_cids;
+  auto grouped_candidates =
+      evaluator.evaluate(grouped_candidates_version, options, mod);
+  std::vector<std::pair<CID, Future>> futures;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    if (original_cids.insert(cid_key(func_cid)).second) {
+      futures.emplace_back(
+          func_cid,
+          evaluator.evaluateAsync(grouped_callees_for_function_version, options,
+                                  grouped_candidates, func_cid));
+      // TODO: For now, we can only evaluate one call at a time; otherwise, we
+      // might deadlock with all threads waiting on jobs and no new threads
+      // available.
+      futures.back().second.wait();
+    }
+  }
+  StringMap<StringSet<>> group_unique_callees;
+  StringMap<Node> groups;
+  for (auto &item : futures) {
+    const CID &func_cid = item.first;
+    Future &callees_for_function = item.second;
+    for (auto &item : callees_for_function->map_range()) {
+      auto &group = groups[item.key()];
+      auto &unique_callees = group_unique_callees[item.key()];
+      if (group.is_null())
+        group = Node(node_list_arg);
+      for (const auto &candidate : item.value().list_range()) {
+        unique_callees.insert(cid_key(candidate["callee"].as<CID>()));
+        Node candidate_changed = candidate;
+        candidate_changed["function"] = Node(func_cid);
+        group.emplace_back(candidate_changed);
+      }
+    }
+  }
+  Node result(node_map_arg);
+  for (auto &item : groups) {
+    Node group = (*grouped_candidates)[item.getKey()];
+    group["members"] = Node(evaluator.getStore().put(item.getValue()));
+    group["num_unique_callees"] = group_unique_callees[item.getKey()].size();
+    result[item.getKey()] = group;
+  }
+  return result;
 }
 
 NodeOrCID smout::unique_callees(Evaluator &evaluator,
@@ -886,6 +991,9 @@ void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(candidates_total_version, &candidates_total);
   evaluator.registerFunc(grouped_candidates_version, &grouped_candidates);
   evaluator.registerFunc(extracted_callees_version, &extracted_callees);
+  evaluator.registerFunc(grouped_callees_for_function_version,
+                         &grouped_callees_for_function);
+  evaluator.registerFunc(grouped_callees_version, &grouped_callees);
   evaluator.registerFunc(unique_callees_version, &unique_callees);
   evaluator.registerFunc(ilp_problem_version, &ilp_problem);
   evaluator.registerFunc(greedy_solution_version, &greedy_solution);
