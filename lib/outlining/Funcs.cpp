@@ -399,16 +399,11 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
   std::vector<std::pair<CID, Future>> futures;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
-    if (original_cids.insert(cid_key(func_cid)).second) {
+    if (original_cids.insert(cid_key(func_cid)).second)
       futures.emplace_back(
           func_cid,
           evaluator.evaluateAsync(grouped_callees_for_function_version, options,
                                   grouped_candidates, func_cid));
-      // TODO: For now, we can only evaluate one call at a time; otherwise, we
-      // might deadlock with all threads waiting on jobs and no new threads
-      // available.
-      futures.back().second.wait();
-    }
   }
   StringMap<size_t> group_unique_callees;
   StringMap<size_t> group_callees_without_duplicates;

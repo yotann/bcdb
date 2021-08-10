@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <semaphore.h>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -383,6 +384,8 @@ public:
   void registerFunc(
       llvm::StringRef name,
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
+  void handleFutureStartsWaiting() override;
+  void handleFutureStopsWaiting() override;
 
 private:
   friend struct AsyncRequest;
@@ -393,7 +396,9 @@ private:
   std::optional<CID> worker_info_cid = std::nullopt;
   std::mutex worker_info_cid_mutex;
 
+  std::mutex threads_mutex;
   std::vector<std::thread> threads;
+  sem_t threads_free;
   std::vector<std::unique_ptr<nng_aio, AioDeleter>> thread_aios;
   std::atomic<bool> work_done = false;
 
@@ -404,19 +409,27 @@ private:
   void workerThreadImpl(nng_aio *aio);
 
   void printProgress();
+
+  void addThread();
 };
 } // end anonymous namespace
 
 ClientEvaluator::ClientEvaluator(std::unique_ptr<HTTPStore> store,
                                  unsigned num_threads)
     : store(std::move(store)) {
+  sem_init(&threads_free, 0, 0);
+  auto lock = std::lock_guard(threads_mutex);
   threads.reserve(num_threads);
   thread_aios.reserve(num_threads);
-  for (unsigned i = 0; i < num_threads; ++i) {
-    thread_aios.emplace_back(aio_alloc());
-    threads.emplace_back(&ClientEvaluator::workerThreadImpl, this,
-                         thread_aios.back().get());
-  }
+  for (unsigned i = 0; i < num_threads; ++i)
+    addThread();
+}
+
+void ClientEvaluator::addThread() {
+  // Caller must old threads_mutex.
+  thread_aios.emplace_back(aio_alloc());
+  threads.emplace_back(&ClientEvaluator::workerThreadImpl, this,
+                       thread_aios.back().get());
 }
 
 ClientEvaluator::~ClientEvaluator() {
@@ -620,6 +633,18 @@ void ClientEvaluator::registerFunc(
   lock = std::unique_lock(worker_info_cid_mutex);
   worker_info_cid = cid;
 }
+
+void ClientEvaluator::handleFutureStartsWaiting() {
+  sem_post(&threads_free);
+  int free;
+  sem_getvalue(&threads_free, &free);
+  if (free > 0) {
+    auto lock = std::lock_guard(threads_mutex);
+    addThread();
+  }
+}
+
+void ClientEvaluator::handleFutureStopsWaiting() { sem_wait(&threads_free); }
 
 void ClientEvaluator::printProgress() {
   // Load atomics in this order to avoid getting negative values.

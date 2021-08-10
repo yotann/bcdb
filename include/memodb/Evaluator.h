@@ -13,6 +13,8 @@
 
 namespace memodb {
 
+class Evaluator;
+
 // A future returned by Evaluator.
 class Future {
 public:
@@ -31,8 +33,9 @@ public:
 
 private:
   friend class Evaluator;
-  explicit Future(std::shared_future<NodeRef> &&future);
+  explicit Future(Evaluator *evaluator, std::shared_future<NodeRef> &&future);
 
+  Evaluator *evaluator;
   std::shared_future<NodeRef> future;
 };
 
@@ -88,6 +91,9 @@ public:
     registerFunc(name,
                  funcImpl(name, func, std::index_sequence_for<Params...>{}));
   }
+
+  virtual void handleFutureStartsWaiting();
+  virtual void handleFutureStopsWaiting();
 
 protected:
   Future makeFuture(std::shared_future<NodeRef> &&future);
