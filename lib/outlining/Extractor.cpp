@@ -43,11 +43,17 @@ static bool compareTypes(Type *t0, Type *t1) {
   return false;
 }
 
-static Type *simplifyType(Type *type) {
+static Type *simplifyType(Value *value) {
+  if (value->isSwiftError()) {
+    // We can't bitcast swift errors.
+    return value->getType();
+  }
+
   // TODO: We could recursively process fields inside structs, vectors, and
   // arrays, in order to find more duplicates. But there are probably very few
   // duplicates that can be found that way, and converting the values back and
   // forth would be difficult (especially for structs).
+  Type *type = value->getType();
   if (!type->isPointerTy())
     return type;
   return Type::getInt8PtrTy(type->getContext(), type->getPointerAddressSpace());
@@ -164,8 +170,7 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
   // Sort input values by type. Values with the same type remain sorted in the
   // order they are used.
   auto value_order = [](Value *v0, Value *v1) {
-    return compareTypes(simplifyType(v0->getType()),
-                        simplifyType(v1->getType()));
+    return compareTypes(simplifyType(v0), simplifyType(v1));
   };
   input_values = input_set.takeVector();
   std::stable_sort(input_values.begin(), input_values.end(), value_order);
@@ -195,13 +200,13 @@ unsigned OutliningCalleeExtractor::getNumReturnValues() const {
 void OutliningCalleeExtractor::getArgTypes(
     SmallVectorImpl<Type *> &types) const {
   for (Value *value : input_values)
-    types.push_back(simplifyType(value->getType()));
+    types.push_back(simplifyType(value));
 }
 
 void OutliningCalleeExtractor::getResultTypes(
     SmallVectorImpl<Type *> &types) const {
   for (Value *value : output_values)
-    types.push_back(simplifyType(value->getType()));
+    types.push_back(simplifyType(value));
 }
 
 Function *OutliningCalleeExtractor::createDeclaration() {
@@ -248,6 +253,11 @@ Function *OutliningCalleeExtractor::createDeclaration() {
       }
     }
   }
+
+  assert(input_values.size() == new_callee->arg_size());
+  for (size_t i = 0; i < input_values.size(); ++i)
+    if (input_values[i]->isSwiftError())
+      new_callee->addParamAttr(i, Attribute::SwiftError);
 
   return new_callee;
 }
@@ -424,7 +434,7 @@ Function *OutliningCalleeExtractor::createDefinition() {
   unsigned ResultI = 0;
   for (Value *orig_value : output_values) {
     Value *new_value = VMap[orig_value];
-    Type *new_type = simplifyType(new_value->getType());
+    Type *new_type = simplifyType(new_value);
     if (new_value->getType() != new_type)
       new_value = new BitCastInst(new_value, new_type, "", ExitBlock);
     ResultValue = InsertValueInst::Create(ResultValue, new_value, {ResultI++},
@@ -531,7 +541,7 @@ void OutliningCallerExtractor::handleSingleCallee(
   Function *new_callee = callee.createDeclaration();
   std::vector<Value *> input_values;
   for (Value *value : callee.input_values) {
-    Type *type = simplifyType(value->getType());
+    Type *type = simplifyType(value);
     if (type != value->getType())
       value = new BitCastInst(value, type, "", insertion_point);
     input_values.push_back(value);

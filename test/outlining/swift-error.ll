@@ -1,5 +1,3 @@
-; XFAIL: *
-
 ; RUN: %outliningtest --no-run %s
 
 %swift.error = type opaque
