@@ -357,7 +357,7 @@ NodeOrCID smout::grouped_callees_for_function(Evaluator &evaluator,
     if (!isGroupWorthExtracting(options, (*grouped_candidates)[group_key]))
       continue;
     for (auto &candidate : item.value().list_range()) {
-      candidate_group.emplace_back(group_key);
+      candidate_group.emplace_back(group_key.str());
       candidate_node.emplace_back(candidate);
     }
   }
