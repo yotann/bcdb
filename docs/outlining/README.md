@@ -47,6 +47,9 @@ git submodule update --init --depth=1
 nix-env -f . -iA bcdb
 ```
 
+If you install BCDB manually instead, make sure to compile with optimizations
+enabled (`cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo`).
+
 ### 2. Obtain bitcode for the desired package
 
 ```shell
@@ -140,8 +143,8 @@ llc --filetype=obj ppmtomitsu-optimized.bc -o ppmtomitsu-optimized.o
 size ppmtomitsu.o ppmtomitsu-optimized.o
 
 # compile both versions to executables
-bc-imitate clang ppmtomitsu.bc -o ppmtomitsu
-bc-imitate clang ppmtomitsu-optimized.bc -o ppmtomitsu-optimized
+bc-imitate clang -Oz ppmtomitsu.bc -o ppmtomitsu
+bc-imitate clang -Oz ppmtomitsu-optimized.bc -o ppmtomitsu-optimized
 
 # compare the sizes
 size ppmtomitsu ppmtomitsu-optimized
@@ -160,7 +163,7 @@ You can also run the optimized command and make sure its behavior is correct:
 
 ### Other analyses
 
-#### Equivalence checking (BROKEN)
+#### Equivalence checking
 
 The equivalence checker uses a specially modified version of Alive2. The Alive2
 checks are done by a separate process, so it needs to connect to
@@ -173,6 +176,9 @@ git clone https://github.com/yotann/alive2
 cd alive2
 nix-env -f . -iA alive2
 ```
+
+If you install Alive2 manually instead, make sure to compile with optimizations
+enabled (`cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo`).
 
 Now you can start the server. If you're sharing a machine with other people,
 you should use a random port number instead of 29179, so you don't conflict
@@ -194,7 +200,8 @@ yes | parallel -u -n0 ./alive-worker http://127.0.0.1:29179
 
 Finally, in a third window, start the actual equivalence checking. When this
 command finishes, it should print the number of equivalent pairs. Func names:
-`smout.equivalent_pairs` and `smout.equivalent_pairs_in_group`.
+`alive.tv`, `smout.refinements_for_group_vN`, and
+`smout.grouped_refinements_vN`.
 
 ```sh
 # Override MEMODB_STORE just for this command, so it connects to memodb-server.

@@ -161,7 +161,7 @@ static int CreateILPProblem() {
 static int Equivalence() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::equivalent_pairs_version,
+  NodeRef result = evaluator->evaluate(smout::grouped_refinements_version,
                                        getCandidatesOptions(), mod);
   llvm::outs() << "\nEquivalent pairs: " << *result << "\n";
   return 0;

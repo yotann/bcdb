@@ -24,9 +24,10 @@ NodeOrCID ilp_problem(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID greedy_solution(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID extracted_caller(Evaluator &evaluator, NodeRef func, NodeRef callees);
 NodeOrCID optimized(Evaluator &evaluator, NodeRef options, NodeRef mod);
-NodeOrCID equivalent_pairs_in_group(Evaluator &evaluator, NodeRef options,
-                                    NodeRef mod, NodeRef group);
-NodeOrCID equivalent_pairs(Evaluator &evaluator, NodeRef options, NodeRef mod);
+NodeOrCID refinements_for_group(Evaluator &evaluator, NodeRef options,
+                                NodeRef members);
+NodeOrCID grouped_refinements(Evaluator &evaluator, NodeRef options,
+                              NodeRef mod);
 
 extern const char *candidates_version;
 extern const char *grouped_candidates_version;
@@ -37,8 +38,8 @@ extern const char *ilp_problem_version;
 extern const char *greedy_solution_version;
 extern const char *extracted_caller_version;
 extern const char *optimized_version;
-extern const char *equivalent_pairs_in_group_version;
-extern const char *equivalent_pairs_version;
+extern const char *refinements_for_group_version;
+extern const char *grouped_refinements_version;
 
 void registerFuncs(Evaluator &evaluator);
 

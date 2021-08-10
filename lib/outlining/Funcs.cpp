@@ -51,9 +51,9 @@ const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution_v0";
 const char *smout::extracted_caller_version = "smout.extracted_caller_v0";
 const char *smout::optimized_version = "smout.optimized_v0";
-const char *smout::equivalent_pairs_in_group_version =
-    "smout.equivalent_pairs_in_group";
-const char *smout::equivalent_pairs_version = "smout.equivalent_pairs";
+const char *smout::refinements_for_group_version =
+    "smout.refinements_for_group_v0";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v0";
 
 static FunctionAnalysisManager makeFAM() {
   FunctionAnalysisManager am;
@@ -908,40 +908,15 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
   return mod_node;
 }
 
-NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
-                                           NodeRef options, NodeRef mod,
-                                           NodeRef group) {
-  report_fatal_error("This part of BCDB is broken and needs to be updated!");
-  std::vector<std::pair<CID, Future>> func_candidates;
-  for (auto &item : (*mod)["functions"].map_range()) {
-    auto func_cid = item.value().as<CID>();
-    func_candidates.emplace_back(
-        func_cid,
-        evaluator.evaluateAsync(candidates_version, options, func_cid));
-  }
-  std::vector<Future> callees;
-  for (auto &future : func_candidates) {
-    const CID &func_cid = future.first;
-    Future &result = future.second;
-    for (auto &item : result->map_range())
-      for (auto &candidate : item.value().list_range())
-        callees.emplace_back(evaluator.evaluateAsync(
-            extracted_callees_version, func_cid, candidate["nodes"]));
-    result.freeNode();
-  }
-  func_candidates.clear();
+NodeOrCID smout::refinements_for_group(Evaluator &evaluator, NodeRef options,
+                                       NodeRef members) {
   StringSet unique_set;
-  for (auto &result : callees) {
-    result.freeNode();
-    unique_set.insert(cid_key(result.getCID()));
-  }
-  callees.clear();
   std::vector<CID> unique;
-  for (const auto &item : unique_set) {
-    const auto &key = item.getKey();
-    unique.emplace_back(*CID::fromBytes(
-        ArrayRef(reinterpret_cast<const uint8_t *>(key.data()), key.size())));
-  }
+  for (const auto &item : members->list_range())
+    if (unique_set.insert(cid_key(item["callee"].as<CID>())).second)
+      unique.push_back(item["callee"].as<CID>());
+  members.freeNode();
+  unique_set.clear();
   std::vector<Future> pairs;
   for (size_t i = 0; i < unique.size(); ++i) {
     for (size_t j = 0; j < unique.size(); ++j) {
@@ -951,43 +926,40 @@ NodeOrCID smout::equivalent_pairs_in_group(Evaluator &evaluator,
                                                  unique[i], unique[j]));
     }
   }
-  unsigned total = 0;
-  for (auto &future : pairs)
-    if ((*future)["valid"] == true)
-      total++;
-  return Node(total);
-}
-
-NodeOrCID smout::equivalent_pairs(Evaluator &evaluator, NodeRef options,
-                                  NodeRef mod) {
-  report_fatal_error("This part of BCDB is broken and needs to be updated!");
-  std::vector<std::pair<CID, Future>> func_candidates;
-  for (auto &item : (*mod)["functions"].map_range()) {
-    auto func_cid = item.value().as<CID>();
-    func_candidates.emplace_back(
-        func_cid,
-        evaluator.evaluateAsync(candidates_version, options, func_cid));
-  }
-  StringMap<unsigned> group_count;
-  for (auto &future : func_candidates) {
-    Future &result = future.second;
-    for (auto &item : result->map_range())
-      group_count[item.key()]++;
-    result.freeNode();
-  }
-  // TODO: not using evaluateAsync for smout.equivalent_pairs_in_group because
-  // there would be too many simultaneous calls, leaving no threads to evaluate
-  // smout.extracted.callee.
-  unsigned total = 0;
-  for (const auto &item : group_count) {
-    if (item.getValue() >= 2) {
-      auto group_pairs =
-          evaluator.evaluate(equivalent_pairs_in_group_version, options, mod,
-                             Node(utf8_string_arg, item.getKey()));
-      total += group_pairs->as<unsigned>();
+  size_t k = 0;
+  Node result(node_list_arg);
+  for (size_t i = 0; i < unique.size(); ++i) {
+    for (size_t j = 0; j < unique.size(); ++j) {
+      if (i == j)
+        continue;
+      if ((*pairs[k])["valid"] == true)
+        result.emplace_back(Node(node_map_arg, {
+                                                   {"src", Node(unique[i])},
+                                                   {"tgt", Node(unique[j])},
+                                               }));
+      k++;
     }
   }
-  return Node(total);
+  return result;
+}
+
+NodeOrCID smout::grouped_refinements(Evaluator &evaluator, NodeRef options,
+                                     NodeRef mod) {
+  Node grouped_callees =
+      *evaluator.evaluate(grouped_callees_version, options, mod);
+  std::vector<Future> futures;
+  for (const auto &item : grouped_callees.map_range())
+    futures.emplace_back(
+        evaluator.evaluateAsync(refinements_for_group_version, options,
+                                item.value()["members"].as<CID>()));
+  size_t i = 0;
+  for (auto &item : grouped_callees.map_range()) {
+    item.value()["refinements"] = Node(futures[i].getCID());
+    item.value()["num_valid_refinements"] = futures[i]->size();
+    futures[i].freeNode();
+    i++;
+  }
+  return grouped_callees;
 }
 
 void smout::registerFuncs(Evaluator &evaluator) {
@@ -1001,7 +973,6 @@ void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(greedy_solution_version, &greedy_solution);
   evaluator.registerFunc(extracted_caller_version, &extracted_caller);
   evaluator.registerFunc(optimized_version, &optimized);
-  evaluator.registerFunc(equivalent_pairs_in_group_version,
-                         &equivalent_pairs_in_group);
-  evaluator.registerFunc(equivalent_pairs_version, &equivalent_pairs);
+  evaluator.registerFunc(refinements_for_group_version, &refinements_for_group);
+  evaluator.registerFunc(grouped_refinements_version, &grouped_refinements);
 }
