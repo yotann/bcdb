@@ -21,6 +21,10 @@ using namespace llvm;
 static bool compareTypes(Type *t0, Type *t1) {
   if (t0->getTypeID() != t1->getTypeID())
     return t0->getTypeID() < t1->getTypeID();
+  if (t0->isPointerTy()) {
+    // Ignore pointee type (otherwise we might recurse infinitely).
+    return t0->getPointerAddressSpace() < t1->getPointerAddressSpace();
+  }
   if (t0->getNumContainedTypes() != t1->getNumContainedTypes())
     return t0->getNumContainedTypes() < t1->getNumContainedTypes();
   for (size_t i = 0; i < t0->getNumContainedTypes(); ++i) {
@@ -33,12 +37,20 @@ static bool compareTypes(Type *t0, Type *t1) {
   }
   if (t0->isIntegerTy())
     return t0->getIntegerBitWidth() < t1->getIntegerBitWidth();
-  if (t0->isPointerTy())
-    return t0->getPointerAddressSpace() < t1->getPointerAddressSpace();
   // TODO: make use of other fields (function vararg, vector number of
   // elements). This doesn't affect correctness, but it could prevent
   // duplicates from being found.
   return false;
+}
+
+static Type *simplifyType(Type *type) {
+  // TODO: We could recursively process fields inside structs, vectors, and
+  // arrays, in order to find more duplicates. But there are probably very few
+  // duplicates that can be found that way, and converting the values back and
+  // forth would be difficult (especially for structs).
+  if (!type->isPointerTy())
+    return type;
+  return Type::getInt8PtrTy(type->getContext(), type->getPointerAddressSpace());
 }
 
 OutliningCalleeExtractor::OutliningCalleeExtractor(
@@ -151,20 +163,18 @@ OutliningCalleeExtractor::OutliningCalleeExtractor(
 
   // Sort input values by type. Values with the same type remain sorted in the
   // order they are used.
+  auto value_order = [](Value *v0, Value *v1) {
+    return compareTypes(simplifyType(v0->getType()),
+                        simplifyType(v1->getType()));
+  };
   input_values = input_set.takeVector();
-  std::stable_sort(input_values.begin(), input_values.end(),
-                   [](Value *v0, Value *v1) {
-                     return compareTypes(v0->getType(), v1->getType());
-                   });
+  std::stable_sort(input_values.begin(), input_values.end(), value_order);
 
   // Sort output values by type. Values with the same type remain sorted in the
   // order they are defined.
   for (auto i : external_outputs)
     output_values.push_back(Nodes[i]);
-  std::stable_sort(output_values.begin(), output_values.end(),
-                   [](Value *v0, Value *v1) {
-                     return compareTypes(v0->getType(), v1->getType());
-                   });
+  std::stable_sort(output_values.begin(), output_values.end(), value_order);
 
   for (auto i : bv) {
     if (isa<BasicBlock>(Nodes[i]))
@@ -180,12 +190,6 @@ unsigned OutliningCalleeExtractor::getNumArgs() const {
 
 unsigned OutliningCalleeExtractor::getNumReturnValues() const {
   return output_values.size();
-}
-
-static Type *simplifyType(Type *type) {
-  if (!type->isPointerTy())
-    return type;
-  return Type::getInt8PtrTy(type->getContext(), type->getPointerAddressSpace());
 }
 
 void OutliningCalleeExtractor::getArgTypes(

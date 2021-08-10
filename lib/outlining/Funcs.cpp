@@ -41,19 +41,19 @@ using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 
-const char *smout::candidates_version = "smout.candidates_v0";
-const char *smout::grouped_candidates_version = "smout.grouped_candidates_v0";
-const char *smout::extracted_callees_version = "smout.extracted_callees_v0";
+const char *smout::candidates_version = "smout.candidates_v1";
+const char *smout::grouped_candidates_version = "smout.grouped_candidates_v1";
+const char *smout::extracted_callees_version = "smout.extracted_callees_v1";
 const char *smout::grouped_callees_for_function_version =
-    "smout.grouped_callees_for_function_v0";
-const char *smout::grouped_callees_version = "smout.grouped_callees_v0";
+    "smout.grouped_callees_for_function_v1";
+const char *smout::grouped_callees_version = "smout.grouped_callees_v1";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
-const char *smout::greedy_solution_version = "smout.greedy_solution_v0";
-const char *smout::extracted_caller_version = "smout.extracted_caller_v0";
-const char *smout::optimized_version = "smout.optimized_v0";
+const char *smout::greedy_solution_version = "smout.greedy_solution_v1";
+const char *smout::extracted_caller_version = "smout.extracted_caller_v1";
+const char *smout::optimized_version = "smout.optimized_v1";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v0";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v1";
 
 static FunctionAnalysisManager makeFAM() {
   FunctionAnalysisManager am;
