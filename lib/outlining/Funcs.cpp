@@ -48,9 +48,9 @@ const char *smout::grouped_callees_for_function_version =
     "smout.grouped_callees_for_function_v0";
 const char *smout::grouped_callees_version = "smout.grouped_callees_v0";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
-const char *smout::greedy_solution_version = "smout.greedy_solution";
+const char *smout::greedy_solution_version = "smout.greedy_solution_v0";
 const char *smout::extracted_caller_version = "smout.extracted_caller_v0";
-const char *smout::optimized_version = "smout.optimized";
+const char *smout::optimized_version = "smout.optimized_v0";
 const char *smout::equivalent_pairs_in_group_version =
     "smout.equivalent_pairs_in_group";
 const char *smout::equivalent_pairs_version = "smout.equivalent_pairs";
@@ -616,88 +616,127 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
 
 NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
                                  NodeRef mod) {
-  report_fatal_error("This part of BCDB is broken and needs to be updated!");
-  std::vector<std::pair<CID, Future>> func_candidates;
+  StringMap<unsigned> original_function_copies;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
-    func_candidates.emplace_back(
-        func_cid,
-        evaluator.evaluateAsync(candidates_version, options, func_cid));
+    original_function_copies[cid_key(func_cid)]++;
+  }
+  auto grouped_callees =
+      evaluator.evaluate(grouped_callees_version, options, mod);
+
+  StringMap<size_t> function_indices;
+  StringMap<size_t> callee_indices;
+
+  struct FunctionInfo {
+    CID cid;
+    std::vector<size_t> candidate_indices;
+
+    FunctionInfo(CID cid) : cid(cid) {}
+  };
+  std::vector<FunctionInfo> functions;
+
+  struct CandidateInfo {
+    int savings;
+    size_t function_index;
+    Node nodes;
+    size_t callee_index;
+    SparseBitVector<> overlaps;
+    bool no_conflict = false;
+  };
+  std::vector<CandidateInfo> candidates;
+
+  struct CalleeInfo {
+    CID cid;
+    int size;
+    SmallVector<size_t, 2> candidate_indices;
+    int benefit;
+
+    CalleeInfo(CID cid) : cid(cid) {}
+  };
+  std::vector<CalleeInfo> callees;
+
+  // Organize candidates. TODO: factor out code shared with ilp_problem.
+  for (auto &item : grouped_callees->map_range()) {
+    const Node &group = item.value();
+    if (group["num_unique_callees"].as<size_t>() >=
+        group["num_members"].as<size_t>())
+      continue;
+    // TODO: if greedy_solution is a bottleneck, we could filter out callees
+    // with an insufficient number of duplicates.
+    Node members = evaluator.getStore().get(group["members"].as<CID>());
+    for (auto &candidate : members.list_range()) {
+      auto function = candidate["function"].as<CID>();
+      auto callee = candidate["callee"].as<CID>();
+
+      // Candidate info.
+      auto m = candidates.size();
+      candidates.push_back({});
+      CandidateInfo &cand_info = candidates.back();
+      cand_info.savings = candidate["caller_savings"].as<int>() *
+                          original_function_copies[cid_key(function)];
+      cand_info.nodes = candidate["nodes"];
+
+      // Original function info.
+      if (!function_indices.count(cid_key(function))) {
+        cand_info.function_index = function_indices[cid_key(function)] =
+            function_indices.size();
+        functions.emplace_back(function);
+      } else {
+        cand_info.function_index = function_indices[cid_key(function)];
+      }
+      functions[cand_info.function_index].candidate_indices.push_back(m);
+
+      // Callee info.
+      auto callee_size = candidate["callee_size"].as<int>();
+      CalleeInfo *callee_info;
+      if (!callee_indices.count(cid_key(callee))) {
+        cand_info.callee_index = callee_indices[cid_key(callee)] =
+            callee_indices.size();
+        callees.emplace_back(callee);
+        callee_info = &callees.back();
+        callee_info->size = callee_size;
+      } else {
+        cand_info.callee_index = callee_indices[cid_key(callee)];
+        callee_info = &callees[cand_info.callee_index];
+        callee_info->size = std::min(callee_info->size, callee_size);
+      }
+      callee_info->candidate_indices.push_back(m);
+    }
   }
 
-  // Get candidates.
-  std::vector<Future> callees;
-  std::vector<int> s_m, f_m;
-  std::vector<SparseBitVector<>> o_m;
-  std::vector<size_t> func_index_m;
-  std::vector<Node> nodes_m;
-  for (size_t func_index = 0; func_index < func_candidates.size();
-       ++func_index) {
-    auto &future = func_candidates[func_index];
-    const CID &func_cid = future.first;
-    Future &result = future.second;
-    std::vector<SmallVector<size_t, 4>> func_overlaps;
-    for (auto &item : result->map_range()) {
-      for (auto &candidate : item.value().list_range()) {
-        size_t m = s_m.size();
-        s_m.emplace_back(candidate["caller_savings"].as<int>());
-        f_m.emplace_back(candidate["callee_size"].as<int>());
-        o_m.emplace_back();
-        func_index_m.emplace_back(func_index);
-        nodes_m.emplace_back(candidate["nodes"]);
-        for (size_t i : decodeBitVector(nodes_m[m])) {
-          if (func_overlaps.size() <= i)
-            func_overlaps.resize(i + 1);
-          func_overlaps[i].push_back(m);
-        }
-        callees.emplace_back(evaluator.evaluateAsync(extracted_callees_version,
-                                                     func_cid, nodes_m[m]));
+  // Determine overlaps.
+  for (FunctionInfo &func_info : functions) {
+    std::vector<SmallVector<size_t, 4>> overlaps;
+    for (size_t m : func_info.candidate_indices) {
+      for (size_t i : decodeBitVector(candidates[m].nodes)) {
+        if (overlaps.size() <= i)
+          overlaps.resize(i + 1);
+        overlaps[i].push_back(m);
       }
     }
-    for (size_t i = 0; i < func_overlaps.size(); ++i) {
-      if (i > 0 && func_overlaps[i] == func_overlaps[i - 1])
+    for (size_t i = 0; i < overlaps.size(); ++i) {
+      if (overlaps[i].size() <= 1)
         continue;
-      for (size_t m0 : func_overlaps[i])
-        for (size_t m1 : func_overlaps[i])
+      if (i > 0 && overlaps[i] == overlaps[i - 1])
+        continue;
+      for (size_t m0 : overlaps[i])
+        for (size_t m1 : overlaps[i])
           if (m0 != m1)
-            o_m[m0].set(m1);
+            candidates[m0].overlaps.set(m1);
     }
-    result.freeNode();
   }
 
-  // Get extracted callees.
-  StringMap<size_t> callee_indices;
-  std::vector<int> f_n;
-  std::vector<size_t> n_from_m;
-  std::vector<SmallVector<size_t, 2>> m_from_n;
-  for (size_t m = 0; m < callees.size(); ++m) {
-    callees[m].freeNode();
-    auto cid = callees[m].getCID();
-    size_t n;
-    if (!callee_indices.count(cid_key(cid))) {
-      n = callee_indices[cid_key(cid)] = callee_indices.size();
-      f_n.emplace_back(f_m[m]);
-      m_from_n.emplace_back();
-    } else {
-      n = callee_indices[cid_key(cid)];
-      f_n[n] = std::min(f_n[n], f_m[m]);
-    }
-    m_from_n[n].emplace_back(m);
-    n_from_m.emplace_back(n);
-  }
-
-  // Calculate benefit of using each callee.
-  std::vector<bool> no_conflict_m(s_m.size());
-  std::vector<int> benefit_n(f_n.size());
-  for (size_t n = 0; n < f_n.size(); ++n) {
-    SparseBitVector<> conf;
-    benefit_n[n] = -f_n[n];
-    for (size_t m : m_from_n[n]) {
-      if (conf.test(m))
+  // Calculate benefit of using each callee. If a callee has multiple
+  // duplicates that overlap with each other, only consider the first one seen.
+  for (CalleeInfo &ci2 : callees) {
+    ci2.benefit = -ci2.size;
+    SparseBitVector<> conflicts;
+    for (size_t m : ci2.candidate_indices) {
+      if (conflicts.test(m))
         continue;
-      no_conflict_m[m] = true;
-      conf |= o_m[m];
-      benefit_n[n] += s_m[m];
+      candidates[m].no_conflict = true;
+      conflicts |= candidates[m].overlaps;
+      ci2.benefit += candidates[m].savings;
     }
   }
 
@@ -708,10 +747,10 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
   while (true) {
     size_t best_n = 0;
     int best_benefit = 0;
-    for (size_t n = 0; n < f_n.size(); ++n) {
-      if (benefit_n[n] > best_benefit) {
+    for (size_t n = 0; n < callees.size(); ++n) {
+      if (callees[n].benefit > best_benefit) {
         best_n = n;
-        best_benefit = benefit_n[n];
+        best_benefit = callees[n].benefit;
       }
     }
     if (best_benefit <= 0)
@@ -720,25 +759,29 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
     size_t n = best_n;
     selected_n.push_back(n);
     total_benefit += best_benefit;
-    benefit_n[n] = -1; // don't use this n again
-    for (size_t m : m_from_n[n]) {
-      if (!no_conflict_m[m])
+    callees[n].benefit = -1; // don't use this n again
+    for (size_t m : callees[n].candidate_indices) {
+      CandidateInfo &cand_info = candidates[m];
+      if (!cand_info.no_conflict)
         continue;
       selected_m.push_back(m);
-      no_conflict_m[m] = false;
-      for (size_t m2 : o_m[m]) {
-        if (!no_conflict_m[m2])
+      cand_info.no_conflict = false;
+      for (size_t m2 : cand_info.overlaps) {
+        CandidateInfo &cand_info2 = candidates[m2];
+        if (!cand_info2.no_conflict)
           continue;
-        benefit_n[n_from_m[m2]] -= s_m[m2];
-        no_conflict_m[m2] = false;
+        callees[cand_info2.callee_index].benefit -= cand_info2.savings;
+        cand_info2.no_conflict = false;
       }
     }
   }
 
   Node result_functions(node_map_arg);
   for (size_t m : selected_m) {
-    const CID &cid = func_candidates[func_index_m[m]].first;
-    const Node &nodes = nodes_m[m];
+    CandidateInfo &cand_info = candidates[m];
+    CalleeInfo &callee_info = callees[cand_info.callee_index];
+    const CID &cid = functions[cand_info.function_index].cid;
+    const Node &nodes = cand_info.nodes;
     auto key = cid.asString(Multibase::base64url);
     auto &value = result_functions[key];
     if (value == Node())
@@ -746,10 +789,9 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
                                   {"candidates", Node(node_list_arg)}});
     value["candidates"].emplace_back(
         Node(node_map_arg, {{"nodes", nodes},
-                            {"callee", Node(callees[m].getCID())},
-                            {"caller_savings", s_m[m]},
-                            {"callee_size", f_m[m]}}));
-    // FIXME: sort candidates.
+                            {"callee", Node(callee_info.cid)},
+                            {"caller_savings", cand_info.savings},
+                            {"callee_size", callee_info.size}}));
   }
   return Node(node_map_arg, {
                                 {"functions", result_functions},
@@ -792,7 +834,6 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
 }
 
 NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
-  report_fatal_error("This part of BCDB is broken and needs to be updated!");
   NodeRef solution = evaluator.evaluate(greedy_solution_version, options, mod);
   Node mod_node = *mod;
 

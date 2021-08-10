@@ -108,27 +108,28 @@ candidates because of duplicates. Func names: `smout.extracted_callees_vN`,
 smout extract-callees --name=ppmtomitsu
 ```
 
-#### Find greedy solution (BROKEN)
+#### Find greedy solution
 
 This step decides which candidates should actually be outlined, avoiding
 overlaps. When it finishes, it prints the chosen solution, including a
 `total_benefit` item that gives the estimated code size savings for the whole
-module. Func name: `smout.greedy_solution`.
+module. Func name: `smout.greedy_solution_vN`.
 
 ```sh
 smout solve-greedy --name=ppmtomitsu
 ```
 
-#### Perform full outlining (BROKEN)
+#### Perform full outlining
 
 This step uses the greedy solution to actually perform outlining and link
 everything together into one module. When it finishes, it prints the CID of the
-optimized module. Func name: `smout.greedy_solution`.
+optimized module. Func name: `smout.optimized_vN`.
 
 ```sh
 smout optimize --name=ppmtomitsu
 
 # you should copy the CID from the output of smout optimize
+# opt is important to clean up and optimize the outlined code
 bcdb get /cid/uAXG... | opt --simplifycfg --function-attrs > ppmtomitsu-optimized.bc
 
 # compile both versions to object files
@@ -146,7 +147,7 @@ bc-imitate clang ppmtomitsu-optimized.bc -o ppmtomitsu-optimized
 size ppmtomitsu ppmtomitsu-optimized
 ```
 
-Hopefully the optimized version has a small `.text` section. You can compare
+Hopefully the optimized version has a smaller `.text` section. You can compare
 the actual size savings from the `size` command against the estimated savings
 from the `smout solve-greedy` command.
 
