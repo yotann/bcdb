@@ -14,6 +14,8 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Transforms/IPO/FunctionAttrs.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <string>
 #include <vector>
 
@@ -45,17 +47,17 @@ using bcdb::SizeModelResults;
 
 const char *smout::candidates_version = "smout.candidates_v1";
 const char *smout::grouped_candidates_version = "smout.grouped_candidates_v1";
-const char *smout::extracted_callees_version = "smout.extracted_callees_v2";
+const char *smout::extracted_callees_version = "smout.extracted_callees_v3";
 const char *smout::grouped_callees_for_function_version =
-    "smout.grouped_callees_for_function_v2";
-const char *smout::grouped_callees_version = "smout.grouped_callees_v2";
+    "smout.grouped_callees_for_function_v3";
+const char *smout::grouped_callees_version = "smout.grouped_callees_v3";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
-const char *smout::greedy_solution_version = "smout.greedy_solution_v2";
-const char *smout::extracted_caller_version = "smout.extracted_caller_v2";
-const char *smout::optimized_version = "smout.optimized_v2";
+const char *smout::greedy_solution_version = "smout.greedy_solution_v3";
+const char *smout::extracted_caller_version = "smout.extracted_caller_v3";
+const char *smout::optimized_version = "smout.optimized_v3";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v2";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v3";
 
 static FunctionAnalysisManager makeFAM(const Node &options) {
   OutliningCandidatesOptions cand_opts;
@@ -74,6 +76,24 @@ static FunctionAnalysisManager makeFAM(const Node &options) {
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   am.registerPass([] { return SizeModelAnalysis(); });
   return am;
+}
+
+static void postprocessModule(Module &m) {
+  LoopAnalysisManager lam;
+  FunctionAnalysisManager fam;
+  CGSCCAnalysisManager cgam;
+  ModuleAnalysisManager mam;
+  PassBuilder pb;
+  pb.crossRegisterProxies(lam, fam, cgam, mam);
+  pb.registerLoopAnalyses(lam);
+  pb.registerFunctionAnalyses(fam);
+  pb.registerCGSCCAnalyses(cgam);
+  pb.registerModuleAnalyses(mam);
+  ModulePassManager pm;
+  pm.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass()));
+  pm.addPass(
+      createModuleToPostOrderCGSCCPassAdaptor(PostOrderFunctionAttrsPass()));
+  pm.run(m, mam);
 }
 
 static StringRef cid_key(const CID &cid) {
@@ -342,6 +362,7 @@ NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
     callees.push_back(extractor.createDefinition());
   }
 
+  postprocessModule(*m);
   bcdb::Splitter splitter(*m);
   Node result(node_list_arg);
   for (Function *callee : callees) {
@@ -853,6 +874,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
     }
   }
 
+  postprocessModule(*m);
   bcdb::Splitter splitter(*m);
   auto mpart = splitter.SplitGlobal(&f);
   SmallVector<char, 0> buffer;
