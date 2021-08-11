@@ -40,20 +40,21 @@ using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
 using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
+using bcdb::SizeModelResults;
 
 const char *smout::candidates_version = "smout.candidates_v1";
 const char *smout::grouped_candidates_version = "smout.grouped_candidates_v1";
-const char *smout::extracted_callees_version = "smout.extracted_callees_v1";
+const char *smout::extracted_callees_version = "smout.extracted_callees_v2";
 const char *smout::grouped_callees_for_function_version =
-    "smout.grouped_callees_for_function_v1";
-const char *smout::grouped_callees_version = "smout.grouped_callees_v1";
+    "smout.grouped_callees_for_function_v2";
+const char *smout::grouped_callees_version = "smout.grouped_callees_v2";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
-const char *smout::greedy_solution_version = "smout.greedy_solution_v1";
-const char *smout::extracted_caller_version = "smout.extracted_caller_v1";
+const char *smout::greedy_solution_version = "smout.greedy_solution_v2";
+const char *smout::extracted_caller_version = "smout.extracted_caller_v2";
 const char *smout::optimized_version = "smout.optimized_v2";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v1";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v2";
 
 static FunctionAnalysisManager makeFAM() {
   FunctionAnalysisManager am;
@@ -335,11 +336,14 @@ NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
   bcdb::Splitter splitter(*m);
   Node result(node_list_arg);
   for (Function *callee : callees) {
+    auto size = SizeModelResults(*callee).this_function_total_size;
     auto mpart = splitter.SplitGlobal(callee);
     SmallVector<char, 0> buffer;
     bcdb::WriteAlignedModule(*mpart, buffer);
     result.emplace_back(
-        Node(evaluator.getStore().put(Node(byte_string_arg, buffer))));
+        Node(node_map_arg, {{"callee", Node(evaluator.getStore().put(
+                                           Node(byte_string_arg, buffer)))},
+                            {"size", size}}));
   }
   assert(node_sets->size() == result.size());
   return result;
@@ -384,7 +388,16 @@ NodeOrCID smout::grouped_callees_for_function(Evaluator &evaluator,
       if (group.is_null())
         group = Node(node_list_arg);
       Node &node = candidate_node[i + j];
-      node["callee"] = (*callees)[j];
+      const Node &callee = (*callees)[j];
+      node["callee"] = callee["callee"];
+
+      // Update estimated sizes now that we know the real callee size.
+      node["estimated_callee_size"] = node["callee_size"];
+      node["callee_size"] = callee["size"];
+      int delta = node["callee_size"].as<int>() -
+                  node["estimated_callee_size"].as<int>();
+      node["caller_savings"] = node["caller_savings"].as<int>() + delta;
+
       group.emplace_back(node);
     }
   }

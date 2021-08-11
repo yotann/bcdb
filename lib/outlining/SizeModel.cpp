@@ -61,10 +61,13 @@ struct SizingStreamer : public MCStreamer {
   MCCodeEmitter &mce;
   const MCSubtargetInfo &sti;
   unsigned current_line = 0;
+  bool &uses_eh_frame;
 
   explicit SizingStreamer(std::vector<unsigned> &sizes, MCContext &context,
-                          MCCodeEmitter &mce, const MCSubtargetInfo &sti)
-      : MCStreamer(context), sizes(sizes), mce(mce), sti(sti) {}
+                          MCCodeEmitter &mce, const MCSubtargetInfo &sti,
+                          bool &uses_eh_frame)
+      : MCStreamer(context), sizes(sizes), mce(mce), sti(sti),
+        uses_eh_frame(uses_eh_frame) {}
 
   // Must implement (pure virtual function).
 #if LLVM_VERSION_MAJOR >= 11
@@ -144,6 +147,14 @@ struct SizingStreamer : public MCStreamer {
     current_line = line;
     if (current_line >= sizes.size())
       sizes.resize(current_line + 1);
+  }
+
+#if LLVM_VERSION_MAJOR >= 11
+  void emitCFIStartProcImpl(MCDwarfFrameInfo &frame) override{
+#else
+  void EmitCFIStartProcImpl(MCDwarfFrameInfo &frame) override {
+#endif
+      uses_eh_frame = true;
   }
 };
 } // end anonymous namespace
@@ -235,8 +246,9 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
 
   // Actually set up our custom MCStreamer, and perform compilation!
   std::vector<unsigned> sizes;
+  bool uses_eh_frame = false;
   std::unique_ptr<MCStreamer> asm_streamer(
-      new SizingStreamer(sizes, *context, *mce, sti));
+      new SizingStreamer(sizes, *context, *mce, sti, uses_eh_frame));
   target->createNullTargetStreamer(*asm_streamer);
   FunctionPass *printer =
       target->createAsmPrinter(llvmtm, std::move(asm_streamer));
@@ -335,6 +347,13 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
       ret_size + extra_func_size + (function_alignment + 1) / 2;
   function_size_with_callees =
       function_size_without_callees + eh_frame_size + fp_management_size;
+
+  unsigned total_ins_size = 0;
+  for (auto size : sizes)
+    total_ins_size += size;
+  this_function_total_size = extra_func_size + (function_alignment + 1) / 2 +
+                             (uses_eh_frame ? eh_frame_size : 0) +
+                             total_ins_size;
 }
 
 void SizeModelResults::print(raw_ostream &os) const {
@@ -343,6 +362,8 @@ void SizeModelResults::print(raw_ostream &os) const {
   os << "; estimated function size without callees: "
      << function_size_without_callees << " bytes\n";
   os << "; estimated function size with callees: " << function_size_with_callees
+     << " bytes\n";
+  os << "; estimated total size of this function: " << this_function_total_size
      << " bytes\n";
   os << "\n";
   SizeModelWriter writer(this);

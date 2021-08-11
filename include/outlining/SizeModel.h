@@ -54,6 +54,10 @@ public:
   // frame pointer management instructions and exception handling frame data.
   unsigned function_size_with_callees;
 
+  // The estimated total size, in bytes, of this particular function, including
+  // both the base function size and the size of all instructions.
+  unsigned this_function_total_size;
+
 private:
   Function &f;
 };
