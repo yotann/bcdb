@@ -50,7 +50,7 @@ const char *smout::grouped_callees_version = "smout.grouped_callees_v1";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution_v1";
 const char *smout::extracted_caller_version = "smout.extracted_caller_v1";
-const char *smout::optimized_version = "smout.optimized_v1";
+const char *smout::optimized_version = "smout.optimized_v2";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
 const char *smout::grouped_refinements_version = "smout.grouped_refinements_v1";
@@ -870,6 +870,8 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
                             BasicBlock::Create(context, "", &callee_f));
         callee_f.setName(name);
         assert(callee_f.getName() == name && "name conflict");
+        callee_f.setDSOLocal(true);
+        callee_f.setLinkage(GlobalValue::InternalLinkage);
         err(mover.move(
             std::move(callee_m), {&callee_f},
             [](GlobalValue &, IRMover::ValueAdder) {},
