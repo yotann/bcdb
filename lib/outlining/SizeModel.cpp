@@ -149,13 +149,15 @@ struct SizingStreamer : public MCStreamer {
       sizes.resize(current_line + 1);
   }
 
+  // clang-format off
 #if LLVM_VERSION_MAJOR >= 11
   void emitCFIStartProcImpl(MCDwarfFrameInfo &frame) override{
 #else
   void EmitCFIStartProcImpl(MCDwarfFrameInfo &frame) override {
 #endif
-      uses_eh_frame = true;
+    uses_eh_frame = true;
   }
+  // clang-format on
 };
 } // end anonymous namespace
 
