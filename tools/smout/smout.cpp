@@ -77,6 +77,23 @@ static cl::opt<int>
                      cl::init(1), cl::cat(SmoutCategory),
                      cl::sub(*cl::AllSubCommands));
 
+static cl::opt<size_t> MaxArgs(
+    "max-args",
+    cl::desc(
+        "Maximum number of arguments and return values for an outlined callee"),
+    cl::init(10), cl::cat(SmoutCategory), cl::sub(*cl::AllSubCommands));
+
+static cl::opt<size_t> MaxAdjacent(
+    "max-adjacent",
+    cl::desc("Maximum candidate size generated using adjacent nodes"),
+    cl::init(10), cl::cat(SmoutCategory), cl::sub(*cl::AllSubCommands));
+
+static cl::opt<size_t>
+    MaxNodes("max-nodes",
+             cl::desc("Maximum candidate size generated using dependencies"),
+             cl::init(50), cl::cat(SmoutCategory),
+             cl::sub(*cl::AllSubCommands));
+
 static StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {
     report_fatal_error(
@@ -116,6 +133,12 @@ static Node getCandidatesOptions() {
     result["min_benefit"] = Node(static_cast<int>(MinBenefit));
   if (MinCallerSavings != 1)
     result["min_caller_savings"] = Node(static_cast<int>(MinCallerSavings));
+  if (MaxArgs != 10)
+    result["max_args"] = Node(static_cast<size_t>(MaxArgs));
+  if (MaxAdjacent != 10)
+    result["max_adjacent"] = Node(static_cast<size_t>(MaxAdjacent));
+  if (MaxNodes != 50)
+    result["max_nodes"] = Node(static_cast<size_t>(MaxNodes));
   return result;
 }
 

@@ -38,6 +38,7 @@ using bcdb::OutliningCalleeExtractor;
 using bcdb::OutliningCallerExtractor;
 using bcdb::OutliningCandidates;
 using bcdb::OutliningCandidatesAnalysis;
+using bcdb::OutliningCandidatesOptions;
 using bcdb::OutliningDependenceAnalysis;
 using bcdb::SizeModelAnalysis;
 using bcdb::SizeModelResults;
@@ -56,12 +57,20 @@ const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
 const char *smout::grouped_refinements_version = "smout.grouped_refinements_v2";
 
-static FunctionAnalysisManager makeFAM() {
+static FunctionAnalysisManager makeFAM(const Node &options) {
+  OutliningCandidatesOptions cand_opts;
+  cand_opts.max_adjacent =
+      options.get_value_or<size_t>("max_adjacent", cand_opts.max_adjacent);
+  cand_opts.max_args =
+      options.get_value_or<size_t>("max_args", cand_opts.max_args);
+  cand_opts.max_nodes =
+      options.get_value_or<size_t>("max_nodes", cand_opts.max_nodes);
+
   FunctionAnalysisManager am;
   // TODO: Would it be faster to just register the analyses we need?
   PassBuilder().registerFunctionAnalyses(am);
   am.registerPass([] { return FalseMemorySSAAnalysis(); });
-  am.registerPass([] { return OutliningCandidatesAnalysis(); });
+  am.registerPass([=] { return OutliningCandidatesAnalysis(cand_opts); });
   am.registerPass([] { return OutliningDependenceAnalysis(); });
   am.registerPass([] { return SizeModelAnalysis(); });
   return am;
@@ -253,7 +262,7 @@ NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
 
-  FunctionAnalysisManager am = makeFAM();
+  FunctionAnalysisManager am = makeFAM(*options);
   auto &candidates = am.getResult<OutliningCandidatesAnalysis>(f);
 
   Node result(node_map_arg);
@@ -323,7 +332,7 @@ NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
   auto m = Err(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
-  FunctionAnalysisManager am = makeFAM();
+  FunctionAnalysisManager am = makeFAM(Node(node_map_arg));
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
   std::vector<Function *> callees;
@@ -829,7 +838,7 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   for (const auto &callee : callees->list_range())
     bvs.emplace_back(decodeBitVector(callee["nodes"]));
 
-  FunctionAnalysisManager am = makeFAM();
+  FunctionAnalysisManager am = makeFAM(Node(node_map_arg));
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
 
   OutliningCallerExtractor extractor(f, deps, bvs);

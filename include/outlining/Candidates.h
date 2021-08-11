@@ -26,6 +26,14 @@ namespace bcdb {
 
 using namespace llvm;
 
+struct OutliningCandidatesOptions {
+  size_t max_adjacent = 10;
+  size_t max_args = 10;
+  size_t max_nodes = 50;
+
+  static OutliningCandidatesOptions getFromCommandLine();
+};
+
 class OutliningCandidates {
 public:
   struct Candidate {
@@ -39,13 +47,15 @@ public:
 
   // size_model may be nullptr to disable profitability checks.
   OutliningCandidates(Function &F, OutliningDependenceResults &OutDep,
-                      const SizeModelResults *size_model);
+                      const SizeModelResults *size_model,
+                      const OutliningCandidatesOptions &options);
 
   void print(raw_ostream &OS) const;
 
   Function &F;
   OutliningDependenceResults &OutDep;
   const SizeModelResults *size_model;
+  OutliningCandidatesOptions options;
 
   std::vector<Candidate> Candidates;
 
@@ -61,9 +71,12 @@ class OutliningCandidatesAnalysis
 
   static AnalysisKey Key;
 
+  OutliningCandidatesOptions options;
+
 public:
   using Result = OutliningCandidates;
 
+  OutliningCandidatesAnalysis(const OutliningCandidatesOptions &options);
   OutliningCandidates run(Function &f, FunctionAnalysisManager &am);
 };
 

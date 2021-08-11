@@ -38,10 +38,19 @@ static cl::opt<bool> OutlineUnprofitable(
     cl::desc(
         "Outline every possible sequence, even if it seems unprofitable."));
 
-OutliningCandidates::OutliningCandidates(Function &F,
-                                         OutliningDependenceResults &OutDep,
-                                         const SizeModelResults *size_model)
-    : F(F), OutDep(OutDep), size_model(size_model) {
+OutliningCandidatesOptions OutliningCandidatesOptions::getFromCommandLine() {
+  OutliningCandidatesOptions options;
+  options.max_adjacent = OutlineMaxAdjacent;
+  options.max_nodes = OutlineMaxNodes;
+  options.max_args = OutlineMaxArgs;
+  return options;
+}
+
+OutliningCandidates::OutliningCandidates(
+    Function &F, OutliningDependenceResults &OutDep,
+    const SizeModelResults *size_model,
+    const OutliningCandidatesOptions &options)
+    : F(F), OutDep(OutDep), size_model(size_model), options(options) {
   if (!OutlineOnly.empty()) {
     for (StringRef chosen : OutlineOnly) {
       if (chosen.contains(':')) {
@@ -104,7 +113,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
     deps |= OutDep.DominatingDepends[j];
   deps.intersectWithComplement(candidate.bv);
 
-  while (candidate.bv.count() <= OutlineMaxNodes &&
+  while (candidate.bv.count() <= options.max_nodes &&
          !OutDep.PreventsOutlining.intersects(candidate.bv)) {
     emitCandidate(candidate);
 
@@ -170,7 +179,7 @@ void OutliningCandidates::generateCandidatesEndingAt(size_t i) {
   Candidate contig_candidate;
   // Stop after OutlineMaxAdjacent nodes, or at the beginning of the block.
   int first_contig =
-      static_cast<int>(i) + 1 - static_cast<int>(OutlineMaxAdjacent);
+      static_cast<int>(i) + 1 - static_cast<int>(options.max_adjacent);
   first_contig = std::max(
       first_contig,
       static_cast<int>(OutDep.NodeIndices[cast<Instruction>(OutDep.Nodes[i])
@@ -227,7 +236,7 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
 
     OutliningCalleeExtractor extractor(F, OutDep, candidate.bv);
     if (extractor.getNumArgs() + extractor.getNumReturnValues() >
-        OutlineMaxArgs)
+        options.max_args)
       return;
     candidate.arg_types.clear();
     candidate.result_types.clear();
@@ -264,13 +273,17 @@ void OutliningCandidates::print(raw_ostream &OS) const {
 
 AnalysisKey OutliningCandidatesAnalysis::Key;
 
+OutliningCandidatesAnalysis::OutliningCandidatesAnalysis(
+    const OutliningCandidatesOptions &options)
+    : options(options) {}
+
 OutliningCandidates
 OutliningCandidatesAnalysis::run(Function &f, FunctionAnalysisManager &am) {
   const SizeModelResults *size_model = nullptr;
   auto &deps = am.getResult<OutliningDependenceAnalysis>(f);
   if (!OutlineUnprofitable && OutlineOnly.empty())
     size_model = &am.getResult<SizeModelAnalysis>(f);
-  return OutliningCandidates(f, deps, size_model);
+  return OutliningCandidates(f, deps, size_model, options);
 }
 
 PreservedAnalyses
@@ -289,7 +302,8 @@ bool OutliningCandidatesWrapperPass::runOnFunction(Function &F) {
   const SizeModelResults *size_model = nullptr;
   if (!OutlineUnprofitable && OutlineOnly.empty())
     size_model = &getAnalysis<SizeModelWrapperPass>().getSizeModel();
-  OutCands.emplace(F, OutDep, size_model);
+  OutCands.emplace(F, OutDep, size_model,
+                   OutliningCandidatesOptions::getFromCommandLine());
   return false;
 }
 

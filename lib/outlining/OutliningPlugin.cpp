@@ -19,7 +19,10 @@ llvmGetPassPluginInfo() {
             builder.registerAnalysisRegistrationCallback(
                 [](FunctionAnalysisManager &am) {
                   am.registerPass([] { return FalseMemorySSAAnalysis(); });
-                  am.registerPass([] { return OutliningCandidatesAnalysis(); });
+                  am.registerPass([] {
+                    return OutliningCandidatesAnalysis(
+                        OutliningCandidatesOptions::getFromCommandLine());
+                  });
                   am.registerPass([] { return OutliningDependenceAnalysis(); });
                   am.registerPass([] { return SizeModelAnalysis(); });
                 });
