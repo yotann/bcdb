@@ -64,6 +64,12 @@ static cl::opt<std::string>
                         std::getenv("MEMODB_STORE")))),
                     cl::cat(SmoutCategory), cl::sub(*cl::AllSubCommands));
 
+static cl::opt<int> MinBenefit("min-benefit",
+                               cl::desc("Outlined candidates must have this "
+                                        "minimum estimated benefit, in bytes"),
+                               cl::init(1), cl::cat(SmoutCategory),
+                               cl::sub(*cl::AllSubCommands));
+
 static StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {
     report_fatal_error(
@@ -97,7 +103,12 @@ static std::unique_ptr<Evaluator> createEvaluator() {
   return evaluator;
 }
 
-static Node getCandidatesOptions() { return Node(node_map_arg); }
+static Node getCandidatesOptions() {
+  Node result(node_map_arg);
+  if (MinBenefit != 1)
+    result["min_benefit"] = Node(int(MinBenefit));
+  return result;
+}
 
 // smout candidates
 

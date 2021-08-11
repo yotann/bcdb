@@ -81,6 +81,11 @@ public:
   const_iterator begin() const { return members_.begin(); }
   const_iterator end() const { return members_.end(); }
   std::size_t size() const { return members_.size(); }
+  void erase(const llvm::StringRef &name) {
+    auto it = find(name);
+    if (it != members_.end())
+      members_.erase(it);
+  }
   void clear() { members_.clear(); }
   void reserve(std::size_t n) { members_.reserve(n); }
   iterator find(const llvm::StringRef &name) noexcept {
@@ -459,8 +464,10 @@ public:
     const Map &value = std::get<Map>(variant_);
     auto iter = value.find(name);
     return iter == value.end() ? static_cast<T>(std::forward<U>(default_value))
-                               : iter->value();
+                               : iter->value().as<T>();
   }
+
+  void erase(const llvm::StringRef &name);
 
   void clear();
 

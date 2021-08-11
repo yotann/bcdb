@@ -624,13 +624,17 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
 
 NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
                                  NodeRef mod) {
+  Node stripped_options = *options;
+  int min_benefit = stripped_options.get_value_or<int>("min_benefit", 1);
+  stripped_options.erase("min_benefit");
+
   StringMap<unsigned> original_function_copies;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
     original_function_copies[cid_key(func_cid)]++;
   }
   auto grouped_callees =
-      evaluator.evaluate(grouped_callees_version, options, mod);
+      evaluator.evaluate(grouped_callees_version, stripped_options, mod);
 
   StringMap<size_t> function_indices;
   StringMap<size_t> callee_indices;
@@ -761,7 +765,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
         best_benefit = callees[n].benefit;
       }
     }
-    if (best_benefit <= 0)
+    if (best_benefit < min_benefit)
       break;
 
     size_t n = best_n;

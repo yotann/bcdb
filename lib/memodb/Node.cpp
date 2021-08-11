@@ -213,6 +213,10 @@ const Node &Node::at_or_null(const llvm::StringRef &name) const {
   return iter == value.end() ? null_node : iter->value();
 }
 
+void Node::erase(const llvm::StringRef &name) {
+  std::get<Map>(variant_).erase(name);
+}
+
 void Node::clear() {
   std::visit(Overloaded{
                  [](List &val) { val.clear(); },
