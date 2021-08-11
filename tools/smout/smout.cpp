@@ -70,6 +70,13 @@ static cl::opt<int> MinBenefit("min-benefit",
                                cl::init(1), cl::cat(SmoutCategory),
                                cl::sub(*cl::AllSubCommands));
 
+static cl::opt<int>
+    MinCallerSavings("min-caller-savings",
+                     cl::desc("Outlined candidates must have this "
+                              "minimum savings per caller, in bytes"),
+                     cl::init(1), cl::cat(SmoutCategory),
+                     cl::sub(*cl::AllSubCommands));
+
 static StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {
     report_fatal_error(
@@ -107,6 +114,8 @@ static Node getCandidatesOptions() {
   Node result(node_map_arg);
   if (MinBenefit != 1)
     result["min_benefit"] = Node(int(MinBenefit));
+  if (MinCallerSavings != 1)
+    result["min_caller_savings"] = Node(int(MinCallerSavings));
   return result;
 }
 

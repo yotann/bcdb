@@ -627,6 +627,9 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
   Node stripped_options = *options;
   int min_benefit = stripped_options.get_value_or<int>("min_benefit", 1);
   stripped_options.erase("min_benefit");
+  int min_caller_savings =
+      stripped_options.get_value_or<int>("min_caller_savings", 1);
+  stripped_options.erase("min_caller_savings");
 
   StringMap<unsigned> original_function_copies;
   for (auto &item : (*mod)["functions"].map_range()) {
@@ -677,6 +680,9 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
     // with an insufficient number of duplicates.
     Node members = evaluator.getStore().get(group["members"].as<CID>());
     for (auto &candidate : members.list_range()) {
+      if (candidate["caller_savings"].as<int>() < min_caller_savings)
+        continue;
+
       auto function = candidate["function"].as<CID>();
       auto callee = candidate["callee"].as<CID>();
 
