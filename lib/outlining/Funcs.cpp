@@ -426,7 +426,8 @@ NodeOrCID smout::grouped_callees_for_function(Evaluator &evaluator,
       node["callee_size"] = callee["size"];
       int delta = node["callee_size"].as<int>() -
                   node["estimated_callee_size"].as<int>();
-      node["caller_savings"] = node["caller_savings"].as<int>() + delta;
+      if (delta < 0)
+        node["caller_savings"] = node["caller_savings"].as<int>() + delta;
 
       group.emplace_back(node);
     }
