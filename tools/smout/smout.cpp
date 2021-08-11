@@ -113,9 +113,9 @@ static std::unique_ptr<Evaluator> createEvaluator() {
 static Node getCandidatesOptions() {
   Node result(node_map_arg);
   if (MinBenefit != 1)
-    result["min_benefit"] = Node(int(MinBenefit));
+    result["min_benefit"] = Node(static_cast<int>(MinBenefit));
   if (MinCallerSavings != 1)
-    result["min_caller_savings"] = Node(int(MinCallerSavings));
+    result["min_caller_savings"] = Node(static_cast<int>(MinCallerSavings));
   return result;
 }
 
