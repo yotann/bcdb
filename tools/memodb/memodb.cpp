@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "memodb/CAR.h"
+#include "memodb/Evaluator.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
 #include "memodb/URI.h"
@@ -28,6 +29,9 @@ using namespace memodb;
 
 cl::OptionCategory MemoDBCategory("MemoDB options");
 
+static cl::SubCommand EvaluateCommand(
+    "evaluate",
+    "Evaluate an arbitrary func (if the func is built in to memodb)");
 static cl::SubCommand ExportCommand("export", "Export values to a CAR file");
 static cl::SubCommand GetCommand("get", "Get a value");
 static cl::SubCommand InitCommand("init", "Initialize a store");
@@ -196,6 +200,24 @@ static void WriteValue(const Node &Value) {
     }
     OutputFile->keep();
   }
+}
+
+// memodb evaluate
+
+static cl::opt<std::string> CallToEvaluate(cl::Positional, cl::Required,
+                                           cl::desc("<call to evaluate>"),
+                                           cl::value_desc("call"),
+                                           cl::cat(MemoDBCategory),
+                                           cl::sub(EvaluateCommand));
+
+static int Evaluate() {
+  auto evaluator = Evaluator::create(GetStoreUri(), /*num_threads*/ 1);
+  auto name = GetNameFromURI(CallToEvaluate);
+  if (!std::holds_alternative<Call>(name))
+    report_fatal_error("You must provide a call starting with /call/");
+  auto result = evaluator->evaluate(std::get<Call>(name));
+  outs() << result.getCID() << "\n";
+  return 0;
 }
 
 // memodb export
@@ -412,7 +434,9 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Tools");
 
-  if (ExportCommand) {
+  if (EvaluateCommand) {
+    return Evaluate();
+  } else if (ExportCommand) {
     return Export();
   } else if (GetCommand) {
     return Get();

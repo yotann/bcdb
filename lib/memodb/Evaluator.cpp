@@ -201,6 +201,17 @@ void ThreadPoolEvaluator::printProgress() {
                << finished;
 }
 
+static NodeOrCID test_add(Evaluator &evaluator, NodeRef lhs_node,
+                          NodeRef rhs_node) {
+  int64_t lhs = lhs_node->as<int64_t>();
+  int64_t rhs = rhs_node->as<int64_t>();
+  return Node(lhs + rhs);
+}
+
+static void registerDefaultFuncs(Evaluator &evaluator) {
+  evaluator.registerFunc("test.add", test_add);
+}
+
 Evaluator::Evaluator() {}
 
 Evaluator::~Evaluator() {}
@@ -215,15 +226,24 @@ Future Evaluator::makeFuture(std::shared_future<NodeRef> &&future) {
 
 std::unique_ptr<Evaluator> Evaluator::createLocal(std::unique_ptr<Store> store,
                                                   unsigned num_threads) {
-  return std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
+  auto result =
+      std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
+  registerDefaultFuncs(*result);
+  return result;
 }
 
 std::unique_ptr<Evaluator> Evaluator::create(llvm::StringRef uri,
                                              unsigned num_threads) {
-  if (uri.startswith("http:") || uri.startswith("https:"))
-    return createClientEvaluator(uri, num_threads);
-  auto store = Store::open(uri);
-  return std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
+  std::unique_ptr<Evaluator> result;
+  if (uri.startswith("http:") || uri.startswith("https:")) {
+    result = createClientEvaluator(uri, num_threads);
+  } else {
+    auto store = Store::open(uri);
+    result =
+        std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
+  }
+  registerDefaultFuncs(*result);
+  return result;
 }
 
 void PrettyStackTraceCall::print(llvm::raw_ostream &os) const {

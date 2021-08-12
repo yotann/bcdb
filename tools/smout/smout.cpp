@@ -32,6 +32,10 @@ static cl::SubCommand EquivalenceCommand(
     "equivalence",
     "Check candidates for semantic equivalence (requires alive-worker)");
 
+static cl::SubCommand EvaluateCommand(
+    "evaluate",
+    "Evaluate an arbitrary func (if the func is built in to smout)");
+
 static cl::SubCommand
     ExtractCalleesCommand("extract-callees",
                           "Extract all outlinable callee functions");
@@ -210,6 +214,24 @@ static int Equivalence() {
   return 0;
 }
 
+// smout evaluate
+
+static cl::opt<std::string> CallToEvaluate(cl::Positional, cl::Required,
+                                           cl::desc("<call to evaluate>"),
+                                           cl::value_desc("call"),
+                                           cl::cat(SmoutCategory),
+                                           cl::sub(EvaluateCommand));
+
+static int Evaluate() {
+  auto evaluator = createEvaluator();
+  auto name_or_null = Name::parse(CallToEvaluate);
+  if (!name_or_null || !std::holds_alternative<Call>(*name_or_null))
+    report_fatal_error("invalid call URI");
+  auto result = evaluator->evaluate(std::get<Call>(*name_or_null));
+  llvm::outs() << result.getCID() << "\n";
+  return 0;
+}
+
 // smout extract-callees
 
 static int ExtractCallees() {
@@ -294,6 +316,8 @@ int main(int argc, char **argv) {
     return CreateILPProblem();
   } else if (EquivalenceCommand) {
     return Equivalence();
+  } else if (EvaluateCommand) {
+    return Evaluate();
   } else if (ExtractCalleesCommand) {
     return ExtractCallees();
   } else if (OptimizeCommand) {
