@@ -53,8 +53,8 @@ const char *smout::grouped_callees_for_function_version =
 const char *smout::grouped_callees_version = "smout.grouped_callees_v3";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution_v3";
-const char *smout::extracted_caller_version = "smout.extracted_caller_v3";
-const char *smout::optimized_version = "smout.optimized_v3";
+const char *smout::extracted_caller_version = "smout.extracted_caller_v4";
+const char *smout::optimized_version = "smout.optimized_v4";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
 const char *smout::grouped_refinements_version = "smout.grouped_refinements_v3";
@@ -875,7 +875,10 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
     }
   }
 
-  postprocessModule(*m);
+  // TODO: call postprocessModule(*m). This will require extra handling in
+  // optimized() because it can change the function attributes, and the
+  // function attributes on the caller need to match the attributes in the
+  // remainder module.
   bcdb::Splitter splitter(*m);
   auto mpart = splitter.SplitGlobal(&f);
   SmallVector<char, 0> buffer;
