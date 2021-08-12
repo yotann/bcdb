@@ -439,11 +439,6 @@ void OutliningDependenceResults::analyzeMemoryPhi(MemoryPhi *MPhi) {
   addForcedDepend(MPhi, MPhi->getBlock());
   for (Value *value : MPhi->incoming_values())
     addDepend(MPhi, value);
-
-  // This is probably redundant, but let's keep it so we match the handling of
-  // PHINode.
-  for (BasicBlock *block : MPhi->blocks())
-    addDepend(MPhi, block->getTerminator());
 }
 
 void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
