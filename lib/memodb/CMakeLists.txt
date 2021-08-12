@@ -13,6 +13,7 @@ add_llvm_library(libmemodb
   Server.cpp
   SQLite.cpp
   Store.cpp
+  ToolSupport.cpp
   URI.cpp
 )
 target_link_libraries(libmemodb PRIVATE

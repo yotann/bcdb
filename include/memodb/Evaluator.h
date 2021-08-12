@@ -8,6 +8,7 @@
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/PrettyStackTrace.h>
 
 #include "Store.h"
 
@@ -143,6 +144,14 @@ private:
                   NodeRef(evaluator.getStore(), call.Args[indexes])...);
     };
   }
+};
+
+class PrettyStackTraceCall : public llvm::PrettyStackTraceEntry {
+  const Call &call;
+
+public:
+  PrettyStackTraceCall(const Call &call) : call(call) {}
+  void print(llvm::raw_ostream &os) const override;
 };
 
 } // end namespace memodb

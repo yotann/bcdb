@@ -656,6 +656,7 @@ void ClientEvaluator::printProgress() {
 }
 
 void ClientEvaluator::workerThreadImpl(nng_aio *aio) {
+  llvm::PrettyStackTraceString stack_printer("Worker thread (client process)");
   nng_msleep(1000); // Give the program time to call registerFunc().
   while (!work_done) {
     std::unique_lock lock(worker_info_cid_mutex);
@@ -686,7 +687,11 @@ void ClientEvaluator::workerThreadImpl(nng_aio *aio) {
     lock = std::unique_lock(funcs_mutex);
     auto &func = funcs[call.Name];
     lock.unlock();
-    auto result = NodeRef(*store, func(*this, call));
+
+    std::optional<PrettyStackTraceCall> stack_printer;
+    stack_printer.emplace(call);
+    NodeRef result = NodeRef(*store, func(*this, call));
+    stack_printer.reset();
 
     SmallVector<char, 256> buffer;
     llvm::raw_svector_ostream os(buffer);

@@ -18,8 +18,10 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FormatVariadic.h>
+#include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "memodb/ToolSupport.h"
 #include "memodb_internal.h"
 
 using namespace memodb;
@@ -121,6 +123,7 @@ NodeRef ThreadPoolEvaluator::evaluate(const Call &call) {
   if (func_iter == funcs.end())
     llvm::report_fatal_error("No implementation of " + call.Name +
                              " available");
+  PrettyStackTraceCall pretty_stack_trace(call);
   auto result = NodeRef(getStore(), func_iter->getValue()(*this, call));
   getStore().set(call, result.getCID());
   return result;
@@ -163,6 +166,8 @@ void ThreadPoolEvaluator::workerThreadImpl() {
 }
 
 NodeRef ThreadPoolEvaluator::evaluateDeferred(const Call &call) {
+  llvm::PrettyStackTraceString stack_printer("Worker thread (single process)");
+
   num_started++;
 
   // Use try_to_lock so that printing to stderr doesn't become a bottleneck. If
@@ -219,4 +224,15 @@ std::unique_ptr<Evaluator> Evaluator::create(llvm::StringRef uri,
     return createClientEvaluator(uri, num_threads);
   auto store = Store::open(uri);
   return std::make_unique<ThreadPoolEvaluator>(std::move(store), num_threads);
+}
+
+void PrettyStackTraceCall::print(llvm::raw_ostream &os) const {
+  os << "...which was evaluating " << call << "\n";
+  os << "            to try again, run:\n";
+  os << "              " << getArgv0() << " evaluate " << call << "\n";
+  os << "            to save the inputs that caused the failure, run:\n";
+  os << "              memodb export -o fail.car";
+  for (const CID &arg : call.Args)
+    os << " /cid/" << arg;
+  os << "\n";
 }

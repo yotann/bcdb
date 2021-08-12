@@ -3,18 +3,16 @@
 
 // Just some utilities for use in tools.
 
+#include <optional>
+
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/InitLLVM.h>
+#include <llvm/Support/PrettyStackTrace.h>
 
 namespace memodb {
-static inline bool OptionHasCategory(llvm::cl::Option &O,
-                                     llvm::cl::OptionCategory &C) {
-  for (llvm::cl::OptionCategory *C2 : O.Categories)
-    if (C2 == &C)
-      return true;
-  return false;
-}
+
+bool OptionHasCategory(llvm::cl::Option &O, llvm::cl::OptionCategory &C);
 
 template <typename F> static inline void ReorganizeOptions(F f) {
   // Reorganize options into subcommands.
@@ -35,11 +33,14 @@ template <typename F> static inline void ReorganizeOptions(F f) {
 }
 
 class InitTool {
-  llvm::InitLLVM InitLLVM;
+  std::optional<llvm::PrettyStackTraceProgram> stack_printer;
 
 public:
-  InitTool(int &argc, char **&argv) : InitLLVM(argc, argv) {}
+  InitTool(int &argc, char **&argv);
 };
+
+llvm::StringRef getArgv0();
+
 } // end namespace memodb
 
 #endif // MEMODB_TOOL_SUPPORT_H
