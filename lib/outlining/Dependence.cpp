@@ -22,6 +22,11 @@
 using namespace bcdb;
 using namespace llvm;
 
+static cl::opt<bool> force_transitive_closures(
+    "force-transitive-closures",
+    cl::desc(
+        "Force transitive closures of outlining dependencies to be computed."));
+
 namespace {
 class OutliningDependenceWriter : public AssemblyAnnotationWriter {
   const OutliningDependenceResults *OutDep;
@@ -106,12 +111,11 @@ OutliningDependenceResults::OutliningDependenceResults(Function &F,
       llvm_unreachable("Impossible node type.");
   }
   finalizeDepends();
+  if (force_transitive_closures)
+    computeTransitiveClosures();
 }
 
 void OutliningDependenceResults::print(raw_ostream &OS) const {
-  // FIXME: update test cases so this is no longer necessary.
-  const_cast<OutliningDependenceResults &>(*this).computeTransitiveClosures();
-
   OutliningDependenceWriter Writer(this);
   F.print(OS, &Writer);
 }

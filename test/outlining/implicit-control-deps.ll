@@ -1,5 +1,6 @@
 ; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-dependence -analyze %s | FileCheck %s
+; RUN:     -outlining-dependence -force-transitive-closures -analyze %s \
+; RUN: | FileCheck %s
 
 
 ; "@may_throw_or_exit" might throw an exception or exit the program, in which
