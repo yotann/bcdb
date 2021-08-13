@@ -5,38 +5,7 @@
 These instructions assume you have built the BCDB and installed it in `PATH`.
 It is recommended to enable RocksDB support.
 
-### 0. Important notes
-
-#### Connecting to the database or the server
-
-The commands `memodb`, `bcdb`, and `smout` can be run in two modes: they can
-either connect directly to the database store, with `MEMODB_STORE=rocksdb:...`,
-or they can connect to a running instance of `memodb-server`, with
-`MEMODB_STORE=http:...`. The `memodb-server` program itself should always be
-run with a direct connection.
-
-Only one process can be directly connected to the database at once. In
-particular, you have to kill `memodb-server` before you run any other command
-that connects directly to the database.
-
-It's okay to run multiple programs plus `memodb-server` at the same time, as
-long as `memodb-server` is the only program with a direct connection to the
-database. But keep in mind it may be slow to go through the server like this.
-
-#### Problems with the server
-
-- The server probably has security holes, so you should be careful not to
-  expose it to the Internet. (Running it on `http://127.0.0.1:29179` should be
-  safe, but `http://0.0.0.0:29179` is dangerous.)
-- If you're using the same machine as someone else, you need to use different
-  port numbers (you can't both use port 29179 at the same time).
-- The server and client have some known memory leaks.
-- If you kill a worker while it's processing a job, the job will never be
-  finished. (The server will keep waiting for results forever.) You can fix
-  this by restarting the server. You'll also have to restart all the programs
-  connected to it.
-  - Note that `alive-worker` is designed to send a result to the server even
-    when it crashes.
+These instruction also assume you have gone through the [MemoDB tutorial].
 
 ### 1. Install the newest version of BCDB
 
@@ -229,3 +198,5 @@ curl http://127.0.0.1:29179/call
 
 You can use the [REST API](../memodb/rest-api.md) to explore the outlining
 results.
+
+[MemoDB tutorial]: ../memodb/tutorial.md

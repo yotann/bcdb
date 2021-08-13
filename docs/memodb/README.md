@@ -13,14 +13,20 @@ Features:
   evaluation.
 - A REST API for accessing the store and writing distributed workers.
 
+## Tutorial
+
+See the [Tutorial].
+
 ## Design
 
 See the [MemoDB data model].
 
 ## Usage
 
-- From the command line: use the `memodb` program. (No documentation yet.)
-- From C++: see the [C++ class list] and look through the header files.
+- From the command line: use the `memodb` program. See the [Tutorial].
+- From C++: see the [C++ class list] and look through the header files. You can
+  also generate documentation by running `doxygen` in the top-level BCDB
+  directory; documentation will go in `build/doxygen/html`.
 - From other languages: see the [REST API documentation].
 
 ## Rationales
@@ -31,3 +37,4 @@ See the [MemoDB data model] and [comparisons of protocols and libraries].
 [comparisons of protocols and libraries]: ./comparisons.md
 [MemoDB data model]: ./data-model.md
 [REST API documentation]: ./rest-api.md
+[Tutorial]: ./tutorial.md
