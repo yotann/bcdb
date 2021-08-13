@@ -82,7 +82,8 @@ static cl::opt<Format> format_option(
                clEnumValN(Format_Raw, "raw",
                           "raw binary data without CBOR wrapper."),
                clEnumValN(Format_JSON, "json", "MemoDB JSON.")),
-    cl::sub(GetCommand), cl::sub(PutCommand), cl::sub(SetCommand));
+    cl::init(Format_JSON), cl::sub(GetCommand), cl::sub(PutCommand),
+    cl::sub(SetCommand));
 
 // Name options
 
