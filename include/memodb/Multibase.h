@@ -52,7 +52,8 @@ public:
   /**
    * Encode a specific multibase, adding a prefix character.
    *
-   * For example, `Multibase::base32.encode({0x55, 0xaa})` will return `"bkwva"`.
+   * For example, `Multibase::base32.encode({0x55, 0xaa})` will return
+   * `"bkwva"`.
    */
   std::string encode(llvm::ArrayRef<std::uint8_t> bytes) const;
 

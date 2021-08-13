@@ -254,7 +254,6 @@ private:
   friend struct NodeTypeTraits<CID>;
 
 public:
-
   Node(const Node &Other) = default;
   Node(Node &&Other) noexcept = default;
   Node &operator=(const Node &Other) = default;
@@ -276,13 +275,17 @@ public:
   /// Construct a boolean Node.
   Node(bool val);
 
+#ifdef __DOXYGEN__
   /// Construct an integer Node.
-  // Note "1 > 0" to stop Doxygen from getting confused by the '<'.
+  template <typename IntegerType> Node(IntegerType val);
+#else // __DOXYGEN__
+
+  // Doxygen gets confused by the '<' characters in template parameters.
+
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_unsigned<IntegerType>::value &&
-                                 sizeof(IntegerType) < sizeof(std::int64_t) &&
-                                 1 > 0,
+                                 sizeof(IntegerType) < sizeof(std::int64_t),
                              int> = 0>
   Node(IntegerType val) : variant_(std::int64_t(val)) {}
 
@@ -299,14 +302,14 @@ public:
   }
 
   /// Construct an integer Node.
-  // Note "1 > 0" to stop Doxygen from getting confused by the '<'.
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_signed<IntegerType>::value &&
-                                 sizeof(IntegerType) <= sizeof(std::int64_t) &&
-                                 1 > 0,
+                                 sizeof(IntegerType) <= sizeof(std::int64_t),
                              int> = 0>
   Node(IntegerType val) : variant_(std::int64_t(val)) {}
+
+#endif // __DOXYGEN__
 
   /// Construct a floating-point Node.
   Node(double Float);
