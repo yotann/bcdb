@@ -86,13 +86,6 @@ static std::unique_ptr<nng_aio, AioDeleter> aio_alloc() {
   return std::unique_ptr<nng_aio, AioDeleter>(result);
 }
 
-static std::unique_ptr<nng_aio, AioDeleter> aio_alloc(void (*callb)(void *),
-                                                      void *arg) {
-  nng_aio *result;
-  checkErr(nng_aio_alloc(&result, callb, arg));
-  return std::unique_ptr<nng_aio, AioDeleter>(result);
-}
-
 static std::unique_ptr<nng_http_client, HTTPClientDeleter>
 http_client_alloc(nng_url *url) {
   nng_http_client *result;
@@ -388,7 +381,9 @@ public:
   void handleFutureStopsWaiting() override;
 
 private:
-  friend struct AsyncRequest;
+  std::optional<NodeRef> tryEvaluate(const Call &call,
+                                     bool inc_started_if_success);
+  NodeRef evaluateDeferred(const Call &call);
 
   std::unique_ptr<HTTPStore> store;
   llvm::StringMap<std::function<NodeOrCID(Evaluator &, const Call &)>> funcs;
@@ -441,52 +436,26 @@ ClientEvaluator::~ClientEvaluator() {
 
 Store &ClientEvaluator::getStore() { return *store; }
 
-NodeRef ClientEvaluator::evaluate(const Call &call) {
+std::optional<NodeRef>
+ClientEvaluator::tryEvaluate(const Call &call, bool inc_started_if_success) {
   // TODO: we need some way to set the timeout parameter.
 
   SmallVector<char, 256> buffer;
   llvm::raw_svector_ostream os(buffer);
   os << call << "/evaluate";
 
-  // TODO: get rid of duplicate code in AsyncRequest.
-
   Response response;
-  bool accepted = false;
-  ++num_requested;
 
-  // Use try_to_lock so that printing to stderr doesn't become a bottleneck. If
-  // there are multiple threads, messages may be skipped, but if the thread
-  // pool is empty and Evaluator is only used by one thread, all messages will
-  // be printed.
-  if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
-    printProgress();
-    llvm::errs() << " starting " << call << "\n";
+  response = store->request("POST", os.str());
+  if (response.status == 202) {
+    // No result yet.
+    return std::nullopt;
+  } else if (response.status != 200) {
+    response.raiseError();
   }
 
-  while (true) {
-    response = store->request("POST", os.str());
-    if (response.status == 202) {
-      // Accepted
-      if (!accepted) {
-        accepted = true;
-        ++num_started;
-      }
-      continue;
-    } else if (response.status == 503) {
-      // Service Unavailable
-      continue;
-    } else if (response.status == 200) {
-      // OK
-      break;
-    } else {
-      response.raiseError();
-    }
-  }
-  if (!accepted) {
-    accepted = true;
+  if (inc_started_if_success)
     ++num_started;
-  }
-
   ++num_finished;
   if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
     printProgress();
@@ -496,126 +465,40 @@ NodeRef ClientEvaluator::evaluate(const Call &call) {
   return NodeRef(*store, response.body.as<CID>());
 }
 
-namespace {
-struct AsyncRequest {
-  AsyncRequest(ClientEvaluator *evaluator, Call call);
-  void start();
-  void transact();
-  void callback();
-
-  ClientEvaluator *evaluator;
-  Call call;
-  std::promise<NodeRef> promise;
-  std::unique_ptr<nng_http_conn, HTTPConnCloser> conn;
-  std::unique_ptr<nng_http_req, HTTPRequestDeleter> req;
-  std::unique_ptr<nng_http_res, HTTPResponseDeleter> res;
-  std::unique_ptr<nng_aio, AioDeleter> aio;
-  bool accepted = false;
-};
-} // end anonymous namespace
-
-static void requestHandler(void *arg) {
-  static_cast<AsyncRequest *>(arg)->callback();
-}
-
-AsyncRequest::AsyncRequest(ClientEvaluator *evaluator, Call call)
-    : evaluator(evaluator), call(call) {
-  SmallVector<char, 256> buffer;
-  llvm::raw_svector_ostream os(buffer);
-  os << call << "/evaluate";
-
-  aio = aio_alloc(requestHandler, this);
-  req = evaluator->store->buildRequest("POST", os.str());
-  res = http_res_alloc();
-}
-
-void AsyncRequest::start() {
-  nng_http_client_connect(evaluator->store->client.get(), aio.get());
-}
-
-void AsyncRequest::transact() {
-  nng_http_conn_transact(conn.get(), req.get(), res.get(), aio.get());
-}
-
-void AsyncRequest::callback() {
-  checkErr(nng_aio_result(aio.get()));
-  if (!conn) {
-    conn.reset(static_cast<nng_http_conn *>(nng_aio_get_output(aio.get(), 0)));
-    ++evaluator->num_requested;
-    if (auto stderr_lock = std::unique_lock(evaluator->stderr_mutex,
-                                                        std::try_to_lock)) {
-      evaluator->printProgress();
-      llvm::errs() << " starting " << call << "\n";
-    }
-    transact();
-    return;
+NodeRef ClientEvaluator::evaluate(const Call &call) {
+  ++num_requested;
+  if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
+    printProgress();
+    llvm::errs() << " starting " << call << "\n";
   }
-  auto response = evaluator->store->getResponse(res.get());
-  if (response.status == 202) {
-    // Accepted
-    if (!accepted) {
-      accepted = true;
-      ++evaluator->num_started;
-    }
-    if (auto stderr_lock =
-            std::unique_lock(evaluator->stderr_mutex, std::try_to_lock)) {
-      evaluator->printProgress();
-      llvm::errs() << " awaiting " << call << "\n";
-    }
-    transact();
-  } else if (response.status == 503) {
-    // Service Unavailable
-    if (auto stderr_lock =
-            std::unique_lock(evaluator->stderr_mutex, std::try_to_lock)) {
-      evaluator->printProgress();
-      llvm::errs() << " retrying " << call << "\n";
-    }
-    transact();
-  } else if (response.status == 200) {
-    // OK
-    if (!accepted) {
-      accepted = true;
-      ++evaluator->num_started;
-    }
-    ++evaluator->num_finished;
-    if (auto stderr_lock =
-            std::unique_lock(evaluator->stderr_mutex, std::try_to_lock)) {
-      evaluator->printProgress();
-      llvm::errs() << " finished " << call << "\n";
-    }
-    promise.set_value(NodeRef(*evaluator->store, response.body.as<CID>()));
-    // We can't delete aio here because that NNG would deadlock.
-    // FIXME: this leaks the aio. Need to think of a better solution.
-    aio.release();
-    delete this;
-  } else {
-    response.raiseError();
+  return evaluateDeferred(call);
+}
+
+NodeRef ClientEvaluator::evaluateDeferred(const Call &call) {
+  ++num_started;
+  while (true) {
+    auto result = tryEvaluate(call, false);
+    if (result)
+      return *result;
+    nng_msleep(1000); // TODO: exponential backoff
   }
 }
 
 Future ClientEvaluator::evaluateAsync(const Call &call) {
-  // TODO: we need some way to set the timeout parameter.
-
-  // Each request uses its own TCP connection, and if we try to open too many
-  // connections at once we'll get an error. So we limit ourselves to 900
-  // outstanding requests.
-  //
-  // TODO: use a connection pool so we don't have to start a new connection for
-  // every request. Also make an nng_aio pool so we don't leak those.
-  while (true) {
-    // Load atomics in this order to avoid getting negative values.
-    unsigned finished = num_finished;
-    unsigned requested = num_requested;
-    if (requested - finished < 900)
-      break;
-    nng_msleep(1000);
+  ++num_requested;
+  if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
+    printProgress();
+    llvm::errs() << " starting " << call << "\n";
   }
-  AsyncRequest *request = new AsyncRequest(this, call);
-  // We need to get the future *before* calling request->start(). Otherwise,
-  // the request could complete and delete itself before we access it!
-  auto result = makeFuture(request->promise.get_future().share());
-  request->start();
-  return result;
+  auto early_result = tryEvaluate(call, true);
+  if (early_result) {
+    std::promise<NodeRef> promise;
+    promise.set_value(*early_result);
+    return makeFuture(promise.get_future().share());
+  }
+  auto future = std::async(std::launch::deferred,
+                           &ClientEvaluator::evaluateDeferred, this, call);
+  return makeFuture(future.share());
 }
 
 void ClientEvaluator::registerFunc(
@@ -677,8 +560,11 @@ void ClientEvaluator::workerThreadImpl(nng_aio *aio) {
     auto response = store->getResponse(res.get());
     if (response.status < 200 || response.status > 299)
       response.raiseError();
-    if (response.body.is_null())
-      continue; // no jobs available
+    if (response.body.is_null()) {
+      // No jobs available.
+      nng_msleep(1000); // TODO: exponential backoff
+      continue;
+    }
 
     Call call("", {});
     call.Name = response.body["func"].as<std::string>();
