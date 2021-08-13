@@ -18,12 +18,14 @@ bool memodb::OptionHasCategory(llvm::cl::Option &O,
 }
 
 InitTool::InitTool(int &argc, char **&argv) {
+#if LLVM_VERSION_MAJOR >= 11
   llvm::setBugReportMsg(
       R"(
 Fatal error! This is probably either a bug in BCDB, or you are using it incorrectly.
 When you share this error, please include all parts of the error message.
 
 )");
+#endif
 
   // This is like llvm::InitLLVM, but it registers the handlers in a different
   // order, so the pretty stack trace goes on the bottom. This is important
