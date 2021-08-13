@@ -24,9 +24,15 @@ namespace memodb {
 
 class Node;
 
+/// \defgroup utility MemoDB utility classes
+
+/// \defgroup core MemoDB core data classes
+
+/// \ingroup utility
 using BytesRef = llvm::ArrayRef<std::uint8_t>;
 
-// An alternative to std::pair for holding key-value pairs.
+/// An alternative to std::pair for holding key-value pairs.
+/// \ingroup utility
 template <class KeyT, class ValueT> class KeyValue {
 private:
   KeyT key_;
@@ -47,7 +53,8 @@ public:
   }
 };
 
-// A map implementation based on a sorted vector (like the one in jsoncons).
+/// A map implementation based on a sorted vector (like the one in jsoncons).
+/// \ingroup utility
 template <class KeyT, class ValueT> class NodeMap {
 public:
   using key_value_type = KeyValue<KeyT, ValueT>;
@@ -129,7 +136,8 @@ public:
   }
 };
 
-// A range consisting of two iterators.
+/// A range consisting of two iterators.
+/// \ingroup utility
 template <class IteratorT> class Range {
   IteratorT first_, last_;
 
@@ -141,28 +149,37 @@ public:
   iterator end() { return last_; }
 };
 
+/// Use \ref node_list_arg to construct list Nodes.
+/// \ingroup utility
 struct NodeListArg {
   explicit NodeListArg() = default;
 };
 constexpr NodeListArg node_list_arg{};
 
+/// Use \ref node_map_arg to construct map Nodes.
+/// \ingroup utility
 struct NodeMapArg {
   explicit NodeMapArg() = default;
 };
 constexpr NodeMapArg node_map_arg{};
 
+/// Use \ref utf8_string_arg to construct text string Nodes.
+/// \ingroup utility
 struct UTF8StringArg {
   explicit UTF8StringArg() = default;
 };
 constexpr UTF8StringArg utf8_string_arg{};
 
+/// Use \ref byte_string_arg to construct byte string Nodes.
+/// \ingroup utility
 struct ByteStringArg {
   explicit ByteStringArg() = default;
 };
 constexpr ByteStringArg byte_string_arg{};
 
-// When specialized for a type, allows that type to be used with Node::as,
-// Node::is, etc.
+/// When specialized for a type, allows that type to be used with Node::as,
+/// Node::is, etc.
+/// \ingroup core
 template <class T, class Enable = void> struct NodeTypeTraits {
   // Check whether the Node can be converted to type T.
   static constexpr bool is(const Node &) noexcept { return false; }
@@ -179,8 +196,9 @@ template <class T, class Enable = void> struct NodeTypeTraits {
   }
 };
 
-// The essential kinds of data in the IPLD Data Model:
-// https://github.com/ipld/specs/blob/master/data-model-layer/data-model.md
+/// The essential kinds of data that can be stored by a Node.
+/// https://github.com/ipld/specs/blob/master/data-model-layer/data-model.md
+/// \ingroup core
 enum class Kind {
   Null,
   Boolean,
@@ -193,13 +211,17 @@ enum class Kind {
   Link,
 };
 
-// A value that may be stored in the IPLD Data Model:
-// https://github.com/ipld/specs/blob/master/data-model-layer/data-model.md
-//
-// The API is based on jsoncons::basic_json:
-// https://github.com/danielaparker/jsoncons/blob/master/include/jsoncons/basic_json.hpp
-// Note that some terminology is different (jsoncons "object" is our "Map",
-// jsoncons "array" is our "List").
+/// A structured data value.
+///
+/// The possible values correspond to the IPLD Data Model:
+/// https://github.com/ipld/specs/blob/master/data-model-layer/data-model.md
+///
+/// The API is based on jsoncons::basic_json:
+/// https://github.com/danielaparker/jsoncons/blob/master/include/jsoncons/basic_json.hpp
+/// Note that some terminology is different (jsoncons "object" is our "Map",
+/// jsoncons "array" is our "List").
+///
+/// \ingroup core
 class Node {
 
 public:
@@ -232,27 +254,39 @@ private:
   friend struct NodeTypeTraits<CID>;
 
 public:
-  // Constructors and assignment.
 
-  // NOTE: default is null (jsoncons default is empty map).
-  Node();
   Node(const Node &Other) = default;
   Node(Node &&Other) noexcept = default;
   Node &operator=(const Node &Other) = default;
   Node &operator=(Node &&Other) noexcept = default;
+  ~Node() noexcept {}
 
+  /// \name Scalar constructors and assignment
+  /// @{
+
+  /// Construct a null Node. (NOTE: jsoncons default is empty map.)
+  Node();
+
+  /// Construct a null Node.
   Node(std::nullptr_t);
+
+  /// Replace with null.
   Node &operator=(std::nullptr_t);
 
+  /// Construct a boolean Node.
   Node(bool val);
 
+  /// Construct an integer Node.
+  // Note "1 > 0" to stop Doxygen from getting confused by the '<'.
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_unsigned<IntegerType>::value &&
-                                 sizeof(IntegerType) < sizeof(std::int64_t),
+                                 sizeof(IntegerType) < sizeof(std::int64_t) &&
+                                 1 > 0,
                              int> = 0>
   Node(IntegerType val) : variant_(std::int64_t(val)) {}
 
+  /// Construct an integer Node.
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_unsigned<IntegerType>::value &&
@@ -264,27 +298,44 @@ public:
     variant_ = std::int64_t(val);
   }
 
+  /// Construct an integer Node.
+  // Note "1 > 0" to stop Doxygen from getting confused by the '<'.
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_signed<IntegerType>::value &&
-                                 sizeof(IntegerType) <= sizeof(std::int64_t),
+                                 sizeof(IntegerType) <= sizeof(std::int64_t) &&
+                                 1 > 0,
                              int> = 0>
   Node(IntegerType val) : variant_(std::int64_t(val)) {}
 
+  /// Construct a floating-point Node.
   Node(double Float);
 
+  /// Construct a text string Node. The text must be valid UTF-8.
   Node(const char *Str);
+
+  /// Construct a text string Node. The text must be valid UTF-8.
   Node(const char *Str, std::size_t Length);
+
+  /// Replace with a text string. The text must be valid UTF-8.
   Node &operator=(const char *Str);
 
-  // We require an explicit utf8_string_arg argument because strings are often
-  // not valid UTF-8.
+  /// Construct a text string Node. We require an explicit \ref utf8_string_arg
+  /// argument to remind you that strings must be valid UTF-8.
   Node(UTF8StringArg, const llvm::StringRef &sr);
+
+  /// Construct a text string Node. We require an explicit \ref utf8_string_arg
+  /// argument to remind you that strings must be valid UTF-8.
   Node(UTF8StringArg, const std::string_view &sv);
+
+  /// Construct a text string Node. We require an explicit \ref utf8_string_arg
+  /// argument to remind you that strings must be valid UTF-8.
   Node(UTF8StringArg, const std::string &str);
 
+  /// Construct an empty byte string Node.
   Node(ByteStringArg);
 
+  /// Construct a byte string Node.
   // FIXME: Check whether Source really is a byte/char sequence.
   template <class Source>
   Node(ByteStringArg, const Source &source)
@@ -293,75 +344,107 @@ public:
                          reinterpret_cast<const std::uint8_t *>(source.data()) +
                              source.size())) {}
 
+  /// Construct a byte string Node.
   Node(BytesRef bytes);
 
+  // Explicit so we don't confuse Node values with links when setting up e.g.
+  // call arguments.
+  /// Construct a link Node.
+  explicit Node(const CID &val);
+  /// Construct a link Node.
+  explicit Node(CID &&val);
+
+  /// @}
+
+  /// \name Container constructors and assignment
+  /// @{
+
+  /// Construct an empty list Node. The argument must be \ref node_list_arg.
   explicit Node(NodeListArg);
 
+  /// Construct a list Node. The first argument must be \ref node_list_arg.
   template <class InputIt>
   Node(NodeListArg, InputIt first, InputIt last) : Node(List(first, last)) {}
 
+  /// Construct a list Node. The first argument must be \ref node_list_arg.
+  /// Example:
+  /// \code
+  ///   Node(node_list_arg, {0, 1, 2})
+  /// \endcode
   Node(NodeListArg, std::initializer_list<Node> init);
 
   Node(const List &list);
   Node(List &&list);
 
+  /// Construct an empty map Node. The argument must be \ref node_map_arg.
   explicit Node(NodeMapArg);
 
+  /// Construct a map Node. The first argument must be \ref node_map_arg.
   template <class InputIt>
   Node(NodeMapArg, InputIt first, InputIt last) : Node(Map(first, last)) {
     validateKeysUTF8();
   }
 
+  /// Construct a map Node. The first argument must be \ref node_map_arg.
+  /// Example:
+  /// \code
+  ///   Node(node_map_arg, {{"number", 27}, {"string", "goodbyte"}})
+  /// \endcode
   Node(NodeMapArg,
        std::initializer_list<std::pair<llvm::StringRef, Node>> init);
 
   Node(const Map &map);
   Node(Map &&map);
 
-  // Explicit so we don't confuse Node values with links when setting up e.g.
-  // call arguments.
-  explicit Node(const CID &val);
-  explicit Node(CID &&val);
+  /// @}
 
-  ~Node() noexcept {}
-
-  // Comparison operators.
+  /// \name Comparison operators
+  /// Nodes of the same kind will be sorted in the natural way (integers in
+  /// ascending order, strings in lexicographical order, etc.) Nodes of
+  /// different kinds are sorted in an arbitrary order.
+  /// @{
 
   bool operator==(const Node &other) const;
   bool operator!=(const Node &other) const;
   bool operator<(const Node &other) const;
 
-  // Saving and loading.
+  /// @}
 
-  // Load a Node from DAG-CBOR bytes:
-  // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
+  /// \name Saving and loading
+  /// @{
+
+  /// Load a Node from DAG-CBOR bytes:
+  /// https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
   static llvm::Expected<Node> loadFromCBOR(BytesRef in);
 
-  // Load a Node from DAG-CBOR bytes at the beginning of a sequence. When this
-  // returns, "in" will refer to the rest of the bytes after the DAG-CBOR
-  // value.
+  /// Load a Node from DAG-CBOR bytes at the beginning of a sequence. When this
+  /// returns, "in" will refer to the rest of the bytes after the DAG-CBOR
+  /// value.
   static llvm::Expected<Node> loadFromCBORSequence(BytesRef &in);
 
-  // Save a Node to DAG-CBOR bytes.
+  /// Save a Node to DAG-CBOR bytes.
   void save_cbor(std::vector<std::uint8_t> &out) const;
 
-  // Load a Node from a CID and the corresponding content bytes. The CID
-  // content type may be either Raw (bytes returned as a bytestring Node) or
-  // DAG-CBOR. The CID hash type may be Identity, in which case the value is
-  // loaded directly from the CID.
+  /// Load a Node from a CID and the corresponding content bytes. The CID
+  /// content type may be either Raw (bytes returned as a bytestring Node) or
+  /// DAG-CBOR. The CID hash type may be Identity, in which case the value is
+  /// loaded directly from the CID.
   static llvm::Expected<Node> loadFromIPLD(const CID &CID, BytesRef Content);
 
-  // Save a Node as a CID and the corresponding content bytes. The CID content
-  // type will be either Raw (if this is a bytestring Node) or DAG-CBOR. If
-  // noIdentity is false and the value is small enough, the CID will be an
-  // Identity CID and the returned content bytes will be empty.
+  /// Save a Node as a CID and the corresponding content bytes. The CID content
+  /// type will be either Raw (if this is a bytestring Node) or DAG-CBOR. If
+  /// noIdentity is false and the value is small enough, the CID will be an
+  /// Identity CID and the returned content bytes will be empty.
   std::pair<CID, std::vector<std::uint8_t>>
   saveAsIPLD(bool noIdentity = false) const;
 
-  // Load a Node from the MemoDB JSON format.
+  /// Load a Node from the MemoDB JSON format.
   static llvm::Expected<Node> loadFromJSON(llvm::StringRef json);
 
-  // Checking the kind of Node.
+  /// @}
+
+  /// \name Checking the kind of Node
+  /// @{
 
   Kind kind() const;
 
@@ -405,37 +488,54 @@ public:
     return std::holds_alternative<CID>(variant_);
   }
 
-  // All-purpose accessors using NodeTypeTraits.
+  /// @}
 
-  // Check whether this Node can be converted to type T.
+  /// \name Templated accessors
+  /// These functions use NodeTypeTraits to support lots of different types.
+  /// You can specialize NodeTypeTraits to make them work for your own types,
+  /// too.
+  /// @{
+
+  /// Check whether this Node can be converted to type T.
+  /// \code
+  ///   node.is<int>()
+  /// \endcode
   template <class T> constexpr bool is() const {
     return NodeTypeTraits<T>::is(*this);
   }
 
-  // Convert this Node to type T, aborting if this is impossible.
+  /// Convert this Node to type T, aborting if this is impossible.
+  /// \code
+  ///   node.as<int>()
+  /// \endcode
   template <class T> T as() const { return NodeTypeTraits<T>::as(*this); }
 
-  // Convert this Node to type T in bytestring mode, aborting if this is
-  // impossible.
+  /// Convert this Node to type T in bytestring mode, aborting if this is
+  /// impossible.
   template <class T> T as(ByteStringArg) const {
     return NodeTypeTraits<T>::as(*this, byte_string_arg);
   }
 
-  // Convenience functions for Lists and Maps.
+  /// @}
+
+  /// \name Access to text strings, byte strings, maps, and lists
+  /// @{
 
   // NOTE: works on strings and bytes, unlike jsoncons.
   std::size_t size() const;
 
+  bool empty() const noexcept;
+
+  /// Works on lists and maps only, not strings!
+  void clear();
+
+  /// @}
+
+  /// \name Access to lists
+  /// @{
+
   Node &operator[](std::size_t i);
   const Node &operator[](std::size_t i) const;
-  Node &operator[](const llvm::StringRef &name);
-  const Node &operator[](const llvm::StringRef &name) const;
-
-  bool contains(const llvm::StringRef &key) const noexcept;
-
-  std::size_t count(const llvm::StringRef &key) const;
-
-  bool empty() const noexcept;
 
   void resize(std::size_t n);
 
@@ -444,14 +544,41 @@ public:
       value->resize(n, val);
   }
 
-  Node &at(const llvm::StringRef &name);
-  const Node &at(const llvm::StringRef &name) const;
-
   // Stricter than jsoncons (maps don't work).
   Node &at(std::size_t i);
 
   // Stricter than jsoncons (maps don't work).
   const Node &at(std::size_t i) const;
+
+  template <class... Args> Node &emplace_back(Args &&...args) {
+    return std::get<List>(variant_).emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class T> void push_back(T &&val) {
+    std::get<List>(variant_).push_back(std::forward<T>(val));
+  }
+
+  /// Returns a pair of iterators to iterate over the list contents.
+  Range<List::iterator> list_range();
+
+  /// Returns a pair of iterators to iterate over the list contents.
+  Range<List::const_iterator> list_range() const;
+
+  /// @}
+
+  /// \name Access to maps
+  /// Note that all map keys must be valid UTF-8 strings.
+  /// @{
+
+  Node &operator[](const llvm::StringRef &name);
+  const Node &operator[](const llvm::StringRef &name) const;
+
+  bool contains(const llvm::StringRef &key) const noexcept;
+
+  std::size_t count(const llvm::StringRef &key) const;
+
+  Node &at(const llvm::StringRef &name);
+  const Node &at(const llvm::StringRef &name) const;
 
   Map::iterator find(const llvm::StringRef &name);
   Map::const_iterator find(const llvm::StringRef &name) const;
@@ -469,8 +596,6 @@ public:
 
   void erase(const llvm::StringRef &name);
 
-  void clear();
-
   template <class T>
   std::pair<Map::iterator, bool> insert_or_assign(const llvm::StringRef &name,
                                                   T &&val) {
@@ -484,22 +609,18 @@ public:
                                                std::forward<Args>(args)...);
   }
 
-  template <class... Args> Node &emplace_back(Args &&...args) {
-    return std::get<List>(variant_).emplace_back(std::forward<Args>(args)...);
-  }
-
-  template <class T> void push_back(T &&val) {
-    std::get<List>(variant_).push_back(std::forward<T>(val));
-  }
-
+  /// Returns a pair of iterators to iterate over the map contents.
   Range<Map::iterator> map_range();
+
+  /// Returns a pair of iterators to iterate over the map contents.
   Range<Map::const_iterator> map_range() const;
-  Range<List::iterator> list_range();
-  Range<List::const_iterator> list_range() const;
 
-  // Extra functions (DAG-CBOR specific).
+  /// @}
 
-  // Call func for each CID found in this Node.
+  /// \name Extra functions
+  /// @{
+
+  /// Traverse this Node and call func for each CID found.
   template <typename T> void eachLink(T func) const {
     std::visit(Overloaded{
                    [&](const CID &Link) { func(Link); },
@@ -515,6 +636,8 @@ public:
                },
                variant_);
   }
+
+  /// @}
 };
 
 // Print a Node in MemoDB's JSON format.
