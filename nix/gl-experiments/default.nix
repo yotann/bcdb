@@ -112,7 +112,7 @@ let
 
         # If we already processed this module under a different name, just make
         # a symlink.
-        vid=$(memodb put /head"$mod")
+        vid=$(memodb get /head"$mod")
         if [ ''${ALREADY_HANDLED[$vid]+_} ]; then
           ln -s "''${ALREADY_HANDLED[$vid]}" "$elf"
           continue
@@ -169,7 +169,7 @@ let
     declare -a MODS
 
     while read mod; do
-      vid=$(memodb put /head"$mod")
+      vid=$(memodb get /head"$mod")
       mkdir -p "$(dirname "$out/$mod")"
 
       # If we already processed this module under a different name, just make

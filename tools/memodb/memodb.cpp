@@ -20,6 +20,7 @@
 
 #include "memodb/CAR.h"
 #include "memodb/Evaluator.h"
+#include "memodb/Server.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"
 #include "memodb/URI.h"
@@ -29,24 +30,18 @@ using namespace memodb;
 
 cl::OptionCategory MemoDBCategory("MemoDB options");
 
+static cl::SubCommand AddCommand("add", "Add a value to the store");
+static cl::SubCommand DeleteCommand("delete",
+                                    "Delete a value, or invalidate calls");
 static cl::SubCommand EvaluateCommand(
     "evaluate",
     "Evaluate an arbitrary func (if the func is built in to memodb)");
 static cl::SubCommand ExportCommand("export", "Export values to a CAR file");
 static cl::SubCommand GetCommand("get", "Get a value");
 static cl::SubCommand InitCommand("init", "Initialize a store");
-static cl::SubCommand InvalidateCommand("invalidate",
-                                        "Delete all results of a function");
-static cl::SubCommand ListCallsCommand("list-calls",
-                                       "List all cached calls of a function");
-static cl::SubCommand ListFuncsCommand("list-funcs",
-                                       "List all cached functions");
-static cl::SubCommand ListHeadsCommand("list-heads", "List all heads");
 static cl::SubCommand
     PathsToCommand("paths-to",
                    "Find paths from a head or call that reach a value");
-static cl::SubCommand
-    PutCommand("put", "Put a value, or find ID of an existing value");
 static cl::SubCommand RefsToCommand("refs-to",
                                     "Find names that reference a value");
 static cl::SubCommand SetCommand("set", "Set a head or a call result");
@@ -71,6 +66,7 @@ static StringRef GetStoreUri() {
 // format options
 
 enum Format {
+  Format_Auto,
   Format_CBOR,
   Format_Raw,
   Format_JSON,
@@ -78,11 +74,12 @@ enum Format {
 
 static cl::opt<Format> format_option(
     "format", cl::Optional, cl::desc("Format for input and output nodes"),
-    cl::values(clEnumValN(Format_CBOR, "cbor", "original DAG-CBOR."),
+    cl::values(clEnumValN(Format_Auto, "auto", "MemoDB JSON or URI."),
+               clEnumValN(Format_CBOR, "cbor", "original DAG-CBOR."),
                clEnumValN(Format_Raw, "raw",
                           "raw binary data without CBOR wrapper."),
                clEnumValN(Format_JSON, "json", "MemoDB JSON.")),
-    cl::init(Format_JSON), cl::sub(GetCommand), cl::sub(PutCommand),
+    cl::init(Format_Auto), cl::sub(AddCommand), cl::sub(GetCommand),
     cl::sub(SetCommand));
 
 // Name options
@@ -96,13 +93,13 @@ static cl::opt<std::string> SourceURI(cl::Positional, cl::Required,
 static cl::opt<std::string>
     TargetURI(cl::Positional, cl::Required, cl::desc("<target URI>"),
               cl::value_desc("uri"), cl::cat(MemoDBCategory),
-              cl::sub(PathsToCommand), cl::sub(RefsToCommand),
-              cl::sub(SetCommand));
+              cl::sub(DeleteCommand), cl::sub(PathsToCommand),
+              cl::sub(RefsToCommand), cl::sub(SetCommand));
 
-static cl::list<std::string>
-    FuncNames(cl::Positional, cl::OneOrMore, cl::desc("<function names>"),
-              cl::value_desc("funcs"), cl::cat(MemoDBCategory),
-              cl::sub(InvalidateCommand), cl::sub(ListCallsCommand));
+static cl::list<std::string> FuncNames(cl::Positional, cl::OneOrMore,
+                                       cl::desc("<function names>"),
+                                       cl::value_desc("funcs"),
+                                       cl::cat(MemoDBCategory));
 
 static Name GetNameFromURI(llvm::StringRef URI) {
   auto result = Name::parse(URI);
@@ -116,7 +113,7 @@ static Name GetNameFromURI(llvm::StringRef URI) {
 static cl::opt<std::string> InputURI(cl::Positional, cl::desc("<input URI>"),
                                      cl::init("-"), cl::value_desc("uri"),
                                      cl::cat(MemoDBCategory),
-                                     cl::sub(PutCommand), cl::sub(SetCommand));
+                                     cl::sub(SetCommand));
 
 static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   ExitOnError Err("value read: ");
@@ -145,6 +142,7 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   case Format_Raw:
     Value = Node(byte_string_arg, Buffer->getBuffer());
     break;
+  case Format_Auto:
   case Format_JSON:
     Value = Err(Node::loadFromJSON(Buffer->getBuffer()));
     break;
@@ -176,7 +174,7 @@ static std::unique_ptr<ToolOutputFile> GetOutputFile(bool binary = true) {
 }
 
 static void WriteValue(const Node &Value) {
-  bool binary = format_option != Format_JSON;
+  bool binary = format_option != Format_JSON && format_option != Format_Auto;
   auto OutputFile = GetOutputFile(binary);
   if (OutputFile) {
     switch (format_option) {
@@ -198,9 +196,110 @@ static void WriteValue(const Node &Value) {
     case Format_JSON:
       OutputFile->os() << Value << "\n";
       break;
+    case Format_Auto:
+      if (Value.is_link())
+        OutputFile->os() << Name(Value.as<CID>()) << "\n";
+      else
+        OutputFile->os() << Value << "\n";
+      break;
     }
     OutputFile->keep();
   }
+}
+
+// Request subclass
+
+namespace {
+class CLIRequest : public Request {
+public:
+  CLIRequest(Method method, const URI &uri) : method(method), uri(uri) {}
+  std::optional<Method> getMethod() const override { return method; }
+  std::optional<URI> getURI() const override { return uri; }
+
+  std::optional<Node>
+  getContentNode(const std::optional<Node> &default_node) override {
+    return std::nullopt;
+  }
+
+  void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
+                       CacheControl cache_control) override {
+    WriteValue(node);
+    state = State::Done;
+  }
+
+  void sendContentURIs(const llvm::ArrayRef<URI> uris,
+                       CacheControl cache_control) override {
+    for (const URI &uri : uris)
+      outs() << uri.encode() << "\n";
+    state = State::Done;
+  }
+
+  void sendAccepted() override {
+    errs() << "accepted\n";
+    state = State::Done;
+  }
+
+  void sendCreated(const std::optional<URI> &path) override {
+    if (path && !path->path_segments.empty() && path->path_segments[0] == "cid")
+      outs() << path->path_segments[1] << "\n";
+    else if (path)
+      outs() << path->encode() << "\n";
+    else
+      errs() << "created\n";
+    state = State::Done;
+  }
+
+  void sendDeleted() override {
+    outs() << "deleted\n";
+    state = State::Done;
+  }
+
+  void sendError(Status status, std::optional<llvm::StringRef> type,
+                 llvm::StringRef title,
+                 const std::optional<llvm::Twine> &detail) override {
+    errs() << "error: " << title << "\n";
+    if (detail)
+      errs() << *detail << "\n";
+    exit(1);
+  }
+
+  void sendMethodNotAllowed(llvm::StringRef allow) override {
+    errs() << "invalid operation for this URI\n";
+    exit(1);
+  }
+
+  void deferWithTimeout(unsigned seconds) override {
+    errs() << "invalid operation for the memodb program\n";
+    exit(1);
+  }
+
+  Method method;
+  URI uri;
+};
+} // end anonymous namespace
+
+// memodb add
+
+static int Add() {
+  auto store = Store::open(GetStoreUri());
+  auto ref = ReadRef(*store, "-");
+  outs() << Name(*ref) << "\n";
+  return 0;
+}
+
+// memodb delete
+
+static int Delete() {
+  auto store = Store::open(GetStoreUri());
+  Server server(*store);
+  auto uri = URI::parse(TargetURI);
+  if (!uri) {
+    errs() << "invalid URI\n";
+    return 1;
+  }
+  auto request = std::make_shared<CLIRequest>(Request::Method::DELETE, *uri);
+  server.handleRequest(request);
+  return 0;
 }
 
 // memodb evaluate
@@ -246,14 +345,15 @@ static int Export() {
 // memodb get
 
 static int Get() {
-  auto Name = GetNameFromURI(SourceURI);
-  auto Db = Store::open(GetStoreUri());
-  auto CID = Db->resolveOptional(Name);
-  auto Value = CID ? Db->getOptional(*CID) : None;
-  if (Value)
-    WriteValue(*Value);
-  else
-    llvm::errs() << "not found\n";
+  auto store = Store::open(GetStoreUri());
+  Server server(*store);
+  auto uri = URI::parse(SourceURI);
+  if (!uri) {
+    errs() << "invalid URI\n";
+    return 1;
+  }
+  auto request = std::make_shared<CLIRequest>(Request::Method::GET, *uri);
+  server.handleRequest(request);
   return 0;
 }
 
@@ -261,46 +361,6 @@ static int Get() {
 
 static int Init() {
   Store::open(GetStoreUri(), /*create_if_missing*/ true);
-  return 0;
-}
-
-// memodb invalidate
-
-static int Invalidate() {
-  auto db = Store::open(GetStoreUri());
-  for (const auto &func : FuncNames)
-    db->call_invalidate(func);
-  return 0;
-}
-
-// memodb list-calls
-
-static int ListCalls() {
-  auto Db = Store::open(GetStoreUri());
-  for (const auto &func : FuncNames)
-    for (const Call &call : Db->list_calls(func))
-      outs() << call << "\n";
-  return 0;
-}
-
-// memodb list-funcs
-
-static int ListFuncs() {
-  auto Db = Store::open(GetStoreUri());
-  for (llvm::StringRef Func : Db->list_funcs()) {
-    URI uri;
-    uri.path_segments = {"call", Func.str()};
-    outs() << uri.encode() << "\n";
-  }
-  return 0;
-}
-
-// memodb list-heads
-
-static int ListHeads() {
-  auto Db = Store::open(GetStoreUri());
-  for (const Head &head : Db->list_heads())
-    outs() << head << "\n";
   return 0;
 }
 
@@ -319,19 +379,6 @@ static int PathsTo() {
       outs() << '[' << item << ']';
     outs() << '\n';
   }
-  return 0;
-}
-
-// memodb put
-
-static int Put() {
-  auto Db = Store::open(GetStoreUri());
-  auto Ref = ReadRef(*Db, InputURI);
-  if (!Ref) {
-    errs() << "not found\n";
-    return 1;
-  }
-  outs() << Name(*Ref) << "\n";
   return 0;
 }
 
@@ -435,7 +482,11 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Tools");
 
-  if (EvaluateCommand) {
+  if (AddCommand) {
+    return Add();
+  } else if (DeleteCommand) {
+    return Delete();
+  } else if (EvaluateCommand) {
     return Evaluate();
   } else if (ExportCommand) {
     return Export();
@@ -443,18 +494,8 @@ int main(int argc, char **argv) {
     return Get();
   } else if (InitCommand) {
     return Init();
-  } else if (InvalidateCommand) {
-    return Invalidate();
-  } else if (ListCallsCommand) {
-    return ListCalls();
-  } else if (ListFuncsCommand) {
-    return ListFuncs();
-  } else if (ListHeadsCommand) {
-    return ListHeads();
   } else if (PathsToCommand) {
     return PathsTo();
-  } else if (PutCommand) {
-    return Put();
   } else if (RefsToCommand) {
     return RefsTo();
   } else if (SetCommand) {

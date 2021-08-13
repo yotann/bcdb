@@ -1,18 +1,18 @@
-; RUN: memodb list-funcs -store car:%p/Inputs/call.car | FileCheck --check-prefix=FUNCS %s
+; RUN: memodb get /call -store car:%p/Inputs/call.car | FileCheck --check-prefix=FUNCS %s
 ; FUNCS: /call/add
 ; FUNCS: /call/primes
 
-; RUN: memodb list-calls -store car:%p/Inputs/call.car add | FileCheck --check-prefix=ADD %s
+; RUN: memodb get /call/add -store car:%p/Inputs/call.car | FileCheck --check-prefix=ADD %s
 ; ADD: /call/add/uAXEAAQI,uAXEAAQI
 
-; RUN: memodb put -store car:%p/Inputs/call.car /call/add/uAXEAAQI,uAXEAAQI | FileCheck --check-prefix=FOUR %s
+; RUN: memodb get -store car:%p/Inputs/call.car /call/add/uAXEAAQI,uAXEAAQI | FileCheck --check-prefix=FOUR %s
 ; FOUR: /cid/uAXEAAQQ
 
-; RUN: memodb list-calls -store car:%p/Inputs/call.car primes | FileCheck --check-prefix=PRIMES %s
+; RUN: memodb get /call/primes -store car:%p/Inputs/call.car | FileCheck --check-prefix=PRIMES %s
 ; PRIMES: /call/primes/uAXEAAQU
 ; PRIMES: /call/primes/uAXEAAQY
 
-; RUN: memodb put -store car:%p/Inputs/call.car /call/primes/uAXEAAQU | FileCheck --check-prefix=PRIMES5 %s
+; RUN: memodb get -store car:%p/Inputs/call.car /call/primes/uAXEAAQU | FileCheck --check-prefix=PRIMES5 %s
 ; PRIMES5: /cid/uAXEABoUCAwUHCw
 
 ; RUN: memodb export -store car:%p/Inputs/call.car > %t.car
