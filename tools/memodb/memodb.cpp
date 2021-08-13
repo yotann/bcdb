@@ -224,19 +224,19 @@ public:
   void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
                        CacheControl cache_control) override {
     WriteValue(node);
-    state = State::Done;
+    responded = true;
   }
 
   void sendContentURIs(const llvm::ArrayRef<URI> uris,
                        CacheControl cache_control) override {
     for (const URI &uri : uris)
       outs() << uri.encode() << "\n";
-    state = State::Done;
+    responded = true;
   }
 
   void sendAccepted() override {
     errs() << "accepted\n";
-    state = State::Done;
+    responded = true;
   }
 
   void sendCreated(const std::optional<URI> &path) override {
@@ -246,12 +246,12 @@ public:
       outs() << path->encode() << "\n";
     else
       errs() << "created\n";
-    state = State::Done;
+    responded = true;
   }
 
   void sendDeleted() override {
     outs() << "deleted\n";
-    state = State::Done;
+    responded = true;
   }
 
   void sendError(Status status, std::optional<llvm::StringRef> type,
@@ -265,11 +265,6 @@ public:
 
   void sendMethodNotAllowed(llvm::StringRef allow) override {
     errs() << "invalid operation for this URI\n";
-    exit(1);
-  }
-
-  void deferWithTimeout(unsigned seconds) override {
-    errs() << "invalid operation for the memodb program\n";
     exit(1);
   }
 
@@ -297,7 +292,7 @@ static int Delete() {
     errs() << "invalid URI\n";
     return 1;
   }
-  auto request = std::make_shared<CLIRequest>(Request::Method::DELETE, *uri);
+  CLIRequest request(Request::Method::DELETE, *uri);
   server.handleRequest(request);
   return 0;
 }
@@ -352,7 +347,7 @@ static int Get() {
     errs() << "invalid URI\n";
     return 1;
   }
-  auto request = std::make_shared<CLIRequest>(Request::Method::GET, *uri);
+  CLIRequest request(Request::Method::GET, *uri);
   server.handleRequest(request);
   return 0;
 }

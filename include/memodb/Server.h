@@ -43,40 +43,6 @@ public:
     ProblemJSON,
   };
 
-  // All Request objects start in the New state, and eventually reach the Done
-  // or Cancelled state. Allowed transitions are as follows:
-  //
-  // New -> Done
-  // - The event loop calls Server::handleRequest(), which calls
-  //   Request::send...().
-  //
-  // New -> Waiting
-  // - The event loop calls Server::handleRequest(), which calls
-  //   Request::deferWithTimeout().
-  //
-  // Waiting -> Done
-  // - While handling a different Request, the Server calls Request::send...()
-  //   on this Request.
-  //
-  // Waiting -> Cancelled
-  // - The event loop detects that the client has disconnected. The event loop
-  //   must call Server::handleRequest() after changing the state.
-  //
-  // Waiting -> TimedOut -> Done
-  // - The event loop detects that the timeout given to
-  //   Request::deferWithTimeout() has elapsed. The event loop must call
-  //   Server::handleRequest() after changing the state to TimedOut, which in
-  //   turn must call Request::send...().
-  //
-  // XXX: the Request must stay locked as long as the state is TimedOut!
-  enum class State {
-    New,
-    Waiting,
-    TimedOut,
-    Cancelled,
-    Done,
-  };
-
   enum class Status {
     BadRequest = 400,
     NotFound = 404,
@@ -122,16 +88,9 @@ public:
 
   virtual void sendMethodNotAllowed(llvm::StringRef allow) = 0;
 
-  virtual void deferWithTimeout(unsigned seconds) = 0;
-
-  // Must be locked before any member function is called or any other member
-  // variable is accessed.
-  std::mutex mutex;
-
-  State state = State::New;
-
-  PendingCall *pending_call = nullptr;
-  WorkerGroup *worker_group = nullptr;
+  // The Request subclass should set this to true when any of the sendXXX
+  // functions is called.
+  bool responded = false;
 };
 
 // Keeps track of all calls of a single function we need to evaluate. A
@@ -142,39 +101,32 @@ public:
   std::mutex mutex;
 
   // The queue of calls we have been requested to evaluate that have not yet
-  // been assigned to a worker. May include PendingCalls without any waiting
-  // requests, if all requests have timed out, in which case the PendingCall
-  // should be deleted as it is removed from the queue.
+  // been assigned to a worker.
   std::deque<PendingCall *> unstarted_calls;
 
   // The actual PendingCalls.
   std::map<Call, PendingCall> calls;
 
-  // All the WorkerGroups for workers that can evaluate this func.
-  llvm::SmallVector<WorkerGroup *, 0> worker_groups;
-
-  // Delete all PendingCalls from the start of unstarted_calls that have no
-  // waiting requests.
+  // Delete all PendingCalls from the start of unstarted_calls that have
+  // already completed. (These are calls for which a client has already
+  // submitted a result to us, even though we didn't assign them to a worker.)
   void deleteSomeUnstartedCalls();
 };
 
 // Keeps track of a single call we need to evaluate. A PendingCall can be
 // deleted, and has a fixed location in memory. All member variables and
-// functions, except read access to call_group and started, are protected by
+// functions, except read access to call_group, are protected by
 // call_group->mutex.
 class PendingCall {
 public:
   CallGroup *call_group;
   Call call;
 
-  // Whether the evaluation has been assigned to a worker. Needs to be atomic
-  // so Server::handleTimeoutOrCancel can read it without a lock.
-  std::atomic<bool> started = false;
+  // Whether the evaluation has been assigned to a worker.
+  bool started = false;
 
-  // The list of all requests that asked to evaluate this call. Some of these
-  // requests may already have timed out. It is illegal to lock CallGroup::mutex
-  // after locking one of these Requests' mutexes.
-  llvm::SmallVector<std::shared_ptr<Request>, 1> requests;
+  // Whether the evaluation has been completed.
+  bool finished = false;
 
   PendingCall(CallGroup *call_group, const Call &call)
       : call_group(call_group), call(call) {}
@@ -189,13 +141,7 @@ public:
 // call_groups (which is read-only after creation).
 class WorkerGroup {
 public:
-  // It is illegal to lock CallGroup::mutex after locking this mutex.
   std::mutex mutex;
-
-  // The queue of workers waiting for jobs. May include requests that have
-  // already timed out. It is illegal to lock CallGroup::mutex or
-  // WorkerGroup::mutex after locking one of these Requests' mutexes.
-  std::deque<std::shared_ptr<Request>> workers;
 
   // All the CallGroups for funcs that these workers can handle.
   llvm::SmallVector<CallGroup *, 0> call_groups;
@@ -205,29 +151,23 @@ class Server {
 public:
   Server(Store &store);
 
-  // When this is called, request->mutex must already be locked. If the Server
-  // calls Request::deferWithTimeout(), it may keep a copy of the shared_ptr
-  // around indefinitely. This function will always cause request->state to
-  // change (unless it's State::Cancelled).
-  void handleRequest(const std::shared_ptr<Request> &request);
+  // This function will always send a response to the request. Thread-safe.
+  void handleRequest(Request &request);
 
 private:
-  void handleNewRequest(const std::shared_ptr<Request> &request);
-  void handleTimeoutOrCancel(const std::shared_ptr<Request> &request);
+  void handleNewRequest(Request &request);
   void handleRequestCID(Request &request,
                         std::optional<llvm::StringRef> cid_str);
   void handleRequestHead(Request &request,
                          std::optional<llvm::StringRef> head_str);
-  void handleRequestCall(const std::shared_ptr<Request> &request,
+  void handleRequestCall(Request &request,
                          std::optional<llvm::StringRef> func_str,
                          std::optional<llvm::StringRef> args_str,
                          std::optional<llvm::StringRef> sub_str);
-  void handleRequestWorker(const std::shared_ptr<Request> &request);
-  void handleEvaluateCall(const std::shared_ptr<Request> &request, Call call,
-                          unsigned timeout);
+  void handleRequestWorker(Request &request);
+  void handleEvaluateCall(Request &request, Call call, unsigned timeout);
   void handleCallResult(const Call &call, NodeRef result);
-  void sendCallToWorker(PendingCall &pending_call,
-                        std::shared_ptr<Request> worker);
+  void sendCallToWorker(PendingCall &pending_call, Request &worker);
 
   Store &store;
 

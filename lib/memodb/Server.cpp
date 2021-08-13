@@ -17,7 +17,6 @@
 #include "memodb/Node.h"
 #include "memodb/URI.h"
 
-static const unsigned REQUEST_TIMEOUT = 60;
 static const unsigned DEFAULT_CALL_TIMEOUT = 600;
 
 using namespace memodb;
@@ -33,7 +32,7 @@ static bool isLegalUTF8(llvm::StringRef str) {
 void CallGroup::deleteSomeUnstartedCalls() {
   while (!unstarted_calls.empty()) {
     PendingCall *pending_call = unstarted_calls.front();
-    if (!pending_call->requests.empty())
+    if (!pending_call->finished)
       break;
     unstarted_calls.pop_front();
     calls.erase(pending_call->call);
@@ -41,8 +40,6 @@ void CallGroup::deleteSomeUnstartedCalls() {
 }
 
 void PendingCall::deleteIfPossible() {
-  if (!requests.empty())
-    return;
   if (started) {
     call_group->calls.erase(call);
   } else {
@@ -61,51 +58,34 @@ void Request::sendContentURIs(const llvm::ArrayRef<URI> uris,
 
 Server::Server(Store &store) : store(store) {}
 
-void Server::handleRequest(const std::shared_ptr<Request> &request) {
-  switch (request->state) {
-  case Request::State::New:
-    handleNewRequest(request);
-    assert(request->state == Request::State::Done ||
-           request->state == Request::State::Waiting);
-    break;
-  case Request::State::TimedOut:
-    handleTimeoutOrCancel(request);
-    assert(request->state == Request::State::Done);
-    break;
-  case Request::State::Cancelled:
-    handleTimeoutOrCancel(request);
-    assert(request->state == Request::State::Cancelled);
-    break;
-  case Request::State::Waiting:
-  case Request::State::Done:
-    llvm_unreachable("impossible request state");
-    break;
-  }
+void Server::handleRequest(Request &request) {
+  handleNewRequest(request);
+  assert(request.responded);
 }
 
-void Server::handleNewRequest(const std::shared_ptr<Request> &request) {
-  if (request->getMethod() == std::nullopt)
-    return request->sendError(Request::Status::NotImplemented, std::nullopt,
-                              "Not Implemented", std::nullopt);
+void Server::handleNewRequest(Request &request) {
+  if (request.getMethod() == std::nullopt)
+    return request.sendError(Request::Status::NotImplemented, std::nullopt,
+                             "Not Implemented", std::nullopt);
 
-  auto uri_or_null = request->getURI();
+  auto uri_or_null = request.getURI();
   if (!uri_or_null ||
       (uri_or_null->rootless && !uri_or_null->path_segments.empty()))
-    return request->sendError(Request::Status::BadRequest, std::nullopt,
-                              "Bad Request", std::nullopt);
+    return request.sendError(Request::Status::BadRequest, std::nullopt,
+                             "Bad Request", std::nullopt);
   auto uri = std::move(*uri_or_null);
 
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "cid") {
     if (uri.path_segments.size() == 1)
-      return handleRequestCID(*request, std::nullopt);
+      return handleRequestCID(request, std::nullopt);
     if (uri.path_segments.size() == 2)
-      return handleRequestCID(*request, uri.path_segments[1]);
+      return handleRequestCID(request, uri.path_segments[1]);
   }
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "head") {
     if (uri.path_segments.size() == 1)
-      return handleRequestHead(*request, std::nullopt);
+      return handleRequestHead(request, std::nullopt);
     if (uri.path_segments.size() >= 2)
-      return handleRequestHead(*request, uri.getPathString(1));
+      return handleRequestHead(request, uri.getPathString(1));
   }
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "call") {
     if (uri.path_segments.size() == 1)
@@ -123,56 +103,9 @@ void Server::handleNewRequest(const std::shared_ptr<Request> &request) {
   }
   if (uri.path_segments.size() == 1 && uri.path_segments[0] == "worker")
     return handleRequestWorker(request);
-  if (uri.path_segments.size() == 2 && uri.path_segments[0] == "debug" &&
-      uri.path_segments[1] == "timeout") {
-    request->deferWithTimeout(2);
-    return;
-  }
 
-  return request->sendError(Request::Status::NotFound, std::nullopt,
-                            "Not Found", std::nullopt);
-}
-
-void Server::handleTimeoutOrCancel(const std::shared_ptr<Request> &request) {
-  bool cancelled = request->state == Request::State::Cancelled;
-  if (request->pending_call) {
-    if (cancelled)
-      return;
-    auto pending_call = request->pending_call;
-    if (pending_call->started)
-      request->sendAccepted();
-    else
-      request->sendError(Request::Status::ServiceUnavailable, std::nullopt,
-                         "Service Unavailable",
-                         "No available workers can evaluate \"" +
-                             pending_call->call.Name + "\"");
-
-    // TODO: we need to eventually delete PendingCalls for which all requests
-    // have timed out. Normally, the requesters will keep retrying and reusing
-    // the PendingCall until eventually the evaluation is successful and
-    // Server::handleCallRequest() deletes the PendingCall. However, if all
-    // the requesters time out and they don't retry, the PendingCall will
-    // never be deleted, causing a memory leak.
-    //
-    // It would be too awkward to handle that here without causing deadlocks.
-    // Plus, usually we want to keep the PendingCall around so it can be
-    // reused when the client retries. The best solution would be for each
-    // call to Server::handleEvaluateCall() to incrementally walk through a
-    // few PendingCalls, deleting them if they're no longer needed.
-  } else if (request->worker_group) {
-    // TODO: remove old workers from the group. We can't safely lock
-    // request->worker_group->mutex, but we can use std::try_to_lock.
-    if (cancelled)
-      return;
-    request->sendContentNode(nullptr, std::nullopt,
-                             Request::CacheControl::Ephemeral);
-  } else {
-    // /debug/timeout
-    if (cancelled)
-      return;
-    request->sendContentNode("timed out", std::nullopt,
-                             Request::CacheControl::Ephemeral);
-  }
+  return request.sendError(Request::Status::NotFound, std::nullopt, "Not Found",
+                           std::nullopt);
 }
 
 void Server::handleRequestCID(Request &request,
@@ -254,13 +187,13 @@ void Server::handleRequestHead(Request &request,
   }
 }
 
-void Server::handleRequestCall(const std::shared_ptr<Request> &request,
+void Server::handleRequestCall(Request &request,
                                std::optional<StringRef> func_str,
                                std::optional<StringRef> args_str,
                                std::optional<StringRef> sub_str) {
   if (func_str)
     if (func_str->empty() || !isLegalUTF8(*func_str))
-      return request->sendError(
+      return request.sendError(
           Request::Status::BadRequest, "/problems/invalid-string",
           "Invalid UTF-8 or unexpected empty string", std::nullopt);
 
@@ -272,7 +205,7 @@ void Server::handleRequestCall(const std::shared_ptr<Request> &request,
     for (StringRef arg_str : args_split) {
       auto arg = CID::parse(arg_str);
       if (!arg)
-        return request->sendError(
+        return request.sendError(
             Request::Status::BadRequest, "/problems/invalid-or-unsupported-cid",
             "Invalid or unsupported CID",
             "CID \"" + arg_str + "\" could not be parsed.");
@@ -282,54 +215,54 @@ void Server::handleRequestCall(const std::shared_ptr<Request> &request,
 
   if (sub_str) {
     if (sub_str != "evaluate")
-      return request->sendError(Request::Status::NotFound, std::nullopt,
-                                "Not Found", std::nullopt);
-    if (request->getMethod() != Request::Method::POST)
-      return request->sendMethodNotAllowed("POST");
+      return request.sendError(Request::Status::NotFound, std::nullopt,
+                               "Not Found", std::nullopt);
+    if (request.getMethod() != Request::Method::POST)
+      return request.sendMethodNotAllowed("POST");
     // POST /call/.../.../evaluate
     unsigned timeout = DEFAULT_CALL_TIMEOUT;
-    auto body = request->getContentNode(Node(node_map_arg));
+    auto body = request.getContentNode(Node(node_map_arg));
     if (!body)
       return;
     if (!body->is_map())
-      return request->sendError(Request::Status::BadRequest, std::nullopt,
-                                "Invalid body kind", std::nullopt);
+      return request.sendError(Request::Status::BadRequest, std::nullopt,
+                               "Invalid body kind", std::nullopt);
     if (body->count("timeout")) {
       if (!(*body)["timeout"].is<unsigned>())
-        return request->sendError(Request::Status::BadRequest, std::nullopt,
-                                  "Invalid body field: timeout", std::nullopt);
+        return request.sendError(Request::Status::BadRequest, std::nullopt,
+                                 "Invalid body field: timeout", std::nullopt);
       timeout = (*body)["timeout"].as<unsigned>();
     }
     return handleEvaluateCall(request, std::move(*call), timeout);
 
   } else if (args_str) {
-    if (request->getMethod() != Request::Method::GET &&
-        request->getMethod() != Request::Method::PUT)
-      return request->sendMethodNotAllowed("GET, HEAD, PUT");
+    if (request.getMethod() != Request::Method::GET &&
+        request.getMethod() != Request::Method::PUT)
+      return request.sendMethodNotAllowed("GET, HEAD, PUT");
 
-    if (request->getMethod() == Request::Method::GET) {
+    if (request.getMethod() == Request::Method::GET) {
       // GET /call/.../...
       auto cid = store.resolveOptional(*call);
       if (!cid)
-        return request->sendError(Request::Status::NotFound, std::nullopt,
-                                  "Not Found", "Call not found in store.");
-      return request->sendContentNode(Node(*cid), std::nullopt,
-                                      Request::CacheControl::Mutable);
+        return request.sendError(Request::Status::NotFound, std::nullopt,
+                                 "Not Found", "Call not found in store.");
+      return request.sendContentNode(Node(*cid), std::nullopt,
+                                     Request::CacheControl::Mutable);
     } else {
       // PUT /call/.../...
-      auto node_or_null = request->getContentNode();
+      auto node_or_null = request.getContentNode();
       if (!node_or_null)
         return;
       if (!node_or_null->is<CID>())
-        return request->sendError(
+        return request.sendError(
             Request::Status::BadRequest, "/problems/expected-cid",
             "Expected CID but got another kind of node", std::nullopt);
       store.set(*call, node_or_null->as<CID>());
       handleCallResult(*call, NodeRef(store, node_or_null->as<CID>()));
-      return request->sendCreated(std::nullopt);
+      return request.sendCreated(std::nullopt);
     }
   } else if (func_str) {
-    if (request->getMethod() == Request::Method::GET) {
+    if (request.getMethod() == Request::Method::GET) {
       // GET /call/...
       std::vector<URI> uris;
       store.eachCall(*func_str, [&](const Call &call) {
@@ -341,17 +274,17 @@ void Server::handleRequestCall(const std::shared_ptr<Request> &request,
         uris.back().path_segments = {"call", func_str->str(), std::move(args)};
         return false;
       });
-      return request->sendContentURIs(uris, Request::CacheControl::Mutable);
-    } else if (request->getMethod() == Request::Method::DELETE) {
+      return request.sendContentURIs(uris, Request::CacheControl::Mutable);
+    } else if (request.getMethod() == Request::Method::DELETE) {
       // DELETE /call/...
       store.call_invalidate(*func_str);
-      return request->sendDeleted();
+      return request.sendDeleted();
     } else {
-      return request->sendMethodNotAllowed("DELETE, GET, HEAD");
+      return request.sendMethodNotAllowed("DELETE, GET, HEAD");
     }
   } else {
-    if (request->getMethod() != Request::Method::GET)
-      return request->sendMethodNotAllowed("GET, HEAD");
+    if (request.getMethod() != Request::Method::GET)
+      return request.sendMethodNotAllowed("GET, HEAD");
 
     // GET /call
     std::vector<URI> uris;
@@ -359,19 +292,19 @@ void Server::handleRequestCall(const std::shared_ptr<Request> &request,
       uris.emplace_back();
       uris.back().path_segments = {"call", func};
     }
-    return request->sendContentURIs(uris, Request::CacheControl::Mutable);
+    return request.sendContentURIs(uris, Request::CacheControl::Mutable);
   }
 }
 
-void Server::handleRequestWorker(const std::shared_ptr<Request> &request) {
-  if (request->getMethod() != Request::Method::POST)
-    return request->sendMethodNotAllowed("POST");
+void Server::handleRequestWorker(Request &request) {
+  if (request.getMethod() != Request::Method::POST)
+    return request.sendMethodNotAllowed("POST");
   // POST /worker
-  auto node_or_null = request->getContentNode();
+  auto node_or_null = request.getContentNode();
   if (!node_or_null)
     return;
   if (!node_or_null->is<CID>())
-    return request->sendError(
+    return request.sendError(
         Request::Status::BadRequest, "/problems/expected-cid",
         "Expected CID but got another kind of node", std::nullopt);
   CID cid = node_or_null->as<CID>();
@@ -379,22 +312,21 @@ void Server::handleRequestWorker(const std::shared_ptr<Request> &request) {
   StringRef key(reinterpret_cast<const char *>(cid_bytes.data()),
                 cid_bytes.size());
 
-  // No deadlock: the only other mutex we hold is request->mutex, which isn't
-  // accessible by other threads.
+  // No deadlock: we don't hold any other mutexes.
   std::unique_lock<std::mutex> lock(mutex);
   auto iter = worker_groups.find(key);
   WorkerGroup *worker_group;
   if (iter == worker_groups.end()) {
     auto info_or_null = store.getOptional(cid);
     if (!info_or_null)
-      return request->sendError(
+      return request.sendError(
           Request::Status::BadRequest, "/problems/unknown-cid",
           "Provided CID was missing from the store", std::nullopt);
     if (!info_or_null->is_map() || !info_or_null->contains("funcs") ||
         !(*info_or_null)["funcs"].is_list())
-      return request->sendError(
-          Request::Status::BadRequest, "/problems/invalid-worker-info",
-          "Provided worker info is invalid", std::nullopt);
+      return request.sendError(Request::Status::BadRequest,
+                               "/problems/invalid-worker-info",
+                               "Provided worker info is invalid", std::nullopt);
     worker_group = &worker_groups[key];
     // No deadlock: worker_group.mutex is inaccessible to other threads (they
     // could only reach it by going through worker_groups, but that's protected
@@ -409,101 +341,61 @@ void Server::handleRequestWorker(const std::shared_ptr<Request> &request) {
     }
     wg_lock.unlock();
     lock.unlock();
-    for (CallGroup *call_group : worker_group->call_groups) {
-      // No deadlock: the only other mutex we hold is request->mutex, which
-      // isn't accessible by other threads.
-      std::lock_guard cg_lock(call_group->mutex);
-      call_group->worker_groups.emplace_back(worker_group);
-    }
   } else {
     worker_group = &iter->getValue();
     lock.unlock();
   }
 
   for (CallGroup *call_group : worker_group->call_groups) {
-    // No deadlock: the only other mutex we hold is request->mutex, which isn't
-    // accessible by other threads.
+    // No deadlock: we don't hold any other mutexes.
     std::lock_guard<std::mutex> cg_lock(call_group->mutex);
+    // TODO: time out unstarted calls if nothing has requested them recently.
     call_group->deleteSomeUnstartedCalls();
     if (call_group->unstarted_calls.empty())
       continue;
     PendingCall *pending_call = call_group->unstarted_calls.front();
     call_group->unstarted_calls.pop_front();
-    // XXX: this sends the call to the worker that just made a request,
-    // ignoring other workers that may still be waiting.
     sendCallToWorker(*pending_call, request);
     return;
   }
 
   // No PendingCall found.
-  // No deadlock: the only other mutex we hold is request->mutex, which isn't
-  // accessible by other threads.
-  lock = std::unique_lock(worker_group->mutex);
-  worker_group->workers.emplace_back(request);
-  request->worker_group = worker_group;
-  request->deferWithTimeout(REQUEST_TIMEOUT);
+  return request.sendContentNode(nullptr, std::nullopt,
+                                 Request::CacheControl::Ephemeral);
 }
 
-void Server::handleEvaluateCall(const std::shared_ptr<Request> &request,
-                                Call call, unsigned timeout) {
+void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
   // It's common for the result to already be in the store. Optimistically
   // check for that case before we bother locking any mutexes.
   auto result = store.resolveOptional(call);
   if (result) {
-    request->sendContentNode(Node(*result), std::nullopt,
-                             Request::CacheControl::Mutable);
+    request.sendContentNode(Node(*result), std::nullopt,
+                            Request::CacheControl::Mutable);
     return;
   }
 
-  // No deadlock: the only other mutex we hold is request->mutex, which isn't
-  // accessible by other threads.
+  // No deadlock: we don't hold any other mutexes.
   std::unique_lock<std::mutex> lock(mutex);
   CallGroup &call_group = call_groups[call.Name];
   lock.unlock();
-  // No deadlock: the only other mutex we hold is request->mutex, which isn't
-  // accessible by other threads.
+  // No deadlock: we don't hold any other mutexes.
   lock = std::unique_lock<std::mutex>(call_group.mutex);
 
-  // If the result has just been added to the store, return it now. If the
-  // result still isn't in the store, we will respond to this request when it
-  // gets added.
+  // If the result has just been added to the store, return it now instead of
+  // potentially creating a new PendingCall.
   result = store.resolveOptional(call);
   if (result) {
-    request->sendContentNode(Node(*result), std::nullopt,
-                             Request::CacheControl::Mutable);
+    request.sendContentNode(Node(*result), std::nullopt,
+                            Request::CacheControl::Mutable);
     return;
   }
 
   auto item = call_group.calls.try_emplace(call, &call_group, call);
   PendingCall &pending_call = item.first->second;
-  // TODO: remove timed out requests from pending_call.requests.
-  pending_call.requests.emplace_back(request);
-  request->pending_call = &pending_call;
-  request->deferWithTimeout(REQUEST_TIMEOUT);
+  request.sendAccepted();
 
   if (item.second) {
-    // Check for queued workers that can handle this call.
-    for (WorkerGroup *worker_group : call_group.worker_groups) {
-      // No deadlock: the only other mutexes we hold are request->mutex, which
-      // isn't accessible by other threads, and call_group.mutex, which can't
-      // be locked by any thread that holds worker_group->mutex.
-      std::lock_guard wg_lock(worker_group->mutex);
-      while (!worker_group->workers.empty()) {
-        std::shared_ptr<Request> worker =
-            std::move(worker_group->workers.front());
-        worker_group->workers.pop_front();
-        // No deadlock: the only other mutexes we hold are request->mutex,
-        // which isn't accessible by other threads, and call_group.mutex and
-        // worker_group->mutex, which can't be locked by any thread that holds
-        // worker->mutex.
-        std::lock_guard lock(worker->mutex);
-        if (worker->state != Request::State::Waiting)
-          continue;
-        sendCallToWorker(pending_call, std::move(worker));
-        return;
-      }
-    }
-    // No workers found.
+    // New PendingCall, add it to the queue.
     call_group.unstarted_calls.push_back(&pending_call);
   } else {
     // TODO: if the pending_call has already been started, check whether the
@@ -512,42 +404,26 @@ void Server::handleEvaluateCall(const std::shared_ptr<Request> &request,
 }
 
 void Server::handleCallResult(const Call &call, NodeRef result) {
-  // Send the result to all waiting requests (if any).
-  // No deadlock: the only other mutex we hold is the original request's mutex,
-  // which isn't accessible by other threads.
+  // Remove the PendingCall.
+  // No deadlock: we don't hold any other mutexes.
   std::unique_lock<std::mutex> lock(mutex);
   auto call_group_it = call_groups.find(call.Name);
   if (call_group_it == call_groups.end())
     return;
   CallGroup &call_group = call_group_it->second;
   lock.unlock();
-  // No deadlock: the only other mutex we hold is the original request's mutex,
-  // which isn't accessible by other threads.
+  // No deadlock: we don't hold any other mutexes.
   lock = std::unique_lock<std::mutex>(call_group.mutex);
   auto pending_call_it = call_group.calls.find(call);
   if (pending_call_it == call_group.calls.end())
     return;
   PendingCall &pending_call = pending_call_it->second;
-  for (auto &request : pending_call.requests) {
-    // No deadlock: the only other mutexes we hold are the original request's
-    // mutex, which isn't accessible by other threads, and call_group.mutex,
-    // which can't be locked by any thread that holds request->mutex.
-    std::lock_guard request_lock(request->mutex);
-    assert(request->state != Request::State::New &&
-           request->state != Request::State::TimedOut);
-    if (request->state != Request::State::Waiting)
-      continue;
-    request->sendContentNode(Node(result.getCID()), std::nullopt,
-                             Request::CacheControl::Mutable);
-  }
-  pending_call.requests.clear();
+  pending_call.finished = true;
   pending_call.deleteIfPossible();
 }
 
-void Server::sendCallToWorker(PendingCall &pending_call,
-                              std::shared_ptr<Request> worker) {
-  assert(worker->state == Request::State::New ||
-         worker->state == Request::State::Waiting);
+void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
+  assert(!worker.responded);
   // TODO: add "timeout" key
   // TODO: add "uri" key
   Node node(node_map_arg,
@@ -557,7 +433,7 @@ void Server::sendCallToWorker(PendingCall &pending_call,
             });
   for (const CID &arg : pending_call.call.Args)
     node["args"].emplace_back(arg);
-  worker->sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
+  worker.sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
   pending_call.started = true;
   // TODO: record the start time.
 }

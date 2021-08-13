@@ -59,10 +59,6 @@ static Server *g_server = nullptr;
 
 namespace {
 
-struct AioDeleter {
-  void operator()(nng_aio *aio) { nng_aio_free(aio); }
-};
-
 struct HTTPHandlerDeleter {
   void operator()(nng_http_handler *handler) { nng_http_handler_free(handler); }
 };
@@ -105,19 +101,12 @@ http_handler_alloc(const Twine &path, void (*func)(nng_aio *)) {
   return std::unique_ptr<nng_http_handler, HTTPHandlerDeleter>(result);
 }
 
-static void cancelHandler(nng_aio *http_aio, void *arg, int err) {
-  // Just cancel the timeout, and handle everything in the timeout handler.
-  nng_aio_cancel(static_cast<nng_aio *>(arg));
-}
-
 namespace {
 struct NNGRequest : public HTTPRequest,
                     public std::enable_shared_from_this<NNGRequest> {
   nng_http_req *req;
   std::unique_ptr<nng_http_res, HTTPResponseDeleter> res;
   nng_aio *http_aio;
-  std::unique_ptr<nng_aio, AioDeleter> wait_aio;
-  std::shared_ptr<NNGRequest> self_if_deferred;
 
   NNGRequest(nng_http_req *req, nng_aio *http_aio)
       : req(req), http_aio(http_aio) {
@@ -182,16 +171,10 @@ struct NNGRequest : public HTTPRequest,
   }
 
   void actuallySend() {
-    assert(state != State::Cancelled && state != State::Done);
+    assert(!responded);
     nng_aio_set_output(http_aio, 0, res.release());
     nng_aio_finish(http_aio, 0);
-    state = State::Done;
-    if (self_if_deferred) {
-      // The self_if_deferred variable is preventing this NNGRequest from being
-      // deleted. We can't delete it until wait_aio is successfully cancelled
-      // and waitHandler() is called.
-      nng_aio_cancel(wait_aio.get());
-    }
+    responded = true;
   }
 
   void writeLog(size_t body_size) {
@@ -222,61 +205,13 @@ struct NNGRequest : public HTTPRequest,
     llvm::outs() << line << "\n";
   }
 
-  void waitHandler() {
-    // XXX: self must be declared before lock is, to ensure the lock is
-    // released before self is (potentially) deleted.
-    std::shared_ptr<NNGRequest> self;
-
-    std::lock_guard lock(mutex);
-
-    // Make sure this NNGRequest exists until this function returns, at which
-    // point it may be deleted (depending on whether or not the Server has a
-    // shared_ptr<NNGRequest> pointing to it).
-    self = std::move(self_if_deferred);
-
-    // We can't free wait_aio in this function because NNG would deadlock.
-    // FIXME: this leaks the aio. Need to think of a better solution.
-    nng_aio *tmp_aio = wait_aio.release();
-
-    if (state == State::Done) {
-      // Nothing to do. The Server must have responded to this request while we
-      // were still waiting to lock the mutex.
-      return;
-    }
-
-    assert(state == State::Waiting);
-    int result = nng_aio_result(tmp_aio);
-    state = result == 0 ? State::TimedOut : State::Cancelled;
-    g_server->handleRequest(self);
-    assert(state == (result == 0 ? State::Done : State::Cancelled));
-  }
-
-  static void waitHandlerStatic(void *self) {
-    static_cast<NNGRequest *>(self)->waitHandler();
-  }
-
-  void deferWithTimeout(unsigned seconds) override {
-    assert(state == State::New);
-    state = State::Waiting;
-
-    self_if_deferred = shared_from_this();
-
-    nng_aio *tmp_aio;
-    checkErr(nng_aio_alloc(&tmp_aio, waitHandlerStatic, this));
-    wait_aio.reset(tmp_aio);
-    nng_sleep_aio(seconds * 1000, wait_aio.get());
-
-    nng_aio_defer(http_aio, cancelHandler, wait_aio.get());
-  }
-
   std::uint16_t sent_status = 0;
 };
 } // end anonymous namespace
 
 static void httpHandler(nng_aio *aio) {
   auto nng_req = reinterpret_cast<nng_http_req *>(nng_aio_get_input(aio, 0));
-  auto req = std::make_shared<NNGRequest>(nng_req, aio);
-  std::lock_guard lock(req->mutex);
+  NNGRequest req(nng_req, aio);
   g_server->handleRequest(req);
 }
 

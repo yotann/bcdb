@@ -15,6 +15,7 @@ using llvm::StringRef;
 
 namespace {
 
+// TODO: use a mock class.
 class TestHTTPRequest : public HTTPRequest {
 public:
   TestHTTPRequest(StringRef method_str, std::optional<StringRef> uri_str,
@@ -61,10 +62,6 @@ public:
     EXPECT_NE(response_status, std::nullopt);
     EXPECT_EQ(response_body, std::nullopt);
     response_body = "";
-  }
-
-  void deferWithTimeout(unsigned seconds) override {
-    FAIL() << "should not be used by HTTPTest";
   }
 
   std::string request_method_str;
