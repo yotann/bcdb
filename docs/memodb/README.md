@@ -17,6 +17,10 @@ Features:
 
 See the [Tutorial].
 
+## Debugging
+
+See [debugging].
+
 ## Design
 
 See the [MemoDB data model].
@@ -35,6 +39,7 @@ See the [MemoDB data model] and [comparisons of protocols and libraries].
 
 [C++ class list]: ./classes.md
 [comparisons of protocols and libraries]: ./comparisons.md
+[debugging]: ./debugging.md
 [MemoDB data model]: ./data-model.md
 [REST API documentation]: ./rest-api.md
 [Tutorial]: ./tutorial.md
