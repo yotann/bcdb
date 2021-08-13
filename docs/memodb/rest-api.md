@@ -14,6 +14,21 @@ well have severe security vulnerabilities. If nothing else, it certainly has
 lots of DoS vulnerabilities. Do not expose the server to the Internet, unless
 you put it behind an encrypting, authenticating proxy.
 
+## Problems with the server
+
+- The server probably has security holes, so you should be careful not to
+  expose it to the Internet. (Running it on `http://127.0.0.1:29179` should be
+  safe, but `http://0.0.0.0:29179` is dangerous.)
+- If you're using the same machine as someone else, you need to use different
+  port numbers (you can't both use port 29179 at the same time).
+- The server and client have some known memory leaks.
+- If you kill a worker while it's processing a job, the job will never be
+  finished. (The server will keep waiting for results forever.) You can fix
+  this by restarting the server. You'll also have to restart all the programs
+  connected to it.
+  - Note that `alive-worker` is designed to send a result to the server even
+    when it crashes.
+
 ## Overview
 
 ### Data formats and content negotiation

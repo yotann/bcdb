@@ -15,7 +15,7 @@ RocksDB is better for huge amounts of data. Then you need to set `MEMODB_STORE`
 to the location of the database. Finally, run `memodb init` to create the
 database for the first time.
 
-```shell
+```console
 $ export MEMODB_STORE=sqlite:$HOME/memodb-tutorial.db
 $ memodb init
 $ ls $HOME/memodb-tutorial.db
@@ -35,7 +35,7 @@ the MemoDB store, then retrieve them.
 **NOTE:** Unfortunately, the word "node" is overloaded. Don't confuse MemoDB
 Nodes with outlining dependence nodes or other kinds of nodes.
 
-```shell
+```console
 $ echo '27' | memodb add
 /cid/uAXEAAhgb
 $ memodb get /cid/uAXEAAhgb
@@ -57,7 +57,7 @@ you need to use its CID.
 A given Node value will always have the same CID, no matter how many times you
 add it, and even if you add it to multiple different MemoDB stores.
 
-```shell
+```console
 $ echo '27' | memodb add
 /cid/uAXEAAhgb
 $ echo '27' | memodb add
@@ -77,7 +77,7 @@ the database won't get any larger.
 Aside from integers, there are many other kinds of Node. See [MemoDB data
 model] for more details.
 
-```shell
+```console
 $ # null
 $ echo 'null' | memodb add
 /cid/uAXEAAfY
@@ -116,7 +116,7 @@ the native format of MemoDB is actually [CBOR], not JSON. CBOR is a binary
 format and it's much more efficient than JSON. There are lots of [CBOR
 implementations] for different programming languages.
 
-```shell
+```console
 $ memodb get --format=cbor /cid/uAXEAAhgb | hexdump -C
 00000000  18 1b                                             |..|
 00000002
@@ -134,14 +134,15 @@ map: `{"foo": "bar", "oof": "rab"}`.
 You might notice that the JSON version of the map is wrapped in `{"map":...}`,
 but the CBOR version isn't. CBOR supports more kinds of value than JSON does,
 so when we convert values to JSON, we have to add some extra wrappers ("special
-objects") to distinguish between different kinds of value. See [MemoDB JSON]
-for more details.
+objects") to distinguish between different kinds of value. This affects maps,
+links, byte strings, and floating-point values. See [MemoDB JSON] for more
+details.
 
 Whenever you work with JSON, you need to remember to use these special objects.
 It might be easier to work with CBOR instead, which doesn't need special
 objects (although CIDs encoded in CBOR can be a bit tricky).
 
-```shell
+```console
 $ # incorrect: adding a map encoded in JSON without a special object
 $ echo '{"foo":"bar","oof":"rab"}' | bin/memodb add
 value read: Invalid MemoDB JSON: Invalid special JSON object
@@ -158,7 +159,7 @@ $ echo 'A263666F6F63626172636F6F6663726162' | basenc -d --base16 | bin/memodb ad
 Nodes can use CIDs to refer to other Nodes that are already in the store.
 MemoDB even keeps track of which Nodes refer to which other ones.
 
-```shell
+```console
 $ echo '{"cid":"uAXEAAhgb"}' | memodb add
 /cid/uAXEACtgqRwABcQACGBs
 $ echo '[{"cid":"uAXEAAhgb"},{"cid":"uAXEACRsAAAAd-qFQew"}]' | memodb add
@@ -188,7 +189,7 @@ deduplicated. Let's try an example.
 
 **NOTE:** You may get different CIDs, depending on your version of LLVM.
 
-```shell
+```console
 $ bcdb add --name=two_funcs - <<EOF
 define void @f0() {
   ret void
@@ -210,12 +211,12 @@ actually stored in the database.
 
 ## Heads
 
-You may have noticed the `/head/` option in the last section. Heads allow you
-to assign a convenient name to a particular CID, which would otherwise be hard
-to remember. The `bcdb add --name=two_funcs` command automatically updated the
+You may have noticed the `/head/` path in the last section. Heads allow you to
+assign a convenient name to a particular CID, which would otherwise be hard to
+remember. The `bcdb add --name=two_funcs` command automatically updated the
 head `two_funcs` to point to the new Node it created.
 
-```shell
+```console
 $ memodb set /head/twentyseven /cid/uAXEAAhgb
 $ memodb set /head/random_number /cid/uAXEAAhgb
 $ memodb get /head/twentyseven
@@ -237,7 +238,7 @@ Aside from Nodes and heads, call results are the last way of storing data in
 MemoDB. When you have a func such as `test.add` that takes one or more Nodes as
 arguments, you can evaluate the func on some Nodes:
 
-```shell
+```console
 $ echo '2' | memodb add
 /cid/uAXEAAQI
 $ echo '3' | memodb add
@@ -251,13 +252,13 @@ $ memodb get /cid/uAXEAAQU
 ```
 
 **NOTE:** Don't get the terminology confused! A MemoDB func is different from a
-C++ function or an LLVM IR function. MemoDB funcs are usually implemented using
-C++ functions, but they have to be specially designed C++ functions and they
-must be registered with `Evaluator::registerFunc()`.
+C++ function or an LLVM IR function. MemoDB funcs are usually *implemented*
+using C++ functions, but they have to be specially designed C++ functions and
+they must be registered with `Evaluator::registerFunc()`.
 
 **NOTE:** Different funcs may be available depending on which program you're
-running. For example, `memodb evaluate /call/smout.candidates...` will break,
-but `smout evaluate /call/smout.candidates...` will work. If you're using
+running. For example, `memodb evaluate /call/smout.candidates...` won't work,
+but `smout evaluate /call/smout.candidates...` will. If you're using
 `memodb-server`, the available funcs depend on which worker programs are
 connected to the server.
 
@@ -268,7 +269,7 @@ store. The next time you evaluate it using the same arguments, MemoDB will use
 the cached result instead of actually evaluating the func again. This is
 extremely useful for funcs that take a long time to evaluate!
 
-```shell
+```console
 $ memodb get /call
 /call/test.add
 $ memodb get /call/test.add
@@ -300,7 +301,7 @@ rid of the old cached results and make sure all calls are evaluated again using
 the new code. One way of doing this is to manually invalidate all the old
 results. For example:
 
-```shell
+```console
 $ memodb get /call/test.add/uAXEAAQI,uAXEAAQI
 /cid/uAXEAAQQ
 $ memodb delete /call/test.add
@@ -352,7 +353,7 @@ different computers and connect them to the server.
 
 To start the server:
 
-```shell
+```console
 $ # the server should be started with MEMODB_STORE set to an sqlite:
 $ # or rocksdb: database, just like the other commands in the tutorial.
 $ export MEMODB_STORE=sqlite:$HOME/memodb-tutorial.db
@@ -363,7 +364,7 @@ Server started!
 Now, in a different terminal, you can try connecting to the server to access
 the MemoDB store.
 
-```shell
+```console
 $ curl http://127.0.0.1:29179/head
 ["/head/two_funcs","/head/twentyseven","/head/random_number"]
 $ curl http://127.0.0.1:29179/twentyseven
