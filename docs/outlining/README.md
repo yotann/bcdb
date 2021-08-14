@@ -241,20 +241,61 @@ Remember to kill memodb-server and alive-worker when you're done with them.
 
 TODO: explain.
 
-#### Explore the cached outlining results
+#### Manually running the funcs and analyzing results
 
-You need to run the other steps first, in order to fill the database with
-results.
+The outliner actually uses a bunch of different MemoDB funcs to handle
+different parts of the outlining process:
 
-```sh
-# In one window:
-memodb-server http://127.0.0.1:29179
+- `smout.actual_size_vN`: compile a function and get its actual machine code
+  size.
+- `smout.candidates_vN`: generate outlining candidates from a particular
+  original function, using specified options.
+- `smout.grouped_candidates_vN`: use `smout.candidates_vN` on all functions in
+  a module, then group all the candidates based on the callee function type and
+  accessed global variables.
+- `smout.extracted_callees_vN`: extract a list of callee functions (indicated
+  by node number ranges) from a particular original function.
+- `smout.extracted_caller_vN`: extract a single caller function (indicated by a
+  node number range) from a particular original function.
+- `smout.grouped_callees_for_function_vN`: use `smout.extracted_callees_vN`
+  (possibly multiple times) on an original function and combine all the results
+  with the results from `smout.grouped_candidates_vN`.
+- `smout.grouped_callees_vN`: use `smout.grouped_callees_for_function_vN` on
+  all functions in a module, then group the results.
+- `smout.ilp_problem_vN`: BROKEN.
+- `smout.greedy_solution_vN`: use `smout.grouped_callees_vN` on a module, then
+  use a greedy algorithm to decide which candidates to outline. Avoids
+  overlapping candidates.
+- `smout.outlined_module_vN`: given a set of candidates to outline in a
+  particular module (such as the set returned by `smout.greedy_solution_vN`),
+  applies `smout.extracted_caller_vN` to apply outlining to all the functions
+  in the module, and organizes everything into a new module compatible with the
+  `bcdb get` command.
+- `smout.optimized_vN`: the full outlining process. Just applies
+  `smout.greedy_solution_vN` to a module and gives the result to
+  `smout.outlined_module_vN`.
 
-# In another window:
-curl http://127.0.0.1:29179/call
-```
+See [Funcs.h](../../include/outlining/Funcs.h) and
+[Funcs.cpp](../../lib/outlining/Funcs.cpp) for the actual code. And remember
+that all the func names have version numbers, which you can see in Funcs.cpp
+(for example, `smout.candidates` might actually be called
+`smout.candidates_v1`).
 
-You can use the [REST API](../memodb/rest-api.md) to explore the outlining
-results.
+You can use `memodb get /call` to list all funcs that currently have results in
+MemoDB. You can use `memodb get /call/smout.greedy_solution` to see all the
+calls of one particular func. You can use `memodb get
+/call/smout.greedy_solution/...` to get the actual results of one particular
+call.
+
+If you need to get lots of results, running `memodb get` thousands of times
+would be very slow. Instead, you can start `memodb-server` and write your own
+script that uses the [REST API] to download results.
+
+You can use the `smout evaluate /call/...` command to run these funcs manually.
+For example, you could take the normal output of `smout.greedy_solution`,
+delete all candidates from the set except one, and then apply
+`smout.outlined_module` to the new set, in order to find out what happens when
+you only outline one candidate.
 
 [MemoDB tutorial]: ../memodb/tutorial.md
+[REST API]: ../memodb/rest-api.md

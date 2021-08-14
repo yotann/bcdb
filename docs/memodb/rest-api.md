@@ -21,7 +21,6 @@ you put it behind an encrypting, authenticating proxy.
   safe, but `http://0.0.0.0:29179` is dangerous.)
 - If you're using the same machine as someone else, you need to use different
   port numbers (you can't both use port 29179 at the same time).
-- The server and client have some known memory leaks.
 - If you kill a worker while it's processing a job, the job will never be
   finished. (The server will keep waiting for results forever.) You can fix
   this by restarting the server. You'll also have to restart all the programs
@@ -209,6 +208,25 @@ Content-Type: application/json
 
 201 Created
 ```
+
+### Start evaluation of a call
+
+```http
+POST /call/:func/:cid0,:cid1,:cid2,.../evaluate HTTP/1.1
+
+202 Accepted
+```
+
+The server will return `202 Accepted` at first, and add the call to a queue. A
+worker process connected to the server, such as `alive-worker` or `smout
+worker`, can retrieve the job, evaluate it, and submit the results to the
+server using `PUT`. After results are available, the next time you `POST` the
+call, the server will respond with `200 OK` and the result of the job.
+
+It is recommended to send the `POST` request once a second until you get `200
+OK` back. If you have 1000s of jobs, you can submit each of them with one
+`POST` request, and then wait for the results of each job, one at a time, with
+more `POST` requests.
 
 [CBOR]: https://cbor.io/
 [MemoDB data model]: ./data-model.md
