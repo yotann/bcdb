@@ -11,6 +11,7 @@ using memodb::Node;
 using memodb::NodeOrCID;
 using memodb::NodeRef;
 
+NodeOrCID actual_size(Evaluator &evaluator, NodeRef func);
 NodeOrCID candidates(Evaluator &evaluator, NodeRef options, NodeRef func);
 NodeOrCID grouped_candidates(Evaluator &evaluator, NodeRef options,
                              NodeRef mod);
@@ -29,6 +30,7 @@ NodeOrCID refinements_for_group(Evaluator &evaluator, NodeRef options,
 NodeOrCID grouped_refinements(Evaluator &evaluator, NodeRef options,
                               NodeRef mod);
 
+extern const char *actual_size_version;
 extern const char *candidates_version;
 extern const char *grouped_candidates_version;
 extern const char *extracted_callees_version;
