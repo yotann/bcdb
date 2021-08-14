@@ -57,6 +57,7 @@ const char *smout::grouped_callees_version = "smout.grouped_callees_v3";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
 const char *smout::greedy_solution_version = "smout.greedy_solution_v4";
 const char *smout::extracted_caller_version = "smout.extracted_caller_v4";
+const char *smout::outlined_module_version = "smout.outlined_module_v0";
 const char *smout::optimized_version = "smout.optimized_v5";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
@@ -1109,10 +1110,9 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   return Node(byte_string_arg, buffer);
 }
 
-NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
-  NodeRef solution = evaluator.evaluate(greedy_solution_version, options, mod);
+NodeOrCID smout::outlined_module(Evaluator &evaluator, NodeRef mod,
+                                 NodeRef solution) {
   Node mod_node = *mod;
-
   ExitOnError err("smout.optimized: ");
   LLVMContext context;
   Node old_remainder = evaluator.getStore().get((*mod)["remainder"].as<CID>());
@@ -1186,6 +1186,11 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
   return mod_node;
 }
 
+NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
+  NodeRef solution = evaluator.evaluate(greedy_solution_version, options, mod);
+  return evaluator.evaluate(outlined_module_version, mod, solution).getCID();
+}
+
 NodeOrCID smout::refinements_for_group(Evaluator &evaluator, NodeRef options,
                                        NodeRef members) {
   StringSet unique_set;
@@ -1251,6 +1256,7 @@ void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(ilp_problem_version, &ilp_problem);
   evaluator.registerFunc(greedy_solution_version, &greedy_solution);
   evaluator.registerFunc(extracted_caller_version, &extracted_caller);
+  evaluator.registerFunc(outlined_module_version, &outlined_module);
   evaluator.registerFunc(optimized_version, &optimized);
   evaluator.registerFunc(refinements_for_group_version, &refinements_for_group);
   evaluator.registerFunc(grouped_refinements_version, &grouped_refinements);
