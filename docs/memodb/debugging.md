@@ -8,6 +8,39 @@
   inputs, there's probably a bug in BCDB.
 - LLVM bugs. These are less common than the other two, but they do happen.
 
+## Hangs
+
+If the BCDB commands seem to hang without printing anything, there are several
+possible reasons:
+
+- If the command hangs right after you start it, it might be rewriting files in
+  the RocksDB database. This should normally take less than a minute. In this
+  case, the `top` command will show that BCDB is using CPU.
+- It's still working on a task, but the task is taking a really long time. For
+  example, maybe `smout.candidates` is working on a really huge function and
+  generating 10,000 candidates. In this case, the `top` command will show that
+  BCDB is using CPU.
+- There's a bug in BCDB and it's stuck in an infinite loop. In this case, the
+  `top` command will show that BCDB is using CPU. You can try to investigate by
+  using `gdb` to attach to it.
+- BCDB already finished all the jobs and printed the results, but it didn't
+  exit properly. In this case, BCDB will have printed results, and the `top`
+  command will show very low CPU usage. You can just kill the command if this
+  happens.
+- If you're using `memodb-server` and one of the worker programs or other
+  programs crashed or got killed: most likely `memodb-server` sent a job to the
+  worker, but it never got a result, so it's waiting forever. In this case, the
+  `top` command will show very low CPU usage, but `memodb-server` will still
+  respond to any requests you make with `curl`. You can fix this by restarting
+  `memodb-server` and all the other programs connected to it.
+- If you're using `memodb-server` and nothing has crashed or been killed: you
+  might have run into a bug in NNG (the HTTP server library). In this case, the
+  `top` command will show very low CPU usage, and `memodb-server` will **not**
+  respond to any requests you make with `curl`. Unfortunately, I don't know any
+  easy way to fix this problem. I guess you would have to rewrite
+  `tools/memodb-server/memodb-server.cpp` to use a different library instead of
+  NNG.
+
 ## Read the whole error message
 
 It's important to look at **all parts** of the error message to find the source

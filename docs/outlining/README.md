@@ -130,6 +130,64 @@ You can also run the optimized command and make sure its behavior is correct:
 ./ppmtomitsu-optimized </dev/null
 ```
 
+### Outlining options
+
+The following options affect all `smout` subcommands, because they affect
+candidate generation:
+
+- `--max-args=10`: maximum combined number of arguments and return values for
+  an outlined callee. Increase to generate more candidates, but candidates with
+  more arguments are less likely to be profitable to outline.
+- `--max-nodes=50`: for the dependency-based candidate generator, maximum
+  number of nodes in a single candidate.
+- `--max-adjacent=10`: for the adjacent-node candidate generator, maximum
+  number of nodes in a single candidate.
+- `--min-rough-caller-savings=1`: minimum estimated benefit in the
+  caller for a candidate to be generated in the first place. Increase this to
+  make `smout` faster by reducing the number of candidates (but the results may
+  be worse). If you use `--compile-all-callers`, you can decrease this option
+  to a negative number in order to generate candidates that are estimated to be
+  unprofitable, just in case it turns out they actually **are** profitable
+  after being compiled.
+
+The following options only affect `smout solve-greedy` and `smout optimize`,
+because they affect which candidates are selected for outlining.
+
+- `--min-caller-savings=1`: minimum size savings in the caller, per copy of the
+  candidate, to consider a candidate for outlining. This is always based on the
+  estimated size.
+- `--min-benefit=1`: minimum benefit, across all duplicates, to consider a
+  candidate for outlining. This is usually based on the estimated size, unless
+  `--compile-all-callers` is given, in which case it is based on the actual
+  compiled size.
+- `--verify-caller-savings`: before outlining a candidate, compile the modified
+  callers to make sure the candidate actually makes them smaller. Candidates
+  are still chosen based on the estimated size savings, but candidates that
+  turn out to be unprofitable will be skipped.
+- `--compile-all-callers`: exhaustively compile the modified callers for all
+  candidates being considered. Candidates will be chosen based on the actual
+  compiled size, not the estimated size. If you use this option, there's no
+  reason to use `--verify-caller-savings`.
+
+If you don't use `--verify-caller-savings` or `--compile-all-callers`, it's
+usually best to use the options `--min-caller-savings=16 --min-benefit=128` or
+similar values. If you use `--verify-caller-savings` or
+`--compile-all-callers`, the other options can use lower values.
+
+#### Using options consistently for different commands
+
+If you want to use the results from multiple different commands, like `smout
+candidates` and `smout optimize`, you should use the same options for both.
+(But remember that some options, like `--compile-all-callers`, only apply to
+the `smout solve-greedy` and `smout optimize` commands.)
+
+Suppose you run `smout candidates --max-adjacent=20`, and then you run `smout
+optimize --max-adjacent=30`. The `smout optimize` command will actually ignore
+the results of the `smout candidates` command, because the option value didn't
+match, and it will generate new candidates using the `--max-adjacent=30`
+option. So the results from both commands will be correct, but they will use
+two different sets of candidate generation results.
+
 ### Other analyses
 
 #### Equivalence checking
