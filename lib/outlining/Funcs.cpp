@@ -1,6 +1,7 @@
 #include "outlining/Funcs.h"
 
 #include <cstdint>
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
@@ -662,26 +663,10 @@ NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
   return Node(utf8_string_arg, os.str());
 }
 
-NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
-                                 NodeRef mod) {
-  Node stripped_options = *options;
-  int min_benefit = stripped_options.get_value_or<int>("min_benefit", 1);
-  stripped_options.erase("min_benefit");
-  int min_caller_savings =
-      stripped_options.get_value_or<int>("min_caller_savings", 1);
-  stripped_options.erase("min_caller_savings");
-
-  StringMap<unsigned> original_function_copies;
-  for (auto &item : (*mod)["functions"].map_range()) {
-    auto func_cid = item.value().as<CID>();
-    original_function_copies[cid_key(func_cid)]++;
-  }
-  auto grouped_callees =
-      evaluator.evaluate(grouped_callees_version, stripped_options, mod);
-
-  StringMap<size_t> function_indices;
-  StringMap<size_t> callee_indices;
-
+namespace smout {
+namespace {
+// Holds all information used when deciding which candidates to outline.
+struct OutliningProblem {
   struct FunctionInfo {
     CID cid;
 
@@ -695,7 +680,12 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
     // outlined from it.
     size_t current_size;
 
-    FunctionInfo(CID cid) : cid(cid) {}
+    // How many identical copies of this function there are in the original
+    // program.
+    size_t num_copies;
+
+    FunctionInfo(CID cid, size_t num_copies)
+        : cid(cid), num_copies(num_copies) {}
   };
   std::vector<FunctionInfo> functions;
 
@@ -741,84 +731,101 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
   };
   std::vector<CalleeInfo> callees;
 
-  // Organize candidates. TODO: factor out code shared with ilp_problem.
-  for (auto &item : grouped_callees->map_range()) {
-    const Node &group = item.value();
-    if (group["num_unique_callees"].as<size_t>() >=
-        group["num_members"].as<size_t>())
-      continue;
-    // TODO: if greedy_solution is a bottleneck, we could filter out callees
-    // with an insufficient number of duplicates.
-    Node members = evaluator.getStore().get(group["members"].as<CID>());
-    for (auto &candidate : members.list_range()) {
-      if (candidate["caller_savings"].as<int>() < min_caller_savings)
+  Evaluator &evaluator;
+
+  OutliningProblem(Evaluator &evaluator,
+                   StringMap<unsigned> &original_function_copies,
+                   const Node &grouped_callees, int min_caller_savings)
+      : evaluator(evaluator) {
+    organizeCandidates(original_function_copies, grouped_callees,
+                       min_caller_savings);
+    determineOverlaps();
+    markInitialConflicts();
+  }
+
+  void organizeCandidates(StringMap<unsigned> &original_function_copies,
+                          const Node &grouped_callees, int min_caller_savings) {
+    StringMap<size_t> function_indices;
+    StringMap<size_t> callee_indices;
+
+    for (auto &item : grouped_callees.map_range()) {
+      const Node &group = item.value();
+      if (group["num_unique_callees"].as<size_t>() >=
+          group["num_members"].as<size_t>())
         continue;
+      // TODO: if greedy_solution is a bottleneck, we could filter out callees
+      // with an insufficient number of duplicates.
+      Node members = evaluator.getStore().get(group["members"].as<CID>());
+      for (auto &candidate : members.list_range()) {
+        if (candidate["caller_savings"].as<int>() < min_caller_savings)
+          continue;
 
-      auto function = candidate["function"].as<CID>();
-      auto callee = candidate["callee"].as<CID>();
+        auto function = candidate["function"].as<CID>();
+        auto callee = candidate["callee"].as<CID>();
 
-      // Candidate info.
-      auto m = candidates.size();
-      candidates.push_back({});
-      CandidateInfo &cand_info = candidates.back();
-      cand_info.estimated_savings = cand_info.savings =
-          candidate["caller_savings"].as<int>() *
-          original_function_copies[cid_key(function)];
-      cand_info.nodes = candidate["nodes"];
+        // Candidate info.
+        auto m = candidates.size();
+        candidates.push_back({});
+        CandidateInfo &cand_info = candidates.back();
+        cand_info.estimated_savings = cand_info.savings =
+            candidate["caller_savings"].as<int>() *
+            original_function_copies[cid_key(function)];
+        cand_info.nodes = candidate["nodes"];
 
-      // Original function info.
-      if (!function_indices.count(cid_key(function))) {
-        cand_info.function_index = function_indices[cid_key(function)] =
-            function_indices.size();
-        functions.emplace_back(function);
-      } else {
-        cand_info.function_index = function_indices[cid_key(function)];
+        // Original function info.
+        if (!function_indices.count(cid_key(function))) {
+          cand_info.function_index = function_indices[cid_key(function)] =
+              function_indices.size();
+          functions.emplace_back(function,
+                                 original_function_copies[cid_key(function)]);
+        } else {
+          cand_info.function_index = function_indices[cid_key(function)];
+        }
+        functions[cand_info.function_index].candidate_indices.push_back(m);
+
+        // Callee info.
+        auto callee_size = candidate["callee_size"].as<int>();
+        CalleeInfo *callee_info;
+        if (!callee_indices.count(cid_key(callee))) {
+          cand_info.callee_index = callee_indices[cid_key(callee)] =
+              callee_indices.size();
+          callees.emplace_back(callee);
+          callee_info = &callees.back();
+          callee_info->size = callee_size;
+        } else {
+          cand_info.callee_index = callee_indices[cid_key(callee)];
+          callee_info = &callees[cand_info.callee_index];
+          callee_info->size = std::min(callee_info->size, callee_size);
+        }
+        callee_info->candidate_indices.push_back(m);
       }
-      functions[cand_info.function_index].candidate_indices.push_back(m);
-
-      // Callee info.
-      auto callee_size = candidate["callee_size"].as<int>();
-      CalleeInfo *callee_info;
-      if (!callee_indices.count(cid_key(callee))) {
-        cand_info.callee_index = callee_indices[cid_key(callee)] =
-            callee_indices.size();
-        callees.emplace_back(callee);
-        callee_info = &callees.back();
-        callee_info->size = callee_size;
-      } else {
-        cand_info.callee_index = callee_indices[cid_key(callee)];
-        callee_info = &callees[cand_info.callee_index];
-        callee_info->size = std::min(callee_info->size, callee_size);
-      }
-      callee_info->candidate_indices.push_back(m);
     }
   }
 
-  // Determine overlaps.
-  for (FunctionInfo &func_info : functions) {
-    std::vector<SmallVector<size_t, 4>> overlaps;
-    for (size_t m : func_info.candidate_indices) {
-      for (size_t i : decodeBitVector(candidates[m].nodes)) {
-        if (overlaps.size() <= i)
-          overlaps.resize(i + 1);
-        overlaps[i].push_back(m);
+  void determineOverlaps() {
+    for (FunctionInfo &func_info : functions) {
+      std::vector<SmallVector<size_t, 4>> overlaps;
+      for (size_t m : func_info.candidate_indices) {
+        for (size_t i : decodeBitVector(candidates[m].nodes)) {
+          if (overlaps.size() <= i)
+            overlaps.resize(i + 1);
+          overlaps[i].push_back(m);
+        }
       }
-    }
-    for (size_t i = 0; i < overlaps.size(); ++i) {
-      if (overlaps[i].size() <= 1)
-        continue;
-      if (i > 0 && overlaps[i] == overlaps[i - 1])
-        continue;
-      for (size_t m0 : overlaps[i])
-        for (size_t m1 : overlaps[i])
-          if (m0 != m1)
-            candidates[m0].overlaps.set(m1);
+      for (size_t i = 0; i < overlaps.size(); ++i) {
+        if (overlaps[i].size() <= 1)
+          continue;
+        if (i > 0 && overlaps[i] == overlaps[i - 1])
+          continue;
+        for (size_t m0 : overlaps[i])
+          for (size_t m1 : overlaps[i])
+            if (m0 != m1)
+              candidates[m0].overlaps.set(m1);
+      }
     }
   }
 
-  const bool actually_compile_callers = true;
-  if (actually_compile_callers) {
-    // Calculate function actual sizes.
+  void computeOriginalFunctionSizes() {
     std::vector<Future> futures;
     for (size_t i = 0; i < functions.size(); ++i)
       futures.emplace_back(
@@ -827,112 +834,123 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
       functions[i].current_size = futures[i]->as<size_t>();
   }
 
-  // Mark initial conflicts, for callees that have multiple duplicates that
-  // overlap with each other.
-  for (CalleeInfo &ci2 : callees) {
-    SparseBitVector<> conflicts;
-    for (size_t m : ci2.candidate_indices) {
-      if (conflicts.test(m))
-        continue;
-      candidates[m].no_conflict = true;
-      conflicts |= candidates[m].overlaps;
+  void markInitialConflicts() {
+    // Mark initial conflicts, for callees that have multiple duplicates that
+    // overlap with each other.
+    for (CalleeInfo &ci2 : callees) {
+      SparseBitVector<> conflicts;
+      for (size_t m : ci2.candidate_indices) {
+        if (conflicts.test(m))
+          continue;
+        candidates[m].no_conflict = true;
+        conflicts |= candidates[m].overlaps;
+      }
     }
   }
 
-  // Determine which callees to use.
-  unsigned total_benefit = 0;
-  while (true) {
-    if (actually_compile_callers) {
-      // Actually extract the caller for every possible candidate and measure
-      // the resulting function size, so we know exactly what the size savings
-      // are.
+  void updateCallerSavings(const ArrayRef<size_t> &candidates_to_update) {
+    // Actually extract the caller for the given candidates and measure
+    // the resulting function size, so we know exactly what the size savings
+    // are.
 
-      // FIXME: the caller size calculation might be an overestimate because of
-      // missing attributes on the callee declaration. E.g., even if the
-      // original function had "nothrow", the callee declaration we use here
-      // will not have "nothrow", so the extracted caller might be larger than
-      // necessary.
+    // FIXME: the caller size calculation might be an overestimate because of
+    // missing attributes on the callee declaration. E.g., even if the
+    // original function had "nothrow", the callee declaration we use here
+    // will not have "nothrow", so the extracted caller might be larger than
+    // necessary.
 
-      // FIXME: depending on which callee we choose to outline, we might
-      // outline multiple candidates from the same function at once. This code
-      // will be inaccurate in that case because it considers each candidate
-      // separately.
+    // FIXME: depending on which callee we choose to outline, we might
+    // outline multiple candidates from the same function at once. This code
+    // will be inaccurate in that case because it considers each candidate
+    // separately.
 
-      std::vector<Future> caller_futures;
-      for (CandidateInfo &ci : candidates) {
-        // Check if we already have an up-to-date size calculation.
-        if (!ci.no_conflict ||
-            ci.num_candidates_used_in_savings_calculation ==
-                functions[ci.function_index].selected_candidate_indices.size() +
-                    1)
-          continue;
-        Node node(node_list_arg);
-        for (size_t m :
-             functions[ci.function_index].selected_candidate_indices) {
-          size_t n = candidates[m].callee_index;
-          std::string name =
-              "outlined.callee." + callees[n].cid.asString(Multibase::base32);
-          // TODO: check for conflicting names.
-          node.emplace_back(
-              Node(node_map_arg, {{"nodes", candidates[m].nodes},
-                                  {"name", Node(utf8_string_arg, name)}}));
-        }
-        size_t n = ci.callee_index;
+    std::vector<Future> caller_futures;
+    for (size_t m_to_update : candidates_to_update) {
+      CandidateInfo &ci = candidates[m_to_update];
+      // Check if we already have an up-to-date size calculation.
+      if (!ci.no_conflict ||
+          ci.num_candidates_used_in_savings_calculation ==
+              functions[ci.function_index].selected_candidate_indices.size() +
+                  1)
+        continue;
+      Node node(node_list_arg);
+      for (size_t m : functions[ci.function_index].selected_candidate_indices) {
+        size_t n = candidates[m].callee_index;
         std::string name =
             "outlined.callee." + callees[n].cid.asString(Multibase::base32);
         // TODO: check for conflicting names.
         node.emplace_back(
-            Node(node_map_arg,
-                 {{"nodes", ci.nodes}, {"name", Node(utf8_string_arg, name)}}));
-        caller_futures.emplace_back(evaluator.evaluateAsync(
-            extracted_caller_version, functions[ci.function_index].cid, node));
+            Node(node_map_arg, {{"nodes", candidates[m].nodes},
+                                {"name", Node(utf8_string_arg, name)}}));
       }
-
-      std::vector<Future> caller_size_futures;
-      for (Future &future : caller_futures) {
-        caller_size_futures.emplace_back(
-            evaluator.evaluateAsync(actual_size_version, future.getCID()));
-        future.freeNode();
-      }
-
-      size_t i = 0;
-      for (CandidateInfo &ci : candidates) {
-        // Check if we already have an up-to-date size calculation.
-        if (!ci.no_conflict ||
-            ci.num_candidates_used_in_savings_calculation ==
-                functions[ci.function_index].selected_candidate_indices.size() +
-                    1)
-          continue;
-        auto new_size = caller_size_futures[i]->as<size_t>();
-        ci.savings =
-            static_cast<int>(functions[ci.function_index].current_size) -
-            new_size;
-        ci.num_candidates_used_in_savings_calculation =
-            functions[ci.function_index].selected_candidate_indices.size() + 1;
-        ++i;
-      }
+      size_t n = ci.callee_index;
+      std::string name =
+          "outlined.callee." + callees[n].cid.asString(Multibase::base32);
+      // TODO: check for conflicting names.
+      node.emplace_back(
+          Node(node_map_arg,
+               {{"nodes", ci.nodes}, {"name", Node(utf8_string_arg, name)}}));
+      caller_futures.emplace_back(evaluator.evaluateAsync(
+          extracted_caller_version, functions[ci.function_index].cid, node));
     }
 
+    std::vector<Future> caller_size_futures;
+    for (Future &future : caller_futures) {
+      caller_size_futures.emplace_back(
+          evaluator.evaluateAsync(actual_size_version, future.getCID()));
+      future.freeNode();
+    }
+
+    size_t i = 0;
+    for (size_t m_to_update : candidates_to_update) {
+      CandidateInfo &ci = candidates[m_to_update];
+      // Check if we already have an up-to-date size calculation.
+      if (!ci.no_conflict ||
+          ci.num_candidates_used_in_savings_calculation ==
+              functions[ci.function_index].selected_candidate_indices.size() +
+                  1)
+        continue;
+      auto new_size = caller_size_futures[i]->as<size_t>();
+      ci.savings = static_cast<int>(functions[ci.function_index].current_size) -
+                   new_size;
+      ci.num_candidates_used_in_savings_calculation =
+          functions[ci.function_index].selected_candidate_indices.size() + 1;
+      ++i;
+    }
+  }
+
+  void updateAllCallerSavings() {
+    std::vector<size_t> all_candidates;
+    for (size_t m = 0; m < candidates.size(); ++m)
+      all_candidates.push_back(m);
+    updateCallerSavings(all_candidates);
+  }
+
+  int calculateCalleeBenefit(size_t n) {
+    int benefit = -callees[n].size;
+    for (size_t m : callees[n].candidate_indices)
+      if (candidates[m].no_conflict && candidates[m].savings > 0)
+        benefit += candidates[m].savings *
+                   functions[candidates[m].function_index].num_copies;
+    return benefit;
+  }
+
+  void findBestCallee(size_t &best_n, int &best_benefit) {
     // Calculate the benefit of each callee, and choose the best one.
-    size_t best_n = 0;
-    int best_benefit = 0;
+    best_n = 0;
+    best_benefit = 0;
     for (size_t n = 0; n < callees.size(); ++n) {
       if (callees[n].selected)
         continue;
-      int benefit = -callees[n].size;
-      for (size_t m : callees[n].candidate_indices)
-        if (candidates[m].no_conflict && candidates[m].savings > 0)
-          benefit += candidates[m].savings;
+      int benefit = calculateCalleeBenefit(n);
       if (benefit > best_benefit) {
         best_n = n;
         best_benefit = benefit;
       }
     }
-    if (best_benefit < min_benefit)
-      break;
+  }
 
-    size_t n = best_n;
-    total_benefit += best_benefit;
+  void selectCalleeForOutlining(size_t n) {
     callees[n].selected = true;
     for (size_t m : callees[n].candidate_indices) {
       CandidateInfo &cand_info = candidates[m];
@@ -955,14 +973,81 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
     }
   }
 
+  void disableCallee(size_t n) {
+    for (size_t m : callees[n].candidate_indices)
+      candidates[m].no_conflict = false;
+  }
+};
+} // end anonymous namespace
+} // end namespace smout
+
+NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
+                                 NodeRef mod) {
+  Node stripped_options = *options;
+  int min_benefit = stripped_options.get_value_or<int>("min_benefit", 1);
+  int min_caller_savings =
+      stripped_options.get_value_or<int>("min_caller_savings", 1);
+  bool compile_all_callers =
+      stripped_options.get_value_or<bool>("compile_all_callers", false);
+  bool verify_caller_savings =
+      stripped_options.get_value_or<bool>("verify_caller_savings", false);
+  // Remove smout.greedy_solution options so we don't pass them to
+  // smout.grouped_callees (which doesn't understand them anyway).
+  stripped_options.erase("min_benefit");
+  stripped_options.erase("min_caller_savings");
+  stripped_options.erase("compile_all_callers");
+  stripped_options.erase("verify_caller_savings");
+
+  StringMap<unsigned> original_function_copies;
+  for (auto &item : (*mod)["functions"].map_range()) {
+    auto func_cid = item.value().as<CID>();
+    original_function_copies[cid_key(func_cid)]++;
+  }
+  auto grouped_callees =
+      evaluator.evaluate(grouped_callees_version, stripped_options, mod);
+
+  OutliningProblem problem(evaluator, original_function_copies,
+                           *grouped_callees, min_caller_savings);
+
+  if (compile_all_callers || verify_caller_savings)
+    problem.computeOriginalFunctionSizes();
+
+  // Determine which callees to use.
+  unsigned total_benefit = 0;
+  while (true) {
+    if (compile_all_callers)
+      problem.updateAllCallerSavings();
+
+    // Calculate the benefit of each callee, and choose the best one.
+    size_t best_n;
+    int best_benefit;
+    problem.findBestCallee(best_n, best_benefit);
+
+    if (best_benefit < min_benefit)
+      break;
+
+    if (!compile_all_callers && verify_caller_savings) {
+      // We need to verify that outlining this callee is actually profitable.
+      problem.updateCallerSavings(problem.callees[best_n].candidate_indices);
+      best_benefit = problem.calculateCalleeBenefit(best_n);
+      if (best_benefit <= 0) {
+        problem.disableCallee(best_n);
+        continue;
+      }
+    }
+
+    total_benefit += best_benefit;
+    problem.selectCalleeForOutlining(best_n);
+  }
+
   Node result_functions(node_map_arg);
-  for (FunctionInfo &fi : functions) {
+  for (auto &fi : problem.functions) {
     if (fi.selected_candidate_indices.empty())
       continue;
     Node cands_node(node_list_arg);
     for (size_t m : fi.selected_candidate_indices) {
-      CandidateInfo &cand_info = candidates[m];
-      CalleeInfo &callee_info = callees[cand_info.callee_index];
+      auto &cand_info = problem.candidates[m];
+      auto &callee_info = problem.callees[cand_info.callee_index];
       const Node &nodes = cand_info.nodes;
       cands_node.emplace_back(
           Node(node_map_arg,

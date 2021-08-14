@@ -72,14 +72,28 @@ static cl::opt<int> MinBenefit("min-benefit",
                                cl::desc("Outlined candidates must have this "
                                         "minimum estimated benefit, in bytes"),
                                cl::init(1), cl::cat(SmoutCategory),
-                               cl::sub(*cl::AllSubCommands));
+                               cl::sub(OptimizeCommand),
+                               cl::sub(SolveGreedyCommand));
 
 static cl::opt<int>
     MinCallerSavings("min-caller-savings",
                      cl::desc("Outlined candidates must have this "
                               "minimum savings per caller, in bytes"),
                      cl::init(1), cl::cat(SmoutCategory),
-                     cl::sub(*cl::AllSubCommands));
+                     cl::sub(OptimizeCommand), cl::sub(SolveGreedyCommand));
+
+static cl::opt<bool> CompileAllCallers(
+    "compile-all-callers",
+    cl::desc("Compile all possible callers to determine actual sizes"),
+    cl::init(false), cl::cat(SmoutCategory), cl::sub(OptimizeCommand),
+    cl::sub(SolveGreedyCommand));
+
+static cl::opt<bool>
+    VerifyCallerSavings("verify-caller-savings",
+                        cl::desc("Compile candidates selected for outlining to "
+                                 "verify they are profitable"),
+                        cl::init(false), cl::cat(SmoutCategory),
+                        cl::sub(OptimizeCommand), cl::sub(SolveGreedyCommand));
 
 static cl::opt<size_t> MaxArgs(
     "max-args",
@@ -143,6 +157,11 @@ static Node getCandidatesOptions() {
     result["max_adjacent"] = Node(static_cast<size_t>(MaxAdjacent));
   if (MaxNodes != 50)
     result["max_nodes"] = Node(static_cast<size_t>(MaxNodes));
+  if (CompileAllCallers != false)
+    result["compile_all_callers"] = Node(static_cast<bool>(CompileAllCallers));
+  if (VerifyCallerSavings != false)
+    result["verify_caller_savings"] =
+        Node(static_cast<bool>(VerifyCallerSavings));
   return result;
 }
 
