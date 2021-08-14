@@ -377,13 +377,12 @@ public:
   void registerFunc(
       llvm::StringRef name,
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
-  void handleFutureStartsWaiting() override;
-  void handleFutureStopsWaiting() override;
 
 private:
   std::optional<NodeRef> tryEvaluate(const Call &call,
                                      bool inc_started_if_success);
   NodeRef evaluateDeferred(const Call &call);
+  bool workOnce(nng_aio *aio);
 
   std::unique_ptr<HTTPStore> store;
   llvm::StringMap<std::function<NodeOrCID(Evaluator &, const Call &)>> funcs;
@@ -391,9 +390,7 @@ private:
   std::optional<CID> worker_info_cid = std::nullopt;
   std::mutex worker_info_cid_mutex;
 
-  std::mutex threads_mutex;
   std::vector<std::thread> threads;
-  sem_t threads_free;
   std::vector<std::unique_ptr<nng_aio, AioDeleter>> thread_aios;
   std::atomic<bool> work_done = false;
 
@@ -404,27 +401,19 @@ private:
   void workerThreadImpl(nng_aio *aio);
 
   void printProgress();
-
-  void addThread();
 };
 } // end anonymous namespace
 
 ClientEvaluator::ClientEvaluator(std::unique_ptr<HTTPStore> store,
                                  unsigned num_threads)
     : store(std::move(store)) {
-  sem_init(&threads_free, 0, 0);
-  auto lock = std::lock_guard(threads_mutex);
   threads.reserve(num_threads);
   thread_aios.reserve(num_threads);
-  for (unsigned i = 0; i < num_threads; ++i)
-    addThread();
-}
-
-void ClientEvaluator::addThread() {
-  // Caller must old threads_mutex.
-  thread_aios.emplace_back(aio_alloc());
-  threads.emplace_back(&ClientEvaluator::workerThreadImpl, this,
-                       thread_aios.back().get());
+  for (unsigned i = 0; i < num_threads; ++i) {
+    thread_aios.emplace_back(aio_alloc());
+    threads.emplace_back(&ClientEvaluator::workerThreadImpl, this,
+                         thread_aios.back().get());
+  }
 }
 
 ClientEvaluator::~ClientEvaluator() {
@@ -476,11 +465,20 @@ NodeRef ClientEvaluator::evaluate(const Call &call) {
 
 NodeRef ClientEvaluator::evaluateDeferred(const Call &call) {
   ++num_started;
+  auto aio = aio_alloc();
   while (true) {
     auto result = tryEvaluate(call, false);
     if (result)
       return *result;
-    nng_msleep(1000); // TODO: exponential backoff
+
+    // Try to do some useful work while waiting for the call. This is
+    // especially important if we're the only client connected to the server,
+    // and all our threads are in evaluateDeferred().
+    //
+    // XXX: This can cause stack depth to grow arbitrarily large. If that turns
+    // out to be a problem, we may need to change the design.
+    if (!workOnce(aio.get()))
+      nng_msleep(1000); // TODO: exponential backoff
   }
 }
 
@@ -517,18 +515,6 @@ void ClientEvaluator::registerFunc(
   worker_info_cid = cid;
 }
 
-void ClientEvaluator::handleFutureStartsWaiting() {
-  sem_post(&threads_free);
-  int free;
-  sem_getvalue(&threads_free, &free);
-  if (free > 0) {
-    auto lock = std::lock_guard(threads_mutex);
-    addThread();
-  }
-}
-
-void ClientEvaluator::handleFutureStopsWaiting() { sem_wait(&threads_free); }
-
 void ClientEvaluator::printProgress() {
   // Load atomics in this order to avoid getting negative values.
   unsigned finished = num_finished;
@@ -538,53 +524,57 @@ void ClientEvaluator::printProgress() {
                << " -> " << finished;
 }
 
+bool ClientEvaluator::workOnce(nng_aio *aio) {
+  std::unique_lock lock(worker_info_cid_mutex);
+  auto cid = worker_info_cid;
+  lock.unlock();
+  if (!cid) {
+    // No funcs registered yet, so we can't do anything.
+    return false;
+  }
+  auto res = http_res_alloc();
+  auto req = store->buildRequest("POST", "/worker", Node(*cid));
+  nng_http_conn_transact(store->getConn(), req.get(), res.get(), aio);
+  nng_aio_wait(aio);
+  if (nng_aio_result(aio) == NNG_ECANCELED)
+    return false;
+  checkErr(nng_aio_result(aio));
+  auto response = store->getResponse(res.get());
+  if (response.status < 200 || response.status > 299)
+    response.raiseError();
+  if (response.body.is_null()) {
+    // No jobs available.
+    return false;
+  }
+
+  Call call("", {});
+  call.Name = response.body["func"].as<std::string>();
+  for (const auto &arg : response.body["args"].list_range())
+    call.Args.emplace_back(arg.as<CID>());
+  lock = std::unique_lock(funcs_mutex);
+  auto &func = funcs[call.Name];
+  lock.unlock();
+
+  std::optional<PrettyStackTraceCall> stack_printer;
+  stack_printer.emplace(call);
+  NodeRef result = NodeRef(*store, func(*this, call));
+  stack_printer.reset();
+
+  SmallVector<char, 256> buffer;
+  llvm::raw_svector_ostream os(buffer);
+  os << call;
+  response = store->request("PUT", os.str(), Node(result.getCID()));
+  if (response.status != 201)
+    response.raiseError();
+  return true;
+}
+
 void ClientEvaluator::workerThreadImpl(nng_aio *aio) {
   llvm::PrettyStackTraceString stack_printer("Worker thread (client process)");
   nng_msleep(1000); // Give the program time to call registerFunc().
   while (!work_done) {
-    std::unique_lock lock(worker_info_cid_mutex);
-    auto cid = worker_info_cid;
-    lock.unlock();
-    if (!cid) {
-      // No funcs registered yet, so we can't do anything.
-      nng_msleep(1000);
-      continue;
-    }
-    auto res = http_res_alloc();
-    auto req = store->buildRequest("POST", "/worker", Node(*cid));
-    nng_http_conn_transact(store->getConn(), req.get(), res.get(), aio);
-    nng_aio_wait(aio);
-    if (nng_aio_result(aio) == NNG_ECANCELED)
-      continue;
-    checkErr(nng_aio_result(aio));
-    auto response = store->getResponse(res.get());
-    if (response.status < 200 || response.status > 299)
-      response.raiseError();
-    if (response.body.is_null()) {
-      // No jobs available.
+    if (!workOnce(aio))
       nng_msleep(1000); // TODO: exponential backoff
-      continue;
-    }
-
-    Call call("", {});
-    call.Name = response.body["func"].as<std::string>();
-    for (const auto &arg : response.body["args"].list_range())
-      call.Args.emplace_back(arg.as<CID>());
-    lock = std::unique_lock(funcs_mutex);
-    auto &func = funcs[call.Name];
-    lock.unlock();
-
-    std::optional<PrettyStackTraceCall> stack_printer;
-    stack_printer.emplace(call);
-    NodeRef result = NodeRef(*store, func(*this, call));
-    stack_printer.reset();
-
-    SmallVector<char, 256> buffer;
-    llvm::raw_svector_ostream os(buffer);
-    os << call;
-    response = store->request("PUT", os.str(), Node(result.getCID()));
-    if (response.status != 201)
-      response.raiseError();
   }
 }
 

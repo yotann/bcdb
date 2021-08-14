@@ -27,11 +27,6 @@
 using namespace memodb;
 
 NodeRef &Future::get() {
-  if (!checkForResult()) {
-    evaluator->handleFutureStartsWaiting();
-    future.wait();
-    evaluator->handleFutureStopsWaiting();
-  }
   // We need to return a non-const reference so NodeRef::operator*() and
   // NodeRef::getCID() will work. The const_cast is safe because the
   // shared_future's state is only used in two places (this Future, and
@@ -40,11 +35,7 @@ NodeRef &Future::get() {
   return const_cast<NodeRef &>(future.get());
 }
 
-void Future::wait() {
-  // Must go through get() to ensure handleFutureStartsWaiting() is called if
-  // needed.
-  get();
-}
+void Future::wait() { future.wait(); }
 
 bool Future::checkForResult() const {
   return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
@@ -215,10 +206,6 @@ static void registerDefaultFuncs(Evaluator &evaluator) {
 Evaluator::Evaluator() {}
 
 Evaluator::~Evaluator() {}
-
-void Evaluator::handleFutureStartsWaiting() {}
-
-void Evaluator::handleFutureStopsWaiting() {}
 
 Future Evaluator::makeFuture(std::shared_future<NodeRef> &&future) {
   return Future(this, std::move(future));

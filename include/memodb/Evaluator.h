@@ -129,9 +129,6 @@ protected:
 
   Future makeFuture(std::shared_future<NodeRef> &&future);
 
-  virtual void handleFutureStartsWaiting();
-  virtual void handleFutureStopsWaiting();
-
 private:
   template <typename... Params, std::size_t... indexes>
   std::function<NodeOrCID(Evaluator &, const Call &)>
