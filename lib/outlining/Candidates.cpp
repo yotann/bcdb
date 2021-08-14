@@ -227,11 +227,7 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
                                 : size_model->function_size_without_callees;
     candidate.callee_size += candidate_size;
 
-    // TODO: Provide options to change the profitability threshold. We might
-    // want a stricter threshold like "must save at least 8 bytes if there are
-    // 4 copies." Or, we might want to allow seemingly unprofitable candidates
-    // just in case the size model is wrong.
-    if (candidate.caller_savings <= 0)
+    if (candidate.caller_savings < options.min_caller_savings)
       return;
 
     OutliningCalleeExtractor extractor(F, OutDep, candidate.bv);

@@ -82,6 +82,12 @@ static cl::opt<int>
                      cl::init(1), cl::cat(SmoutCategory),
                      cl::sub(OptimizeCommand), cl::sub(SolveGreedyCommand));
 
+static cl::opt<int> MinRoughCallerSavings(
+    "min-rough-caller-savings",
+    cl::desc("Generated candidates must have this "
+             "minimum rough estimate of savings per caller, in bytes"),
+    cl::init(1), cl::cat(SmoutCategory), cl::sub(*cl::AllSubCommands));
+
 static cl::opt<bool> CompileAllCallers(
     "compile-all-callers",
     cl::desc("Compile all possible callers to determine actual sizes"),
@@ -151,6 +157,9 @@ static Node getCandidatesOptions() {
     result["min_benefit"] = Node(static_cast<int>(MinBenefit));
   if (MinCallerSavings != 1)
     result["min_caller_savings"] = Node(static_cast<int>(MinCallerSavings));
+  if (MinRoughCallerSavings != 1)
+    result["min_rough_caller_savings"] =
+        Node(static_cast<int>(MinRoughCallerSavings));
   if (MaxArgs != 10)
     result["max_args"] = Node(static_cast<size_t>(MaxArgs));
   if (MaxAdjacent != 10)

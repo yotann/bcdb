@@ -30,6 +30,7 @@ struct OutliningCandidatesOptions {
   size_t max_adjacent = 10;
   size_t max_args = 10;
   size_t max_nodes = 50;
+  int min_caller_savings = 1;
 
   static OutliningCandidatesOptions getFromCommandLine();
 };

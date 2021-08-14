@@ -1,6 +1,7 @@
 #include "outlining/Funcs.h"
 
 #include <cstdint>
+#include <limits>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/SparseBitVector.h>
 #include <llvm/ADT/StringMap.h>
@@ -69,6 +70,8 @@ static FunctionAnalysisManager makeFAM(const Node &options) {
       options.get_value_or<size_t>("max_args", cand_opts.max_args);
   cand_opts.max_nodes =
       options.get_value_or<size_t>("max_nodes", cand_opts.max_nodes);
+  cand_opts.min_caller_savings =
+      options.get_value_or<int>("min_rough_caller_savings", 1);
 
   FunctionAnalysisManager am;
   // TODO: Would it be faster to just register the analyses we need?
@@ -271,8 +274,8 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
 }
 
 static bool isGroupWorthExtracting(NodeRef &options, const Node &group) {
-  size_t min_callee_size = group["min_callee_size"].as<size_t>();
-  size_t total_caller_savings = group["total_caller_savings"].as<size_t>();
+  auto min_callee_size = group["min_callee_size"].as<int64_t>();
+  auto total_caller_savings = group["total_caller_savings"].as<int64_t>();
   return total_caller_savings > min_callee_size;
 }
 
@@ -321,8 +324,8 @@ NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
         evaluator.evaluateAsync(candidates_version, options, func_cid));
   }
   struct Group {
-    size_t total_caller_savings = 0;
-    size_t min_callee_size = 1000000000;
+    int64_t total_caller_savings = 0;
+    int64_t min_callee_size = std::numeric_limits<int64_t>::max();
     Node members = Node(node_list_arg);
   };
   StringMap<Group> groups;
@@ -332,9 +335,9 @@ NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
     for (auto &item : result->map_range()) {
       Group &group = groups[item.key()];
       for (auto &candidate : item.value().list_range()) {
-        group.total_caller_savings += candidate["caller_savings"].as<size_t>();
-        group.min_callee_size = std::min(group.min_callee_size,
-                                         candidate["callee_size"].as<size_t>());
+        group.total_caller_savings += candidate["caller_savings"].as<int64_t>();
+        group.min_callee_size = std::min(
+            group.min_callee_size, candidate["callee_size"].as<int64_t>());
         Node candidate_changed = candidate;
         candidate_changed["function"] = Node(func_cid);
         group.members.emplace_back(std::move(candidate_changed));
