@@ -31,7 +31,7 @@ in stdenv.mkDerivation {
   preConfigure = ''
     patchShebangs third_party/lit/lit.py
   '';
-  cmakeBuildType = "Debug";
+  cmakeBuildType = "RelWithDebInfo";
   doCheck = true;
   dontStrip = true;
 
