@@ -233,6 +233,8 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
   // Based on llvm's addPassesToGenerateCode:
   TargetPassConfig *pass_config = llvmtm.createPassConfig(pm);
   pass_config->setDisableVerify(true);
+  // LiveDebugValues is unnecessary and takes a long time.
+  pass_config->disablePass(&LiveDebugValuesID);
   pm.add(pass_config);
   pm.add(mmiwp);
   if (pass_config->addISelPasses())
