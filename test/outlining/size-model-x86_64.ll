@@ -5,8 +5,8 @@ target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16
 target triple = "x86_64-unknown-linux-gnu"
 
 ; CHECK: estimated call instruction size: 5 bytes
-; CHECK: estimated function size without callees: 9 bytes
-; CHECK: estimated function size with callees: 25 bytes
+; CHECK: estimated function size without callees: 8 bytes
+; CHECK: estimated function size with callees: 24 bytes
 
 ; CHECK: define i32 @collatz_len(i32 %0)
 define i32 @collatz_len(i32 %0) {

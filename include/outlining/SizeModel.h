@@ -36,6 +36,11 @@ public:
 
   void print(raw_ostream &os) const;
 
+  // Calculate the estimated size, in bytes, of a function, given an estimate
+  // of the size of its instructions. Assumes a new return instruction will
+  // need to be added.
+  unsigned estimateSize(unsigned instructions_size, bool has_callee) const;
+
   // The estimated size, in bytes, of each of the Function's instructions after
   // compilation. Unusual values are possible; for example, an instruction's
   // size may be 0 if it is merged with another instruction during compilation.
@@ -55,7 +60,8 @@ public:
   unsigned function_size_with_callees;
 
   // The estimated total size, in bytes, of this particular function, including
-  // both the base function size and the size of all instructions.
+  // the base function size, the size of all instructions, and the padding
+  // between this function and the next one.
   unsigned this_function_total_size;
 
 private:

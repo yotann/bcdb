@@ -48,20 +48,20 @@ using bcdb::SizeModelAnalysis;
 using bcdb::SizeModelResults;
 
 const char *smout::actual_size_version = "smout.actual_size_v0";
-const char *smout::candidates_version = "smout.candidates_v1";
-const char *smout::grouped_candidates_version = "smout.grouped_candidates_v1";
-const char *smout::extracted_callees_version = "smout.extracted_callees_v3";
+const char *smout::candidates_version = "smout.candidates_v2";
+const char *smout::grouped_candidates_version = "smout.grouped_candidates_v2";
+const char *smout::extracted_callees_version = "smout.extracted_callees_v4";
 const char *smout::grouped_callees_for_function_version =
-    "smout.grouped_callees_for_function_v3";
-const char *smout::grouped_callees_version = "smout.grouped_callees_v3";
+    "smout.grouped_callees_for_function_v4";
+const char *smout::grouped_callees_version = "smout.grouped_callees_v4";
 const char *smout::ilp_problem_version = "smout.ilp_problem";
-const char *smout::greedy_solution_version = "smout.greedy_solution_v4";
+const char *smout::greedy_solution_version = "smout.greedy_solution_v5";
 const char *smout::extracted_caller_version = "smout.extracted_caller_v4";
 const char *smout::outlined_module_version = "smout.outlined_module_v0";
-const char *smout::optimized_version = "smout.optimized_v5";
+const char *smout::optimized_version = "smout.optimized_v6";
 const char *smout::refinements_for_group_version =
     "smout.refinements_for_group_v0";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v3";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v4";
 
 static FunctionAnalysisManager makeFAM(const Node &options) {
   OutliningCandidatesOptions cand_opts;

@@ -297,11 +297,12 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
   unsigned extra_func_size = 0;    // Extra bytes for each instruction.
   unsigned eh_frame_size = 16;     // Most targets use .eh_frame.
   unsigned fp_management_size = 0; // Frame pointer management instructions.
-  unsigned function_alignment = 0;
+  unsigned function_alignment = 1;
+  unsigned instruction_alignment = 1;
   switch (target_machine->getTargetTriple().getArch()) {
   case Triple::ArchType::arm:
   case Triple::ArchType::armeb:
-    // Functions are aligned to 4 bytes, but that's almost always a no-op.
+    function_alignment = instruction_alignment = 4;
     call_instruction_size = 4;
     ret_size = 4;
     eh_frame_size = 8; // uses .ARM.exidx, not .eh_frame
@@ -309,21 +310,21 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
     break;
   case Triple::ArchType::aarch64:
   case Triple::ArchType::aarch64_be:
-    // Functions are aligned to 4 bytes, but that's almost always a no-op.
+    function_alignment = instruction_alignment = 4;
     call_instruction_size = 4;
     ret_size = 4;
     fp_management_size = 8;
     break;
   case Triple::ArchType::riscv32:
   case Triple::ArchType::riscv64:
-    // Functions are aligned to 4 bytes, but that's almost always a no-op.
+    function_alignment = instruction_alignment = 4;
     call_instruction_size = 8;
     ret_size = 4;
     fp_management_size = 16;
     break;
   case Triple::ArchType::thumb:
   case Triple::ArchType::thumbeb:
-    // Functions are aligned to 2 bytes, but that's almost always a no-op.
+    function_alignment = instruction_alignment = 2;
     call_instruction_size = 4;
     ret_size = 2;
     eh_frame_size = 8; // uses .ARM.exidx, not .eh_frame
@@ -347,17 +348,31 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
   default:
     llvm::report_fatal_error("unsupported target for size estimation");
   }
-  function_size_without_callees =
-      ret_size + extra_func_size + (function_alignment + 1) / 2;
+  function_size_without_callees = ret_size + extra_func_size;
+  // The amount of padding between functions can vary between 0 bytes and
+  // (function_alignment - instruction_alignment) bytes. We could try to
+  // calculate the actual alignment needed in estimateSize(), but that would be
+  // too inaccurate because we don't know the actual instruction sizes.
+  // Instead, we use a simple estimate based on the average amount of padding.
+  function_size_without_callees +=
+      (function_alignment - instruction_alignment) / 2;
   function_size_with_callees =
       function_size_without_callees + eh_frame_size + fp_management_size;
 
+  // All machine instructions are counted in sizes; the ones that don't have a
+  // line number are counted in sizes[0].
   unsigned total_ins_size = 0;
   for (auto size : sizes)
     total_ins_size += size;
-  this_function_total_size = extra_func_size + (function_alignment + 1) / 2 +
+  this_function_total_size = extra_func_size +
                              (uses_eh_frame ? eh_frame_size : 0) +
-                             total_ins_size;
+                             alignTo(total_ins_size, function_alignment);
+}
+
+unsigned SizeModelResults::estimateSize(unsigned instructions_size,
+                                        bool has_callee) const {
+  return instructions_size + (has_callee ? function_size_with_callees
+                                         : function_size_without_callees);
 }
 
 void SizeModelResults::print(raw_ostream &os) const {

@@ -222,10 +222,8 @@ void OutliningCandidates::emitCandidate(Candidate &candidate) {
 
     // For each new callee, we need to create a new function and fill it with
     // instructions.
-    candidate.callee_size = candidate.bv.intersects(OutDep.CompilesToCall)
-                                ? size_model->function_size_with_callees
-                                : size_model->function_size_without_callees;
-    candidate.callee_size += candidate_size;
+    candidate.callee_size = size_model->estimateSize(
+        candidate_size, candidate.bv.intersects(OutDep.CompilesToCall));
 
     if (candidate.caller_savings < options.min_caller_savings)
       return;
