@@ -69,41 +69,31 @@ struct SizingStreamer : public MCStreamer {
       : MCStreamer(context), sizes(sizes), mce(mce), sti(sti),
         uses_eh_frame(uses_eh_frame) {}
 
-  // Must implement (pure virtual function).
-#if LLVM_VERSION_MAJOR >= 11
-  bool emitSymbolAttribute(MCSymbol *, MCSymbolAttr) override {
-#else
-  bool EmitSymbolAttribute(MCSymbol *, MCSymbolAttr) override {
+#if LLVM_VERSION_MAJOR < 11
+#define emitCFIStartProcImpl EmitCFIStartProcImpl
+#define emitCommonSymbol EmitCommonSymbol
+#define emitCVLocDirective EmitCVLocDirective
+#define emitDwarfLocDirective EmitDwarfLocDirective
+#define emitInstruction EmitInstruction
+#define emitSymbolAttribute EmitSymbolAttribute
+#define emitZerofill EmitZerofill
 #endif
+
+  // Must implement (pure virtual function).
+  bool emitSymbolAttribute(MCSymbol *, MCSymbolAttr) override {
     return false; // not supported
   }
 
   // Must implement (pure virtual function).
-#if LLVM_VERSION_MAJOR >= 11
   void emitCommonSymbol(MCSymbol *, uint64_t, unsigned) override {}
-#else
-  void EmitCommonSymbol(MCSymbol *, uint64_t, unsigned) override {}
-#endif
 
   // Must implement (pure virtual function).
-#if LLVM_VERSION_MAJOR >= 11
   void emitZerofill(MCSection *, MCSymbol *, uint64_t Size,
                     unsigned ByteAlignment, SMLoc Loc) override {}
-#else
-  void EmitZerofill(MCSection *, MCSymbol *, uint64_t Size,
-                    unsigned ByteAlignment, SMLoc Loc) override {}
-#endif
 
-#if LLVM_VERSION_MAJOR >= 11
   void emitInstruction(const MCInst &inst,
                        const MCSubtargetInfo &sti) override {
     MCStreamer::emitInstruction(inst, sti);
-#else
-  void EmitInstruction(const MCInst &inst,
-                       const MCSubtargetInfo &sti) override {
-    MCStreamer::EmitInstruction(inst, sti);
-#endif
-
     SmallVector<char, 256> buffer;
     raw_svector_ostream os(buffer);
     SmallVector<MCFixup, 4> fixups;
@@ -111,53 +101,30 @@ struct SizingStreamer : public MCStreamer {
     sizes[current_line] += os.str().size();
   }
 
-#if LLVM_VERSION_MAJOR >= 11
   void emitDwarfLocDirective(unsigned file_no, unsigned line, unsigned column,
                              unsigned flags, unsigned isa,
                              unsigned discriminator,
                              StringRef filename) override {
     MCStreamer::emitDwarfLocDirective(file_no, line, column, flags, isa,
                                       discriminator, filename);
-#else
-  void EmitDwarfLocDirective(unsigned file_no, unsigned line, unsigned column,
-                             unsigned flags, unsigned isa,
-                             unsigned discriminator,
-                             StringRef filename) override {
-    MCStreamer::EmitDwarfLocDirective(file_no, line, column, flags, isa,
-                                      discriminator, filename);
-#endif
     current_line = line;
     if (current_line >= sizes.size())
       sizes.resize(current_line + 1);
   }
 
-#if LLVM_VERSION_MAJOR >= 11
   void emitCVLocDirective(unsigned function_id, unsigned file_no, unsigned line,
                           unsigned column, bool prologue_end, bool is_stmt,
                           StringRef filename, SMLoc loc) override {
     MCStreamer::emitCVLocDirective(function_id, file_no, line, column,
                                    prologue_end, is_stmt, filename, loc);
-#else
-  void EmitCVLocDirective(unsigned function_id, unsigned file_no, unsigned line,
-                          unsigned column, bool prologue_end, bool is_stmt,
-                          StringRef filename, SMLoc loc) override {
-    MCStreamer::EmitCVLocDirective(function_id, file_no, line, column,
-                                   prologue_end, is_stmt, filename, loc);
-#endif
     current_line = line;
     if (current_line >= sizes.size())
       sizes.resize(current_line + 1);
   }
 
-  // clang-format off
-#if LLVM_VERSION_MAJOR >= 11
-  void emitCFIStartProcImpl(MCDwarfFrameInfo &frame) override{
-#else
-  void EmitCFIStartProcImpl(MCDwarfFrameInfo &frame) override {
-#endif
+  void emitCFIStartProcImpl(MCDwarfFrameInfo &frame) override {
     uses_eh_frame = true;
   }
-  // clang-format on
 };
 } // end anonymous namespace
 
