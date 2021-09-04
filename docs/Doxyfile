@@ -1,4 +1,10 @@
 # Doxyfile 1.8.20
+#
+# To use this file, run:
+#
+#   doxygen docs/Doxyfile
+#
+# from the main bcdb directory.
 
 PROJECT_NAME           = "BCDB"
 #PROJECT_NUMBER         =

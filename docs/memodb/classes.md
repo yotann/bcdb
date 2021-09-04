@@ -1,7 +1,8 @@
 # MemoDB C++ classes
 
-You can generate documentation for C++ classes by running `doxygen` in the
-top-level BCDB directory; documentation will go in `build/doxygen/html`.
+You can generate documentation for C++ classes by running `doxygen
+docs/Doxyfile` in the top-level BCDB directory; documentation will go in
+`build/doxygen/html`.
 
 ## Utility classes
 

@@ -29,8 +29,8 @@ See the [MemoDB data model].
 
 - From the command line: use the `memodb` program. See the [Tutorial].
 - From C++: see the [C++ class list] and look through the header files. You can
-  also generate documentation by running `doxygen` in the top-level BCDB
-  directory; documentation will go in `build/doxygen/html`.
+  also generate documentation by running `doxygen docs/Doxyfile` in the
+  top-level BCDB directory; documentation will go in `build/doxygen/html`.
 - From other languages: see the [REST API documentation].
 
 ## Rationales
