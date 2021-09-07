@@ -56,7 +56,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         context: .
-        file: dockerfiles/ubuntu-lts-upstream-llvm.docker
+        file: utils/dockerfiles/ubuntu-lts-upstream-llvm.docker
         push: false
         tags: bcdb-ubuntu
         cache-from: type=local,src=/tmp/.buildx-cache
