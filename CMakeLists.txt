@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.13)
 
-project(BCDB C CXX)
+project(BCDB
+  VERSION 0.1.0
+  HOMEPAGE_URL "https://github.com/yotann/bcdb-private"
+  LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cmake-modules"
   )
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -20,59 +24,10 @@ elseif (CMAKE_COMPILER_IS_GNUCXX)
     -Wno-init-list-lifetime)
 endif()
 
-SET(CMAKE_CXX_FLAGS_COVERAGE
-  "${CMAKE_CXX_FLAGS_DEBUG_INIT} --coverage"
-  CACHE STRING "Flags used by the compiler during coverage builds."
-  FORCE )
-SET(CMAKE_C_FLAGS_COVERAGE
-  "${CMAKE_C_FLAGS_DEBUG_INIT} --coverage"
-  CACHE STRING "Flags used by the compiler during coverage builds."
-  FORCE )
-SET(CMAKE_EXE_LINKER_FLAGS_COVERAGE
-  "${CMAKE_EXE_LINKER_FLAGS_DEBUG_INIT} --coverage"
-  CACHE STRING "Flags used by the linker during coverage builds."
-  FORCE )
-SET(CMAKE_MODULE_LINKER_FLAGS_COVERAGE
-  "${CMAKE_MODULE_LINKER_FLAGS_DEBUG_INIT} --coverage"
-  CACHE STRING "Flags used by the linker during coverage builds."
-  FORCE )
-SET(CMAKE_SHARED_LINKER_FLAGS_COVERAGE
-  "${CMAKE_SHARED_LINKER_FLAGS_DEBUG_INIT} --coverage"
-  CACHE STRING "Flags used by the linker during coverage builds."
-  FORCE )
-MARK_AS_ADVANCED(
-  CMAKE_CXX_FLAGS_COVERAGE
-  CMAKE_C_FLAGS_COVERAGE
-  CMAKE_EXE_LINKER_FLAGS_COVERAGE
-  CMAKE_MODULE_LINKER_FLAGS_COVERAGE
-  CMAKE_SHARED_LINKER_FLAGS_COVERAGE)
-
-SET(CMAKE_CXX_FLAGS_SANITIZE
-  "${CMAKE_CXX_FLAGS_DEBUG_INIT} -fsanitize=address -fsanitize=undefined"
-  CACHE STRING "Flags used by the compiler during sanitizer builds."
-  FORCE )
-SET(CMAKE_C_FLAGS_SANITIZE
-  "${CMAKE_C_FLAGS_DEBUG_INIT} -fsanitize=address -fsanitize=undefined"
-  CACHE STRING "Flags used by the compiler during sanitizer builds."
-  FORCE )
-SET(CMAKE_EXE_LINKER_FLAGS_SANITIZE
-  "${CMAKE_EXE_LINKER_FLAGS_DEBUG_INIT} -fsanitize=address -fsanitize=undefined"
-  CACHE STRING "Flags used by the linker during sanitizer builds."
-  FORCE )
-SET(CMAKE_MODULE_LINKER_FLAGS_SANITIZE
-  "${CMAKE_MODULE_LINKER_FLAGS_DEBUG_INIT} -fsanitize=address -fsanitize=undefined"
-  CACHE STRING "Flags used by the linker during sanitizer builds."
-  FORCE )
-SET(CMAKE_SHARED_LINKER_FLAGS_SANITIZE
-  "${CMAKE_SHARED_LINKER_FLAGS_DEBUG_INIT} -fsanitize=address -fsanitize=undefined"
-  CACHE STRING "Flags used by the linker during sanitizer builds."
-  FORCE )
-MARK_AS_ADVANCED(
-  CMAKE_CXX_FLAGS_SANITIZE
-  CMAKE_C_FLAGS_SANITIZE
-  CMAKE_EXE_LINKER_FLAGS_SANITIZE
-  CMAKE_MODULE_LINKER_FLAGS_SANITIZE
-  CMAKE_SHARED_LINKER_FLAGS_SANITIZE)
+include(CoverageFlags)
+include(SanitizeFlags)
+include(GetRevisionDescription)
+get_revision_description(REVISION_DESCRIPTION_FINAL)
 
 find_package(LLVM REQUIRED CONFIG)
 

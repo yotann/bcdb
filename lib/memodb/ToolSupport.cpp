@@ -1,9 +1,13 @@
 #include "memodb/ToolSupport.h"
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
+#include <llvm/Support/raw_ostream.h>
+
+#include "bcdb-version.h"
 
 using namespace memodb;
 
@@ -17,6 +21,33 @@ bool memodb::OptionHasCategory(llvm::cl::Option &O,
   return false;
 }
 
+static void printVersion(llvm::raw_ostream &os) {
+  os << "BCDB (https://github.com/yotann/bcdb-private):\n  ";
+  os << "revision " << REVISION_DESCRIPTION_FINAL << "\n  ";
+  os << "using LLVM " << LLVM_VERSION_STRING << "\n  ";
+  os << "enabled features:";
+#ifndef NDEBUG
+  os << " assertions";
+#endif
+#if BCDB_WITH_NNG
+  os << " NNG";
+#endif
+#if BCDB_WITH_ROCKSDB
+  os << " RocksDB";
+#endif
+  os << "\n  disabled features:";
+#ifdef NDEBUG
+  os << " assertions";
+#endif
+#if !BCDB_WITH_NNG
+  os << " NNG";
+#endif
+#if !BCDB_WITH_ROCKSDB
+  os << " RocksDB";
+#endif
+  os << "\n";
+}
+
 InitTool::InitTool(int &argc, char **&argv) {
 #if LLVM_VERSION_MAJOR >= 11
   llvm::setBugReportMsg(
@@ -27,6 +58,8 @@ See docs/memodb/debugging.md for debugging suggestions.
 
 )");
 #endif
+
+  llvm::cl::SetVersionPrinter(printVersion);
 
   // This is like llvm::InitLLVM, but it registers the handlers in a different
   // order, so the pretty stack trace goes on the bottom. This is important
