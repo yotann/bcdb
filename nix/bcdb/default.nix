@@ -10,7 +10,9 @@ let
   # have to copy all of .git/ into the Nix store, which is very slow. Instead,
   # we can determine the current revision using Nix.
   symref = lib.removePrefix "ref: " (lib.fileContents ../../.git/HEAD);
-  revision = lib.fileContents (../../.git + ("/" + symref));
+  revision = if lib.hasInfix "/" symref
+             then lib.fileContents (../../.git + ("/" + symref))
+             else symref;
   revision-short = builtins.substring 0 7 revision;
 
 in stdenv.mkDerivation {
