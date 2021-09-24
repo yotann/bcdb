@@ -1,5 +1,6 @@
 #include "outlining/Funcs.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <llvm/ADT/ArrayRef.h>
@@ -59,9 +60,10 @@ const char *smout::greedy_solution_version = "smout.greedy_solution_v5";
 const char *smout::extracted_caller_version = "smout.extracted_caller_v4";
 const char *smout::outlined_module_version = "smout.outlined_module_v0";
 const char *smout::optimized_version = "smout.optimized_v6";
+const char *smout::refinements_for_set_version = "smout.refinements_for_set_v0";
 const char *smout::refinements_for_group_version =
-    "smout.refinements_for_group_v0";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v4";
+    "smout.refinements_for_group_v1";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v5";
 
 static FunctionAnalysisManager makeFAM(const Node &options) {
   OutliningCandidatesOptions cand_opts;
@@ -1191,6 +1193,183 @@ NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
   return evaluator.evaluate(outlined_module_version, mod, solution).getCID();
 }
 
+NodeOrCID smout::refinements_for_set(Evaluator &evaluator, NodeRef options,
+                                     NodeRef members) {
+  // Precondition: members is not empty.
+  // Precondition: members is sorted by CID.
+  // Precondition: members contains no duplicates.
+  // Postcondition: if members[0] is in the result at all, it is the first
+  // member of the first sublist.
+
+  if (members->size() <= 1)
+    return Node(node_list_arg);
+  CID first_cid = (*members)[0].as<CID>();
+  Node options_nopoison_noundef = *options;
+  options_nopoison_noundef["disable_poison_input"] = true;
+  options_nopoison_noundef["disable_undef_input"] = true;
+  std::size_t num_unhelpful_results = 0;
+  bool successfully_solved = false;
+  Node tv_result(node_map_arg);
+
+  // Indices of members that have been proven equivalent to first_cid.
+  std::vector<std::size_t> equivalent_to_first;
+
+  // Run alive.tv between the first member and each other member, in order.
+  for (std::size_t i = 1; i < members->size(); ++i) {
+    // Validate forward and backward ignoring poison and undef (unsound but
+    // fast), then forward and backward including poison and undef (sound but
+    // slow).
+    //
+    // TODO: is it worth taking advantage of refinements that are valid in one
+    // direction but not the other? For now, we ignore them.
+    for (unsigned j = 0; j < 4; ++j) {
+      CID src = first_cid;
+      CID tgt = (*members)[i].as<CID>();
+      if (j & 1) // forward or backward?
+        std::swap(src, tgt);
+      tv_result = *evaluator.evaluate(
+          "alive.tv_v2", j & 2 ? *options : options_nopoison_noundef, src, tgt);
+      if (tv_result.at("status") == "syntactic_eq") {
+        // No need to run the other tests.
+        break;
+      } else if (tv_result.at_or_null("valid") != true) {
+        // Unsound or unknown result.
+        break;
+      }
+    }
+
+    if (tv_result.at_or_null("valid") == true) {
+      if (tv_result.at("status") != "syntactic_eq") {
+        // We successfully used the solver to prove this refinement correct, so
+        // we know Alive2 is capable of handling first_cid at least some of the
+        // time.
+        successfully_solved = true;
+      }
+      equivalent_to_first.push_back(i);
+    } else if (tv_result.count("test_input")) {
+      break;
+    } else {
+      // Failure without producing a test input. Possible reasons:
+      // - unsupported by Alive2
+      // - solver timeout
+      // - loops
+      // - precondition is always false
+      num_unhelpful_results++;
+      if (!successfully_solved && num_unhelpful_results >= 10) {
+        // We're repeatedly failing to validate; maybe Alive2 just can't handle
+        // first_cid. Let's give up on it.
+        break;
+      }
+    }
+  }
+
+  // At this point, we've stopped applying alive.tv, for one of these reasons:
+  // - We tested first_cid against every other item in members.
+  // - We're giving up on first_cid because Alive2 didn't work well on it.
+  // - We found a test input that makes first_cid and some other item give
+  //   different results. We can use this test input to divide all the members
+  //   into clusters.
+
+  std::vector<Node> clusters;
+  if (tv_result.count("test_input")) {
+    // Evaluate all members on the test input.
+    std::vector<Future> futures;
+    auto iter = equivalent_to_first.begin();
+    for (std::size_t i = 0; i < members->size(); ++i) {
+      if (iter != equivalent_to_first.end() && i == *iter) {
+        // Skip items we already know are equivalent to first_cid.
+        iter++;
+        continue;
+      }
+      futures.emplace_back(evaluator.evaluateAsync(
+          "alive.interpret", options.getCID(), (*members)[i].as<CID>(),
+          tv_result["test_input"]));
+    }
+
+    StringMap<std::size_t> cluster_indices;
+    iter = equivalent_to_first.begin();
+    auto futures_iter = futures.begin();
+    for (std::size_t i = 0; i < members->size(); ++i) {
+      if (iter != equivalent_to_first.end() && i == *iter) {
+        iter++;
+        continue;
+      }
+      Future &future = *futures_iter++;
+      if ((*future)["status"] == "unsupported") {
+        // If the interpreter doesn't support this function (at least on this
+        // input) there's probably nothing useful we can do with it.
+        continue;
+      }
+      auto key = cid_key(future.getCID());
+      if (!cluster_indices.count(key)) {
+        cluster_indices[key] = clusters.size();
+        clusters.emplace_back(node_list_arg);
+      }
+      clusters[cluster_indices[key]].push_back((*members)[i]);
+    }
+  } else {
+    // We don't have a test input. Just add everything to one cluster.
+    clusters.emplace_back(node_list_arg);
+    auto iter = equivalent_to_first.begin();
+    for (std::size_t i = 0; i < members->size(); ++i) {
+      if (iter != equivalent_to_first.end() && i == *iter) {
+        // Skip items we already know are equivalent to first_cid.
+        iter++;
+        continue;
+      }
+      clusters[0].push_back((*members)[i]);
+    }
+  }
+
+  if (clusters.size() == 1) {
+    // We couldn't generate any clusters, either because we don't have a test
+    // input or because alive.interpret gave the same result for everything
+    // (due to not matching alive.tv's behavior). Either way, we should remove
+    // first_cid from the set to prevent infinite recursion.
+    auto range = clusters[0].list_range();
+    if (*range.begin() == Node(first_cid))
+      clusters[0] = Node(node_list_arg, range.begin() + 1, range.end());
+  }
+
+  // Recursive checking on each cluster.
+  std::vector<Future> futures;
+  for (const Node &cluster : clusters)
+    futures.emplace_back(evaluator.evaluateAsync(refinements_for_set_version,
+                                                 options.getCID(), cluster));
+
+  // Organize results. We mostly just want to concatenate all the lists
+  // returned from the futures, but we also need to add the items in
+  // equivalent_to_first at the appropriate place.
+  Node result(node_list_arg);
+  bool first = true;
+  for (Future &future : futures) {
+    Node node = *future;
+    if (first && !equivalent_to_first.empty()) {
+      first = false;
+      // Put functions equivalent to first_cid in result[0].
+      result.emplace_back(node_list_arg);
+      result[0].emplace_back(first_cid);
+      for (std::size_t i : equivalent_to_first)
+        result[0].emplace_back((*members)[i]);
+      if (!node.empty() && node[0][0].as<CID>() == first_cid) {
+        // first_cid was returned in one of the results. We need to add
+        // everything else in that group to result[0], then handle the rest of
+        // the groups normally.
+        for (std::size_t i = 1; i < node[0].size(); ++i)
+          result[0].emplace_back(node[0][i]);
+        for (std::size_t i = 1; i < node.size(); ++i)
+          result.emplace_back(std::move(node[i]));
+        continue;
+      }
+      // first_cid was not returned in one of the results. Handle the rest of
+      // the groups normally.
+    }
+    for (const Node &sub : node.list_range())
+      result.emplace_back(sub);
+  }
+  return result;
+}
+
 NodeOrCID smout::refinements_for_group(Evaluator &evaluator, NodeRef options,
                                        NodeRef members) {
   StringSet unique_set;
@@ -1199,31 +1378,13 @@ NodeOrCID smout::refinements_for_group(Evaluator &evaluator, NodeRef options,
     if (unique_set.insert(cid_key(item["callee"].as<CID>())).second)
       unique.push_back(item["callee"].as<CID>());
   members.freeNode();
-  unique_set.clear();
-  std::vector<Future> pairs;
-  for (size_t i = 0; i < unique.size(); ++i) {
-    for (size_t j = 0; j < unique.size(); ++j) {
-      if (i == j)
-        continue;
-      pairs.emplace_back(evaluator.evaluateAsync("alive.tv", Node(node_map_arg),
-                                                 unique[i], unique[j]));
-    }
-  }
-  size_t k = 0;
-  Node result(node_list_arg);
-  for (size_t i = 0; i < unique.size(); ++i) {
-    for (size_t j = 0; j < unique.size(); ++j) {
-      if (i == j)
-        continue;
-      if ((*pairs[k])["valid"] == true)
-        result.emplace_back(Node(node_map_arg, {
-                                                   {"src", Node(unique[i])},
-                                                   {"tgt", Node(unique[j])},
-                                               }));
-      k++;
-    }
-  }
-  return result;
+  std::sort(unique.begin(), unique.end());
+
+  Node set_node(node_list_arg);
+  for (const CID &cid : unique)
+    set_node.emplace_back(cid);
+  return evaluator.evaluate(refinements_for_set_version, options, set_node)
+      .getCID();
 }
 
 NodeOrCID smout::grouped_refinements(Evaluator &evaluator, NodeRef options,
@@ -1258,6 +1419,7 @@ void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(extracted_caller_version, &extracted_caller);
   evaluator.registerFunc(outlined_module_version, &outlined_module);
   evaluator.registerFunc(optimized_version, &optimized);
+  evaluator.registerFunc(refinements_for_set_version, &refinements_for_set);
   evaluator.registerFunc(refinements_for_group_version, &refinements_for_group);
   evaluator.registerFunc(grouped_refinements_version, &grouped_refinements);
 }

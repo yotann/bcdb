@@ -26,6 +26,8 @@ NodeOrCID greedy_solution(Evaluator &evaluator, NodeRef options, NodeRef mod);
 NodeOrCID extracted_caller(Evaluator &evaluator, NodeRef func, NodeRef callees);
 NodeOrCID outlined_module(Evaluator &evaluator, NodeRef mod, NodeRef solution);
 NodeOrCID optimized(Evaluator &evaluator, NodeRef options, NodeRef mod);
+NodeOrCID refinements_for_set(Evaluator &evaluator, NodeRef options,
+                              NodeRef members);
 NodeOrCID refinements_for_group(Evaluator &evaluator, NodeRef options,
                                 NodeRef members);
 NodeOrCID grouped_refinements(Evaluator &evaluator, NodeRef options,
@@ -42,6 +44,7 @@ extern const char *greedy_solution_version;
 extern const char *extracted_caller_version;
 extern const char *outlined_module_version;
 extern const char *optimized_version;
+extern const char *refinements_for_set_version;
 extern const char *refinements_for_group_version;
 extern const char *grouped_refinements_version;
 
