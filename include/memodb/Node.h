@@ -238,8 +238,8 @@ private:
   using StringStorage = llvm::SmallString<48>;
 
   // The monostate represents null.
-  std::variant<std::monostate, bool, std::int64_t, double, BytesStorage,
-               StringStorage, CID, List, Map>
+  std::variant<std::monostate, bool, std::int64_t, std::uint64_t, double,
+               BytesStorage, StringStorage, CID, List, Map>
       variant_;
 
   void validateUTF8() const;
@@ -248,6 +248,7 @@ private:
   friend std::ostream &operator<<(std::ostream &, const Node &);
   friend struct NodeTypeTraits<bool>;
   friend struct NodeTypeTraits<std::int64_t>;
+  friend struct NodeTypeTraits<std::uint64_t>;
   friend struct NodeTypeTraits<double>;
   friend struct NodeTypeTraits<BytesRef>;
   friend struct NodeTypeTraits<llvm::StringRef>;
@@ -285,23 +286,10 @@ public:
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_unsigned<IntegerType>::value &&
-                                 sizeof(IntegerType) < sizeof(std::int64_t),
+                                 sizeof(IntegerType) <= sizeof(std::uint64_t),
                              int> = 0>
-  Node(IntegerType val) : variant_(std::int64_t(val)) {}
+  Node(IntegerType val) : variant_(std::uint64_t(val)) {}
 
-  /// Construct an integer Node.
-  template <typename IntegerType,
-            std::enable_if_t<std::is_integral<IntegerType>::value &&
-                                 std::is_unsigned<IntegerType>::value &&
-                                 sizeof(IntegerType) == sizeof(std::int64_t),
-                             int> = 0>
-  Node(IntegerType val) {
-    if (val > (IntegerType)std::numeric_limits<std::int64_t>::max())
-      llvm::report_fatal_error("Integer overflow");
-    variant_ = std::int64_t(val);
-  }
-
-  /// Construct an integer Node.
   template <typename IntegerType,
             std::enable_if_t<std::is_integral<IntegerType>::value &&
                                  std::is_signed<IntegerType>::value &&
@@ -410,6 +398,10 @@ public:
   bool operator==(const Node &other) const;
   bool operator!=(const Node &other) const;
   bool operator<(const Node &other) const;
+  bool operator<=(const Node &other) const;
+  bool operator>(const Node &other) const;
+  bool operator>=(const Node &other) const;
+  int compare(const Node &other) const;
 
   /// @}
 
@@ -467,16 +459,8 @@ public:
     return std::holds_alternative<bool>(variant_);
   }
 
-  constexpr bool is_integer() const noexcept {
-    return std::holds_alternative<std::int64_t>(variant_);
-  }
-
   constexpr bool is_float() const noexcept {
     return std::holds_alternative<double>(variant_);
-  }
-
-  constexpr bool is_number() const noexcept {
-    return is_integer() || is_float();
   }
 
   constexpr bool is_string() const noexcept {
@@ -667,11 +651,56 @@ template <> struct NodeTypeTraits<bool> {
 
 template <> struct NodeTypeTraits<std::int64_t> {
   static constexpr bool is(const Node &node) noexcept {
-    return node.is_integer();
+    return std::visit(Overloaded{
+                          [](const std::int64_t &) { return true; },
+                          [](const std::uint64_t &value) {
+                            return value <=
+                                   std::numeric_limits<std::int64_t>::max();
+                          },
+                          [](const auto &) { return false; },
+                      },
+                      node.variant_);
   }
 
   static std::int64_t as(const Node &node) {
-    return std::get<std::int64_t>(node.variant_);
+    if (!is(node))
+      llvm::report_fatal_error("Integer overflow or not an integer");
+    return std::visit(Overloaded{
+                          [](const std::int64_t &value) { return value; },
+                          [](const std::uint64_t &value) {
+                            return static_cast<std::int64_t>(value);
+                          },
+                          [](const auto &) -> std::int64_t {
+                            llvm_unreachable("impossible");
+                          },
+                      },
+                      node.variant_);
+  }
+};
+
+template <> struct NodeTypeTraits<std::uint64_t> {
+  static constexpr bool is(const Node &node) noexcept {
+    return std::visit(Overloaded{
+                          [](const std::int64_t &value) { return value >= 0; },
+                          [](const std::uint64_t &value) { return true; },
+                          [](const auto &) { return false; },
+                      },
+                      node.variant_);
+  }
+
+  static std::int64_t as(const Node &node) {
+    if (!is(node))
+      llvm::report_fatal_error("Integer overflow or not an integer");
+    return std::visit(Overloaded{
+                          [](const std::int64_t &value) {
+                            return static_cast<std::uint64_t>(value);
+                          },
+                          [](const std::uint64_t &value) { return value; },
+                          [](const auto &) -> std::uint64_t {
+                            llvm_unreachable("impossible");
+                          },
+                      },
+                      node.variant_);
   }
 };
 
@@ -681,17 +710,16 @@ struct NodeTypeTraits<
     typename std::enable_if<std::is_integral<IntegerType>::value &&
                             std::is_unsigned<IntegerType>::value>::type> {
   static bool is(const Node &node) noexcept {
-    if (!node.is<std::int64_t>())
+    if (!node.is<std::uint64_t>())
       return false;
-    const std::int64_t value = node.as<std::int64_t>();
-    return value >= 0 &&
-           static_cast<std::int64_t>(static_cast<IntegerType>(value)) == value;
+    const std::uint64_t value = node.as<std::uint64_t>();
+    return static_cast<std::uint64_t>(static_cast<IntegerType>(value)) == value;
   }
 
   static IntegerType as(const Node &node) {
     if (!is(node))
       llvm::report_fatal_error("Integer overflow or not an integer");
-    return static_cast<IntegerType>(node.as<std::int64_t>());
+    return static_cast<IntegerType>(node.as<std::uint64_t>());
   }
 };
 
@@ -717,13 +745,22 @@ struct NodeTypeTraits<
 
 template <> struct NodeTypeTraits<double> {
   static constexpr bool is(const Node &node) noexcept {
-    return node.is_number();
+    return std::visit(Overloaded{
+                          [](const double &) { return true; },
+                          [](const std::int64_t &) { return true; },
+                          [](const std::uint64_t &) { return true; },
+                          [](const auto &) { return false; },
+                      },
+                      node.variant_);
   }
 
   static double as(const Node &node) {
     return std::visit(Overloaded{
                           [](const double &value) { return value; },
                           [](const std::int64_t &value) {
+                            return static_cast<double>(value);
+                          },
+                          [](const std::uint64_t &value) {
                             return static_cast<double>(value);
                           },
                           [](const auto &) {

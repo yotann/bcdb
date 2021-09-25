@@ -39,11 +39,16 @@ TEST(JSONLoadTest, Float) {
       "{\"float\":\"-1."
       "00000000000000065042509409911827826032367803636410424129692897e-308\"}",
       Node(-1.0000000000000004e-308));
+  test_load("{\"float\":\"Infinity\"}", Node(INFINITY));
+  test_load("{\"float\":\"-Infinity\"}", Node(-INFINITY));
 
-  test_load("{\"float\":\"-0\"}", Node(-0.0));
   auto actualOrErr = Node::loadFromJSON("{\"float\":\"-0\"}");
   EXPECT_EQ(true, (bool)actualOrErr);
   EXPECT_TRUE(std::signbit(actualOrErr->as<double>()));
+
+  actualOrErr = Node::loadFromJSON("{\"float\":\"NaN\"}");
+  EXPECT_EQ(true, (bool)actualOrErr);
+  EXPECT_TRUE(std::isnan(actualOrErr->as<double>()));
 }
 
 TEST(JSONLoadTest, Bool) {

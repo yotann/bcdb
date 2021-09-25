@@ -24,14 +24,12 @@ Several other textual formats were considered and rejected:
 - [DAG-JSON] was intended to be used for this purpose, but it sometimes
   prevents the use of `"/"` as a key in maps, which could easily be a problem
   when representing file paths in MemoDB. The exact rules about when `"/"` are
-  allowed are somewhat complicated.
-- YAML doesn't have a good way to distinguish between the boolean "false" and
-  the string "false", the number "1" and the string "1", etc. That's fine when
-  you know the schema of the data you're parsing, but MemoDB tools need to work
-  with arbitrary Nodes with unknown schemas. One could distinguish between
-  `false` for the boolean value and `"false"` for the string, but it's too
-  error-prone for humans to remember the exact strings which need to be quoted
-  this way.
+  allowed are somewhat complicated. It also doesn't support MemoDB's extensions
+  to DAG-CBOR, such as 64-bit unsigned integers.
+- YAML is actually a set of many possible formats; for example, implementations
+  have no consensus whether `on` should be parsed into a boolean or a string.
+  That's fine when you know the schema of the data you're parsing, but MemoDB
+  tools need to work with arbitrary Nodes with unknown schemas.
 - TOML works best when the top-level structure of the document is a tree of
   maps, which isn't necessarily true of MemoDB Nodes. It also doesn't have a
   good way to encode CIDs or binary data.
@@ -103,18 +101,19 @@ MemoDB booleans are represented with JSON `true` and `false`.
 -1000000
 -9223372036854775808
 9223372036854775807
+18446744073709551615
 ```
 
 MemoDB integers are represented with JSON numbers, without a fraction or an
-exponent. The full 64-bit signed integer range must be supported.
+exponent. The full 64-bit signed and unsigned integer ranges must be supported.
 
 #### Rationale
 
-MemoDB supports the full range of 64-bit signed integers, which JSON can
-represent perfectly well. Some JSON implementations don't support the full
-64-bit integer range because they parse all JSON numbers as floating-point, but
-it would be too awkward to work around this problem by using alternative
-representations of integers.
+MemoDB supports the full range of 64-bit signed and unsigned integers, which
+JSON can represent perfectly well. Some JSON implementations don't support the
+full range because they parse all JSON numbers as floating-point, but it would
+be too awkward to work around this problem by using alternative representations
+of integers.
 
 ## Floats
 
@@ -123,16 +122,20 @@ representations of integers.
 {"float": "1"}
 {"float": "-0"}
 {"float": "-1.00000000000000065042509409911827826032367803636410424129692898e-308"}
+{"float": "NaN"}
+{"float": "Infinity"}
+{"float": "-Infinity"}
 ```
 
 MemoDB floats are represented with a special single-element JSON object, with
 the name `"float"` and a value which is a string representation of the float.
-The string representation will itself be a valid JSON number.
-
-Implementations do **not** need to support floating-point infinities and NaNs,
-which are not allowed in MemoDB Nodes.
+The string representation will itself be a valid JSON number, or `NaN`,
+`Infinity`, or `-Infinity` (case-sensitive).
 
 #### Rationale
+
+The strings `NaN`, `Infinity`, and `-Infinity` are standard in Javascript, and
+supported by at least one JSON implementation (`yq`).
 
 Floats could be distinguished from integers by the presence of a fractional
 part, so `1` would be an integer and `1.0` would be a float. However, some

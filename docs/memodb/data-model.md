@@ -21,10 +21,12 @@ A Node consists of arbitrary structured data. Nodes support a subset of the
 
 - The null value.
 - A boolean true or false.
-- An integer in the signed 64-bit integer range (from -9223372036854775808 to
-  9223372036854775807, inclusive).
+- An integer in the signed or unsigned 64-bit integer range (from
+  -9223372036854775808 to 18446744073709551615, inclusive).
 - A float in the double-precision floating point range, including infinities
-  and NaNs.
+  and NaN. There is no distinction between different NaN values. Floats are
+  distinct from integers even when their values are numerically equal (`2` is
+  different from `2.0`).
 - A text string, which must consist of valid Unicode codepoints.
 - A byte string, containing arbitrary bytes.
 - A link, which consists of a single CID representing a reference to another
@@ -56,6 +58,8 @@ Encoding follows the [CBOR] standard, with the following restrictions:
 - Except for floating-point values, nodes are encoded with [CBOR Core
   Deterministic Encoding].
 - Floating-point values are always encoded in 64-bit form.
+- Floating-point NaN is always encoded as `0xfb7ff8000000000000`--that is, the
+  sign bit is 0, and the significand has its highest bit 1 and other bits 0.
 - Links are encoded using [CIDs in CBOR], and always include the identity
   Multibase prefix (null byte).
 - The only supported tag is the CID tag (42).
@@ -85,18 +89,25 @@ and simplicity, we restrict it to the values supported by [DAG-CBOR], plus
 certain kinds of data that have proven useful in MemoDB. The following values
 have been added to those supported by [DAG-CBOR]:
 
-- Floating point infinities and NaNs.
+- Floating point infinities and NaN.
+- Integers in the unsigned 64-bit range that are not in the signed 64-bit
+  range. These are important for the Alive2 worker, which often generates
+  extremely large 64-bit values (both signed and unsigned).
 
 The following values supported by CBOR have been excluded from MemoDB Nodes:
 
 - The undefined value.
-- Integers outside the signed 64-bit range. Most JSON implementations for C/C++
-  only support the unsigned and signed 64-bit ranges.
+- Negative integers outside the signed 64-bit range. Few JSON or CBOR
+  implementations support these.
+- NaN values other than the default. These are almost never used in persistent
+  data, the distinction would be difficult to maintain in other formats such as
+  [MemoDB JSON], and it would be unclear how to handle NaNs of 16-bit, 32-bit,
+  and 64-bit floats together.
 - Tags, except for the CID tag. Some tags, like timestamps, packed integer
   arrays, and bignums, could be useful in MemoDB. On the other hand, the more
   tags we support, the fewer CBOR implementations will be compatible with
   MemoDB Nodes.
-- Map keys may only be text strings. It would be nice to support byte strings
+- Map keys other than text strings. It would be nice to support byte strings
   and integers as well; for example, the outliner represents candidate groups
   using byte strings and uses them as keys. On the other hand, some highly
   useful CBOR libraries like [jsoncons] have limited support for keys other
@@ -110,6 +121,8 @@ The restrictions have been chosen so that Nodes containing
 processed correctly by IPLD tools such as the `ipfs` program. (However, `ipfs`
 is fairly inefficient at handling huge numbers of small nodes, so it isn't very
 suitable for use with MemoDB.)
+
+The NaN encoding specified is the default NaN on most platforms.
 
 Note that maps are encoded using the new key ordering given in RFC 8949
 (bytewise lexicographical order). [DAG-CBOR] uses the old key ordering from RFC

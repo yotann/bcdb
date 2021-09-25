@@ -13,6 +13,9 @@
 
 using namespace memodb;
 
+using std::int64_t;
+using std::uint64_t;
+
 void Node::validateUTF8() const {
   auto Str = std::get<StringStorage>(variant_);
   auto Ptr = reinterpret_cast<const llvm::UTF8 *>(Str.data());
@@ -88,16 +91,38 @@ Node::Node(Map &&map) : variant_(std::forward<Map>(map)) { validateKeysUTF8(); }
 Node::Node(const CID &val) : variant_(val) {}
 Node::Node(CID &&val) : variant_(std::forward<CID>(val)) {}
 
-bool Node::operator==(const Node &other) const {
-  return variant_ == other.variant_;
-}
+bool Node::operator==(const Node &other) const { return compare(other) == 0; }
 
-bool Node::operator!=(const Node &other) const {
-  return variant_ != other.variant_;
-}
+bool Node::operator!=(const Node &other) const { return compare(other) != 0; }
 
-bool Node::operator<(const Node &other) const {
-  return variant_ < other.variant_;
+bool Node::operator<(const Node &other) const { return compare(other) < 0; }
+
+bool Node::operator<=(const Node &other) const { return compare(other) <= 0; }
+
+bool Node::operator>(const Node &other) const { return compare(other) > 0; }
+
+bool Node::operator>=(const Node &other) const { return compare(other) >= 0; }
+
+int Node::compare(const Node &other) const {
+  Kind kind_left = kind(), kind_right = other.kind();
+  if (kind_left < kind_right)
+    return -1;
+  else if (kind_left > kind_right)
+    return 1;
+  if (kind_left == Kind::Integer) {
+    bool signed_left = is<std::int64_t>();
+    bool signed_right = other.is<std::int64_t>();
+    if (signed_left && signed_right) {
+      auto left = as<std::int64_t>(), right = as<std::int64_t>();
+      return left < right ? -1 : left == right ? 0 : 1;
+    } else if (!signed_left && !signed_right) {
+      auto left = as<std::uint64_t>(), right = as<std::uint64_t>();
+      return left < right ? -1 : left == right ? 0 : 1;
+    } else {
+      return signed_left ? -1 : 1;
+    }
+  }
+  return variant_ < other.variant_ ? -1 : variant_ == other.variant_ ? 0 : 1;
 }
 
 llvm::Expected<Node> Node::loadFromCBOR(BytesRef in) {
@@ -115,6 +140,7 @@ Kind Node::kind() const {
                         [](const std::monostate &) { return Kind::Null; },
                         [](const bool &) { return Kind::Boolean; },
                         [](const std::int64_t &) { return Kind::Integer; },
+                        [](const std::uint64_t &) { return Kind::Integer; },
                         [](const double &) { return Kind::Float; },
                         [](const StringStorage &) { return Kind::String; },
                         [](const BytesStorage &) { return Kind::Bytes; },
@@ -255,27 +281,43 @@ static void writeJSON(llvm::json::OStream &os, const Node &value) {
     os.value(value.as<bool>());
     break;
   case Kind::Integer:
-    os.value(value.as<int64_t>());
+    if (value.is<int64_t>()) {
+      os.value(value.as<int64_t>());
+    } else {
+#if LLVM_VERSION_MAJOR >= 12
+      os.rawValue(
+          [&value](llvm::raw_ostream &os) { os << value.as<uint64_t>(); });
+#else
+      llvm::SmallVector<char, 64> buffer;
+      llvm::raw_svector_ostream raw_os(buffer);
+      raw_os << value.as<uint64_t>();
+      os.value(raw_os.str());
+#endif
+    }
     break;
   case Kind::Float:
     os.objectBegin();
     os.attributeBegin("float");
+    if (std::isnan(value.as<double>())) {
+      os.value("NaN");
+    } else if (std::isinf(value.as<double>())) {
+      os.value(value.as<double>() < 0.0 ? "-Infinity" : "Infinity");
+    } else {
 #if LLVM_VERSION_MAJOR >= 12
-    os.rawValue([&value](llvm::raw_ostream &os) {
-      os << '"'
-         << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
-                         value.as<double>())
-         << '"';
-    });
+      os.rawValue([&value](llvm::raw_ostream &os) {
+        os << '"'
+           << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
+                           value.as<double>())
+           << '"';
+      });
 #else
-    {
       llvm::SmallVector<char, 64> buffer;
       llvm::raw_svector_ostream raw_os(buffer);
       raw_os << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
                              value.as<double>());
       os.value(raw_os.str());
-    }
 #endif
+    }
     os.attributeEnd();
     os.objectEnd();
     break;
@@ -357,6 +399,7 @@ static bool encode_float(std::uint64_t &result, double value, int total_size,
   bool exact = true;
   bool sign = std::signbit(value);
   if (std::isnan(value)) {
+    // This is the default NaN on most platforms.
     exponent = exponent_mask;
     mantissa = 1ull << (mantissa_size - 1);
     sign = false;
@@ -623,6 +666,12 @@ void Node::save_cbor(std::vector<std::uint8_t> &out, CBORInfo *info) const {
                    else
                      start(0, x);
                  },
+                 [&](const uint64_t &x) {
+                   start(0, x);
+                   if (info &&
+                       x > uint64_t(std::numeric_limits<int64_t>::max()))
+                     info->not_dag_cbor = true;
+                 },
                  [&](const double &x) {
                    if (info && !std::isfinite(x))
                      info->not_dag_cbor = true;
@@ -728,6 +777,7 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
   case llvm::json::Value::Boolean:
     return Node(*value.getAsBoolean());
   case llvm::json::Value::Number:
+    // FIXME: LLVM can't parse integers greater than int64_t::max
     return Node(*value.getAsInteger());
   case llvm::json::Value::String:
     return Node(utf8_string_arg, *value.getAsString());
@@ -746,6 +796,12 @@ static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
     if (outer.size() == 1) {
       if (auto f = outer.getString("float")) {
         double d;
+        if (*f == "NaN")
+          return NAN;
+        if (*f == "Infinity")
+          return INFINITY;
+        if (*f == "-Infinity")
+          return -INFINITY;
         if (f->getAsDouble(d))
           return createInvalidJSONError("Invalid float");
         return Node(d);

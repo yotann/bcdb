@@ -18,6 +18,8 @@ TEST(JSONWriteTest, Integer) {
   test_print("1", Node(1));
   test_print("1000000000000", Node(1000000000000));
   test_print("9223372036854775807", Node(9223372036854775807));
+  test_print("18446744073709551615",
+             Node(static_cast<uint64_t>(18446744073709551615ull)));
   test_print("-1", Node(-1));
   test_print("-1000000000000", Node(-1000000000000));
   test_print("-9223372036854775808", Node(-9223372036854775807 - 1));
@@ -35,6 +37,9 @@ TEST(JSONWriteTest, Float) {
   test_print("{\"float\":\"-1.0000000000000004e-308\"}",
              Node(-1.0000000000000004e-308));
   test_print("{\"float\":\"-0\"}", Node(-0.0));
+  test_print("{\"float\":\"Infinity\"}", Node(INFINITY));
+  test_print("{\"float\":\"-Infinity\"}", Node(-INFINITY));
+  test_print("{\"float\":\"NaN\"}", Node(NAN));
 }
 
 TEST(JSONWriteTest, Bool) {
