@@ -272,107 +272,77 @@ Range<Node::List::const_iterator> Node::list_range() const {
   return Range(value.begin(), value.end());
 }
 
-static void writeJSON(llvm::json::OStream &os, const Node &value) {
-  switch (value.kind()) {
-  case Kind::Null:
-    os.value(nullptr);
-    break;
-  case Kind::Boolean:
-    os.value(value.as<bool>());
-    break;
-  case Kind::Integer:
-    if (value.is<int64_t>()) {
-#if LLVM_VERSION_MAJOR >= 12
-      os.rawValue(
-          [&value](llvm::raw_ostream &os) { os << value.as<int64_t>(); });
-#else
-      llvm::SmallVector<char, 64> buffer;
-      llvm::raw_svector_ostream raw_os(buffer);
-      raw_os << value.as<int64_t>();
-      os.value(raw_os.str());
-#endif
+static llvm::raw_ostream &writeJSONString(llvm::raw_ostream &os,
+                                          llvm::StringRef str) {
+  os << '"';
+  for (char c : str) {
+    if (c >= 0x08 && c <= 0x0d && c != 0x0b) {
+      os << '\\' << "btn.fr"[c - 0x08];
+    } else if (c >= 0 && c < 0x20) {
+      os << "\\u" << llvm::format_hex_no_prefix(c, 4);
     } else {
-#if LLVM_VERSION_MAJOR >= 12
-      os.rawValue(
-          [&value](llvm::raw_ostream &os) { os << value.as<uint64_t>(); });
-#else
-      llvm::SmallVector<char, 64> buffer;
-      llvm::raw_svector_ostream raw_os(buffer);
-      raw_os << value.as<uint64_t>();
-      os.value(raw_os.str());
-#endif
+      if (c == '\\' || c == '"')
+        os << '\\';
+      os << c;
     }
-    break;
-  case Kind::Float:
-    os.objectBegin();
-    os.attributeBegin("float");
-    if (std::isnan(value.as<double>())) {
-      os.value("NaN");
-    } else if (std::isinf(value.as<double>())) {
-      os.value(value.as<double>() < 0.0 ? "-Infinity" : "Infinity");
-    } else {
-#if LLVM_VERSION_MAJOR >= 12
-      os.rawValue([&value](llvm::raw_ostream &os) {
-        os << '"'
-           << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
-                           value.as<double>())
-           << '"';
-      });
-#else
-      llvm::SmallVector<char, 64> buffer;
-      llvm::raw_svector_ostream raw_os(buffer);
-      raw_os << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
-                             value.as<double>());
-      os.value(raw_os.str());
-#endif
-    }
-    os.attributeEnd();
-    os.objectEnd();
-    break;
-  case Kind::String:
-    os.value(value.as<llvm::StringRef>());
-    break;
-  case Kind::Bytes:
-    os.objectBegin();
-    os.attributeBegin("base64");
-    os.value(Multibase::base64pad.encodeWithoutPrefix(value.as<BytesRef>()));
-    os.attributeEnd();
-    os.objectEnd();
-    break;
-  case Kind::List:
-    os.arrayBegin();
-    for (const Node &item : value.list_range())
-      writeJSON(os, item);
-    os.arrayEnd();
-    break;
-  case Kind::Map:
-    os.objectBegin();
-    os.attributeBegin("map");
-    os.objectBegin();
-    for (const auto &item : value.map_range()) {
-      os.attributeBegin(item.key());
-      writeJSON(os, item.value());
-      os.attributeEnd();
-    }
-    os.objectEnd();
-    os.attributeEnd();
-    os.objectEnd();
-    break;
-  case Kind::Link:
-    os.objectBegin();
-    os.attributeBegin("cid");
-    os.value(llvm::json::Value(value.as<CID>().asString(Multibase::base64url)));
-    os.attributeEnd();
-    os.objectEnd();
-    break;
   }
+  return os << '"';
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os,
                                       const Node &value) {
-  llvm::json::OStream json_os(os);
-  writeJSON(json_os, value);
-  return os;
+  switch (value.kind()) {
+  case Kind::Null:
+    return os << "null";
+  case Kind::Boolean:
+    return os << (value.as<bool>() ? "true" : "false");
+  case Kind::Integer:
+    if (value.is<uint64_t>())
+      return os << value.as<uint64_t>();
+    return os << value.as<int64_t>();
+  case Kind::Float:
+    os << "{\"float\":\"";
+    if (std::isnan(value.as<double>())) {
+      os << "NaN";
+    } else if (std::isinf(value.as<double>())) {
+      os << (value.as<double>() < 0.0 ? "-Infinity" : "Infinity");
+    } else {
+      os << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
+                         value.as<double>());
+    }
+    return os << "\"}";
+  case Kind::String:
+    return writeJSONString(os, value.as<llvm::StringRef>());
+  case Kind::Bytes:
+    return os << "{\"base64\":\""
+              << Multibase::base64pad.encodeWithoutPrefix(value.as<BytesRef>())
+              << "\"}";
+  case Kind::List: {
+    bool first = true;
+    os << '[';
+    for (const Node &item : value.list_range()) {
+      if (!first)
+        os << ',';
+      first = false;
+      os << item;
+    }
+    return os << ']';
+  }
+  case Kind::Map: {
+    bool first = true;
+    os << "{\"map\":{";
+    for (const auto &item : value.map_range()) {
+      if (!first)
+        os << ',';
+      first = false;
+      writeJSONString(os, item.key()) << ':' << item.value();
+    }
+    return os << "}}";
+  }
+  case Kind::Link:
+    return os << "{\"cid\":\"" << value.as<CID>().asString(Multibase::base64url)
+              << "\"}";
+  }
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {

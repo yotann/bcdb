@@ -72,6 +72,8 @@ TEST(JSONWriteTest, String) {
              Node(utf8_string_arg, llvm::StringRef("\x00\n", 2)));
   test_print("\"\\u0001\x7f\"",
              Node(utf8_string_arg, llvm::StringRef("\x01\x7f", 2)));
+  test_print("\"\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\"",
+             Node("\x07\x08\x09\x0a\x0b\x0c\x0d\x0e"));
   test_print("\"\xe2\x80\xa2\xf0\x9d\x84\x9e\"",
              Node(utf8_string_arg,
                   llvm::StringRef("\xe2\x80\xa2\xf0\x9d\x84\x9e", 7)));

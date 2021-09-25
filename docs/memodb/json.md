@@ -263,12 +263,7 @@ following rules:
 - Object elements will be in the same order that would be used for
   deterministically encoded CBOR. That is, shorter names come before longer
   ones, and names with the same length are ordered lexicographically.
-- String characters that MUST be escaped will always be escaped. Aside from
-  those, printable ASCII characters will never be escaped. The decision of
-  whether to escape other characters will be made in an unspecified but
-  deterministic manner.
-- The choice between escape codes like `\u000a`, `\u000A`, and `\n` will be
-  made in an unspecified but deterministic manner.
+- Strings will be formatted according to [RFC 8785].
 - Floats will be formatted in an unspecified but deterministic manner.
 
 #### Rationale
@@ -281,7 +276,7 @@ header to be valid, allowing cached JSON responses to be validated.
 
 The exact details of the server's JSON encoding are partially unspecified in
 order to allow the server to switch to a different JSON implementation in the
-future. It might be nice to use the rules in [RFC 8785], but some of the
+future. It might be nice to use the other rules in [RFC 8785], but some of the
 requirements there are a poor match for MemoDB (for instance, the required use
 of UTF-16 for sorting).
 
