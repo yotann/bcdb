@@ -121,7 +121,8 @@ of integers.
 {"float": "3.142"}
 {"float": "1"}
 {"float": "-0"}
-{"float": "-1.00000000000000065042509409911827826032367803636410424129692898e-308"}
+{"float": "-1.000000000000001e-308"}
+{"float": "1.0000000000000004e-308"}
 {"float": "NaN"}
 {"float": "Infinity"}
 {"float": "-Infinity"}
@@ -135,7 +136,7 @@ The string representation will itself be a valid JSON number, or `NaN`,
 #### Rationale
 
 The strings `NaN`, `Infinity`, and `-Infinity` are standard in Javascript, and
-supported by at least one JSON implementation (`yq`).
+supported by at least one JSON implementation ([yj]).
 
 Floats could be distinguished from integers by the presence of a fractional
 part, so `1` would be an integer and `1.0` would be a float. However, some
@@ -148,8 +149,8 @@ Chromium's `JSON.stringify()`) do not distinguish between `0.0` and `-0.0`.
 There are also some disagreements between floating point parsers; Ruby rounds
 the number
 `"-1.00000000000000065042509409911827826032367803636410424129692898e-308"`
-incorrectly, for example, although the MemoDB server is unlikely to produce a
-value with such an excessive number of digits.
+incorrectly, for example, although the MemoDB server will never produce a value
+with such an excessive number of digits.
 
 All in all, the best way to ensure the JSON is a faithful representation of the
 Node is to avoid the use of the client's floating-point parser and formatter.
@@ -287,3 +288,4 @@ real advantages.
 [Extended Diagnostic Notation]: https://datatracker.ietf.org/doc/html/rfc8610#appendix-G
 [PHP]: https://github.com/php/php-src/pull/7234
 [RFC 8785]: https://www.rfc-editor.org/info/rfc8785
+[yj]: https://github.com/sclevine/yj
