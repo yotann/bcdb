@@ -76,9 +76,10 @@ the base64url Multibase. This is the preferred Multibase for all CIDs in paths,
 although the server may accept other formats.
 
 Clients that generate their own CIDs should use the exact same generation
-algorithm as the server. In particular, the choice between raw data and
-DAG-CBOR CIDs and the choice between identity and Blake2b-256 CIDs must match
-between client and server. Otherwise, things may not work properly.
+algorithm as the server. In particular, the choice between raw data, DAG-CBOR,
+and DAG-CBOR-Unrestricted CIDs and the choice between identity and Blake2b-256
+CIDs must match between client and server. Otherwise, things may not work
+properly.
 
 ### Head formats
 

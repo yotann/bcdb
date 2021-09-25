@@ -24,6 +24,9 @@ enum class Multicodec {
   Raw = 0x55,
   /// IPLD: this CID refers to structured data encoded with DAG-CBOR.
   DAG_CBOR = 0x71,
+  /// IPLD: this CID refers to structured data encoded with CBOR, with IPLD
+  /// links but without the normal DAG-CBOR restrictions.
+  DAG_CBOR_Unrestricted = 0x0171,
   /// Multihash: the data is included directly in the CID.
   Identity = 0x00,
   /// Multihash: this CID is based on a 256-bit Blake2b hash of the data.

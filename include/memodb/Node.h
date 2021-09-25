@@ -416,28 +416,36 @@ public:
   /// \name Saving and loading
   /// @{
 
-  /// Load a Node from DAG-CBOR bytes:
-  /// https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
+  /// Load a Node from CBOR bytes:
+  /// https://www.rfc-editor.org/rfc/rfc8949.html
   static llvm::Expected<Node> loadFromCBOR(BytesRef in);
 
-  /// Load a Node from DAG-CBOR bytes at the beginning of a sequence. When this
-  /// returns, "in" will refer to the rest of the bytes after the DAG-CBOR
-  /// value.
+  /// Load a Node from CBOR bytes at the beginning of a sequence. When this
+  /// returns, "in" will refer to the rest of the bytes after the CBOR value.
   static llvm::Expected<Node> loadFromCBORSequence(BytesRef &in);
 
-  /// Save a Node to DAG-CBOR bytes.
-  void save_cbor(std::vector<std::uint8_t> &out) const;
+  struct CBORInfo {
+    /// The encoded CBOR includes links (CIDs, tag 42).
+    bool has_links = false;
+    /// The encoded CBOR is not valid DAG-CBOR.
+    bool not_dag_cbor = false;
+  };
+
+  /// Save a Node to CBOR bytes.
+  void save_cbor(std::vector<std::uint8_t> &out,
+                 CBORInfo *info = nullptr) const;
 
   /// Load a Node from a CID and the corresponding content bytes. The CID
-  /// content type may be either Raw (bytes returned as a bytestring Node) or
-  /// DAG-CBOR. The CID hash type may be Identity, in which case the value is
-  /// loaded directly from the CID.
+  /// content type may be Raw (bytes returned as a bytestring Node), DAG-CBOR,
+  /// or DAG-CBOR-Unrestricted. The CID hash type may be Identity, in which
+  /// case the value is loaded directly from the CID.
   static llvm::Expected<Node> loadFromIPLD(const CID &CID, BytesRef Content);
 
   /// Save a Node as a CID and the corresponding content bytes. The CID content
-  /// type will be either Raw (if this is a bytestring Node) or DAG-CBOR. If
-  /// noIdentity is false and the value is small enough, the CID will be an
-  /// Identity CID and the returned content bytes will be empty.
+  /// type will be either Raw (if this is a bytestring Node), DAG-CBOR, or
+  /// DAG-CBOR-Unrestricted. If noIdentity is false and the value is small
+  /// enough, the CID / will be an Identity CID and the returned content bytes
+  /// will be empty.
   std::pair<CID, std::vector<std::uint8_t>>
   saveAsIPLD(bool noIdentity = false) const;
 

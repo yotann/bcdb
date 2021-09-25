@@ -16,6 +16,9 @@ CID identityCID(llvm::ArrayRef<std::uint8_t> Bytes) {
 }
 
 TEST(CIDTest, Calculate) {
+  EXPECT_EQ(CID::fromBytes({0x00, 0x01, 0xf1, 0x02, 0x00, 0x01, 0xf6}),
+            CID::calculate(Multicodec::DAG_CBOR_Unrestricted, {0xf6},
+                           Multicodec::Identity));
   EXPECT_EQ(CID::fromBytes({0x00, 0x01, 0x71, 0x00, 0x01, 0xf6}),
             CID::calculate(Multicodec::DAG_CBOR, {0xf6}, Multicodec::Identity));
   EXPECT_EQ(CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6}),

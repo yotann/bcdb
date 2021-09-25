@@ -121,7 +121,8 @@ std::optional<CID> CID::loadFromSequence(llvm::ArrayRef<std::uint8_t> &Bytes) {
   if (Bytes.size() < RawHashSize)
     return {};
   if (*RawContentType != Multicodec::Raw &&
-      *RawContentType != Multicodec::DAG_CBOR)
+      *RawContentType != Multicodec::DAG_CBOR &&
+      *RawContentType != Multicodec::DAG_CBOR_Unrestricted)
     return {};
   if (*RawHashType == Multicodec::Identity) {
     // arbitrary sizes allowed

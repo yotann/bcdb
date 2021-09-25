@@ -587,9 +587,9 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
   }
 }
 
-void Node::save_cbor(std::vector<std::uint8_t> &out) const {
-  // Save the value in DAG-CBOR format.
-  // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
+void Node::save_cbor(std::vector<std::uint8_t> &out, CBORInfo *info) const {
+  // Save the value in CBOR format.
+  // https://www.rfc-editor.org/rfc/rfc8949.html
 
   auto start = [&](int major_type, std::uint64_t additional,
                    int force_minor = 0) {
@@ -624,6 +624,8 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
                      start(0, x);
                  },
                  [&](const double &x) {
+                   if (info && !std::isfinite(x))
+                     info->not_dag_cbor = true;
                    std::uint64_t additional;
                    encode_float(additional, x, 64, 52, 1023);
                    start(7, additional, 27);
@@ -637,16 +639,19 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
                    out.insert(out.end(), x.begin(), x.end());
                  },
                  [&](const CID &x) {
+                   // https://github.com/ipld/cid-cbor/
                    auto Bytes = x.asBytes();
                    start(6, 42); // CID tag
                    start(2, Bytes.size() + 1);
                    out.push_back(0x00); // DAG-CBOR requires multibase prefix
                    out.insert(out.end(), Bytes.begin(), Bytes.end());
+                   if (info)
+                     info->has_links = true;
                  },
                  [&](const List &x) {
                    start(4, x.size());
                    for (const Node &item : x)
-                     item.save_cbor(out);
+                     item.save_cbor(out, info);
                  },
                  [&](const Map &x) {
                    start(5, x.size());
@@ -654,7 +659,7 @@ void Node::save_cbor(std::vector<std::uint8_t> &out) const {
                      start(3, item.key().size());
                      out.insert(out.end(), item.key().begin(),
                                 item.key().end());
-                     item.value().save_cbor(out);
+                     item.value().save_cbor(out, info);
                    }
                  },
              },
@@ -681,7 +686,8 @@ llvm::Expected<Node> Node::loadFromIPLD(const CID &CID,
   }
   if (CID.getContentType() == Multicodec::Raw)
     return Node(Content);
-  if (CID.getContentType() == Multicodec::DAG_CBOR)
+  if (CID.getContentType() == Multicodec::DAG_CBOR ||
+      CID.getContentType() == Multicodec::DAG_CBOR_Unrestricted)
     return Node::loadFromCBOR(Content);
   return createUnsupportedIPLDError("unsupported CID content type");
 }
@@ -690,11 +696,17 @@ std::pair<CID, std::vector<std::uint8_t>>
 Node::saveAsIPLD(bool noIdentity) const {
   bool raw = kind() == Kind::Bytes;
   std::vector<std::uint8_t> Bytes;
-  if (raw)
+  Multicodec codec;
+  if (raw) {
     Bytes = llvm::ArrayRef<std::uint8_t>(std::get<BytesStorage>(variant_));
-  else
-    save_cbor(Bytes);
-  CID Ref = CID::calculate(raw ? Multicodec::Raw : Multicodec::DAG_CBOR, Bytes,
+    codec = Multicodec::Raw;
+  } else {
+    CBORInfo info;
+    save_cbor(Bytes, &info);
+    codec = info.not_dag_cbor ? Multicodec::DAG_CBOR_Unrestricted
+                              : Multicodec::DAG_CBOR;
+  }
+  CID Ref = CID::calculate(codec, Bytes,
                            noIdentity ? std::optional(Multicodec::Blake2b_256)
                                       : std::nullopt);
   if (Ref.isIdentity())

@@ -17,15 +17,14 @@ This document explains each type in more detail.
 ## Node
 
 A Node consists of arbitrary structured data. Nodes support a subset of the
-[IPLD Data Model]—specifically, the subset implemented by [DAG-CBOR]. Each Node
-can hold one of the following kinds of data:
+[CBOR] data model. Each Node can hold one of the following kinds of data:
 
 - The null value.
 - A boolean true or false.
 - An integer in the signed 64-bit integer range (from -9223372036854775808 to
   9223372036854775807, inclusive).
-- A float in the double-precision floating point range, but excluding
-  infinities and NaNs.
+- A float in the double-precision floating point range, including infinities
+  and NaNs.
 - A text string, which must consist of valid Unicode codepoints.
 - A byte string, containing arbitrary bytes.
 - A link, which consists of a single CID representing a reference to another
@@ -43,12 +42,28 @@ attempting to perform the same calculation may get different results. This will
 interfere with MemoDB's deduplication process. Therefore, floats should be
 avoided when there are good alternatives available.
 
-Nodes are usually represented in [DAG-CBOR], which is a binary format. They can
+Nodes are usually represented in [CBOR], which is a binary format. Nodes can
 also be represented in [MemoDB JSON], which is a textual format.
 
 MemoDB does not enforce any particular schema for Nodes; they can use arbitrary
 combinations of different kinds of data. Clients may wish to enforce schemas
 themselves, perhaps using [CDDL] or [IPLD Schemas].
+
+### CBOR encoding
+
+Encoding follows the [CBOR] standard, with the following restrictions:
+
+- Except for floating-point values, nodes are encoded with [CBOR Core
+  Deterministic Encoding].
+- Floating-point values are always encoded in 64-bit form.
+- Links are encoded using [CIDs in CBOR], and always include the identity
+  Multibase prefix (null byte).
+- The only supported tag is the CID tag (42).
+- The only supported simple values are true, false, and null.
+
+In general, the MemoDB server and tools will accept CBOR that doesn't follow
+these restrictions, and will convert Nodes to follow the restrictions before
+storing them.
 
 #### Rationale
 
@@ -63,23 +78,24 @@ difficult to extend in compatible ways. [CBOR] was chosen because it
 efficiently supports all kinds of data including large binary data, uses a
 regular encoding, and is extensible through the [CBOR Tag Registry].
 
-##### DAG-CBOR and limitations on CBOR values
+##### Limitations on CBOR values
 
-By limiting Nodes to the values supported by [DAG-CBOR], we ensure that they
-can be processed correctly by IPLD tools such as the `ipfs` program. However,
-no practical use has been found for doing so, and this decision may be
-revisited in the future. (`ipfs` is fairly inefficient at handling huge numbers
-of small nodes, so it isn't very suitable for use with MemoDB.)
+CBOR supports an extremely general data model. For the sake of compatibility
+and simplicity, we restrict it to the values supported by [DAG-CBOR], plus
+certain kinds of data that have proven useful in MemoDB. The following values
+have been added to those supported by [DAG-CBOR]:
 
-[CBOR] supports an extremely general data model, and [DAG-CBOR] places many
-restrictions on it:
+- Floating point infinities and NaNs.
 
-- The undefined value is not supported. This is not expected to be a problem.
-- Infinities and NaNs are not supported. This is not expected to be a problem.
-- Tags are not supported, except for the CID tag. Some tags, like timestamps,
-  packed integer arrays, and bignums, could be useful in MemoDB. On the other
-  hand, the more tags we support, the fewer CBOR implementations will be
-  compatible with MemoDB Nodes.
+The following values supported by CBOR have been excluded from MemoDB Nodes:
+
+- The undefined value.
+- Integers outside the signed 64-bit range. Most JSON implementations for C/C++
+  only support the unsigned and signed 64-bit ranges.
+- Tags, except for the CID tag. Some tags, like timestamps, packed integer
+  arrays, and bignums, could be useful in MemoDB. On the other hand, the more
+  tags we support, the fewer CBOR implementations will be compatible with
+  MemoDB Nodes.
 - Map keys may only be text strings. It would be nice to support byte strings
   and integers as well; for example, the outliner represents candidate groups
   using byte strings and uses them as keys. On the other hand, some highly
@@ -87,10 +103,19 @@ restrictions on it:
   than text strings. For now, byte strings are encoded in base64 before being
   used as keys, but this decision should be revisited in the future.
 
-Note that arbitrary CBOR values, ignoring the above restrictions, can be stored
-in a MemoDB Node if they are first encoded as byte strings. However, such
-values may not use links or CIDs to refer to other Nodes, because MemoDB will
-not recognize such links or CIDs, and might delete the other Nodes linked to.
+##### CBOR encoding restrictions
+
+The restrictions have been chosen so that Nodes containing
+[DAG-CBOR]-compatible values will be encoded with [DAG-CBOR]. Such Nodes can be
+processed correctly by IPLD tools such as the `ipfs` program. (However, `ipfs`
+is fairly inefficient at handling huge numbers of small nodes, so it isn't very
+suitable for use with MemoDB.)
+
+Note that maps are encoded using the new key ordering given in RFC 8949
+(bytewise lexicographical order). [DAG-CBOR] uses the old key ordering from RFC
+7049 (by length, then bytewise lexicographical); however, the orderings are
+actually equivalent for canonically encoded text string keys, which are the
+only kind of key supported by [DAG-CBOR].
 
 ## CID
 
@@ -162,19 +187,29 @@ MemoDB uses CIDv1, which is the latest version as of this writing.
 
 ### Content type
 
-MemoDB supports two content types:
+MemoDB supports three content types:
 
 - `raw` (code 0x55), for Nodes consisting of a single byte string.
-- `dag-cbor` (code 0x71), for all other Nodes.
-
-MemoDB uses `raw` for all Nodes consisting of a single byte string, and
-`dag-cbor` only for Nodes that are not byte strings.
+- `dag-cbor` (code 0x71), for Nodes that contain links and comply with the
+  [DAG-CBOR] restrictions.
+- `dag-cbor-unrestricted` (code 0x0171), for Nodes that contain links and do
+  not comply with the [DAG-CBOR] restrictions.
 
 #### Rationale
 
 The `raw` content type is slightly more efficient for Nodes consisting of plain
-byte strings, which are very common in MemoDB. Both these content types are
-supported by the `ipfs` program.
+byte strings, which are very common in MemoDB. It is supported by the `ipfs`
+program.
+
+The `dag-cbor-unrestricted` content type is necessary to represent Nodes that
+do not meet the [DAG-CBOR] restrictions. It is not supported by other IPLD
+programs.
+
+The `dag-cbor` content type is useful to preserve compatibility with the `ipfs`
+program for Nodes that meet the [DAG-CBOR] restrictions.
+
+The `cbor` content type is *not* supported because it has limited benefits over
+`dag-cbor` and `dag-cbor-unrestricted`.
 
 ### Multihash
 
@@ -256,6 +291,8 @@ MemoDB may also support garbage collection on a single store.
 [CBOR Tag Registry]: https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 [CDDL]: https://tools.ietf.org/html/rfc8610
 [CID specification]: https://github.com/multiformats/cid
+[CIDs in CBOR]: https://github.com/ipld/cid-cbor/
+[CBOR Core Deterministic Encoding]: https://www.rfc-editor.org/rfc/rfc8949.html#name-core-deterministic-encoding
 [DAG-CBOR]: https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
 [IPLD Data Model]: https://github.com/ipld/specs/blob/master/data-model-layer/data-model.md
 [IPLD Schemas]: https://github.com/ipld/specs/tree/master/schemas

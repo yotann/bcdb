@@ -75,7 +75,7 @@ enum Format {
 static cl::opt<Format> format_option(
     "format", cl::Optional, cl::desc("Format for input and output nodes"),
     cl::values(clEnumValN(Format_Auto, "auto", "MemoDB JSON or URI."),
-               clEnumValN(Format_CBOR, "cbor", "original DAG-CBOR."),
+               clEnumValN(Format_CBOR, "cbor", "original CBOR."),
                clEnumValN(Format_Raw, "raw",
                           "raw binary data without CBOR wrapper."),
                clEnumValN(Format_JSON, "json", "MemoDB JSON.")),
