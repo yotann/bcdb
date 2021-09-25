@@ -1,5 +1,7 @@
 # Debugging MemoDB errors
 
+<!-- markdownlint-disable MD014 -->
+
 ## Types of errors
 
 - User error. If you try something on a small, easy input and it breaks, you
@@ -119,8 +121,6 @@ $ # also send them the "memodb evaluate ..." command that triggers the error
 
 The other person would do:
 
-<!-- markdownlint-disable MD014 -->
-
 ```console
 $ export MEMODB_STORE=sqlite:$HOME/memodb-fail.db
 $ memodb init
@@ -129,8 +129,6 @@ $ # now the store contains the Nodes we need to evaluate the call,
 $ # so we can reproduce the error
 $ memodb evaluate /call/test.add/uAXEAAfY
 ```
-
-<!-- markdownlint-enable MD014 -->
 
 ## Getting backtraces with GDB
 
