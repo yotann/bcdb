@@ -46,6 +46,8 @@ possible reasons:
 It's important to look at **all parts** of the error message to find the source
 of the error. For example, consider this error message:
 
+<!-- markdownlint-disable MD013 -->
+
 ```text
 LLVM ERROR: Incorrect number of arguments for test.add
  #0 0x00007f581fae535d llvm::sys::PrintStackTrace(llvm::raw_ostream&, int) (///nix/store/iqm3zq1acrf4g922rgldc6h8jr9vl9cr-llvm-12.0.0-lib/lib/libLLVM-12.so+0xd8e35d)
@@ -76,6 +78,8 @@ Stack dump:
             to save the inputs that caused the failure, run:
               memodb export -o fail.car /cid/uAXEAAfY
 ```
+
+<!-- markdownlint-enable MD013 -->
 
 This message actually has four parts:
 
@@ -115,6 +119,8 @@ $ # also send them the "memodb evaluate ..." command that triggers the error
 
 The other person would do:
 
+<!-- markdownlint-disable MD014 -->
+
 ```console
 $ export MEMODB_STORE=sqlite:$HOME/memodb-fail.db
 $ memodb init
@@ -123,6 +129,8 @@ $ # now the store contains the Nodes we need to evaluate the call,
 $ # so we can reproduce the error
 $ memodb evaluate /call/test.add/uAXEAAfY
 ```
+
+<!-- markdownlint-enable MD014 -->
 
 ## Getting backtraces with GDB
 
