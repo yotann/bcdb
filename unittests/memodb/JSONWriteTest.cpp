@@ -26,37 +26,63 @@ TEST(JSONWriteTest, Integer) {
 }
 
 TEST(JSONWriteTest, Float) {
-  test_print("{\"float\":\"NaN\"}", Node(NAN));
-  test_print("{\"float\":\"Infinity\"}", Node(INFINITY));
-  test_print("{\"float\":\"-Infinity\"}", Node(-INFINITY));
+  // RFC8785 Appendix B
   test_print("{\"float\":\"0\"}", Node(0.0));
   test_print("{\"float\":\"-0\"}", Node(-0.0));
+  test_print("{\"float\":\"5e-324\"}", Node(0x0.0000000000001p-1022));
+  test_print("{\"float\":\"-5e-324\"}", Node(-0x0.0000000000001p-1022));
+  test_print("{\"float\":\"1.7976931348623157e+308\"}",
+             Node(0x1.fffffffffffffp+1023));
+  test_print("{\"float\":\"-1.7976931348623157e+308\"}",
+             Node(-0x1.fffffffffffffp+1023));
+  test_print("{\"float\":\"9007199254740992\"}", Node(0x1.0p+53));
+  test_print("{\"float\":\"-9007199254740992\"}", Node(-0x1.0p+53));
+  test_print("{\"float\":\"295147905179352830000\"}", Node(0x1.0p+68));
+  test_print("{\"float\":\"NaN\"}", Node(NAN));
+  test_print("{\"float\":\"Infinity\"}", Node(INFINITY));
+  test_print("{\"float\":\"9.999999999999997e+22\"}",
+             Node(0x1.52d02c7e14af5p+76));
+  test_print("{\"float\":\"1e+23\"}", Node(0x1.52d02c7e14af6p+76));
+  test_print("{\"float\":\"1.0000000000000001e+23\"}",
+             Node(0x1.52d02c7e14af7p+76));
+  test_print("{\"float\":\"999999999999999700000\"}",
+             Node(0x1.b1ae4d6e2ef4ep+69));
+  test_print("{\"float\":\"999999999999999900000\"}",
+             Node(0x1.b1ae4d6e2ef4fp+69));
+  test_print("{\"float\":\"1e+21\"}", Node(0x1.b1ae4d6e2ef50p+69));
+  test_print("{\"float\":\"9.999999999999997e-7\"}",
+             Node(0x1.0c6f7a0b5ed8cp-20));
+  test_print("{\"float\":\"0.000001\"}", Node(0x1.0c6f7a0b5ed8dp-20));
+  test_print("{\"float\":\"333333333.3333332\"}", Node(0x1.3de4355555553p+28));
+  test_print("{\"float\":\"333333333.33333325\"}", Node(0x1.3de4355555554p+28));
+  test_print("{\"float\":\"333333333.3333333\"}", Node(0x1.3de4355555555p+28));
+  test_print("{\"float\":\"333333333.3333334\"}", Node(0x1.3de4355555556p+28));
+  test_print("{\"float\":\"333333333.33333343\"}", Node(0x1.3de4355555557p+28));
+  test_print("{\"float\":\"-0.0000033333333333333333\"}",
+             Node(-0x1.bf647612f3696p-19));
+  test_print("{\"float\":\"1424953923781206.2\"}", Node(0x1.43ff3c1cb0959p+50));
+
+  // other tests
+  test_print("{\"float\":\"-Infinity\"}", Node(-INFINITY));
   test_print("{\"float\":\"1\"}", Node(1.0));
   test_print("{\"float\":\"-1\"}", Node(-1.0));
   test_print("{\"float\":\"1.5\"}", Node(1.5));
   test_print("{\"float\":\"-4.5\"}", Node(-4.5));
-  test_print("{\"float\":\"3.141592653589793\"}", Node(3.141592653589793));
-  test_print("{\"float\":\"-123456.78\"}", Node(-123456.78));
-  test_print("{\"float\":\"123456.78\"}", Node(123456.78));
-  test_print("{\"float\":\"100000000000000000000\"}", Node(1e20));
-  test_print("{\"float\":\"1e+21\"}", Node(1e21));
-  test_print("{\"float\":\"0.1\"}", Node(1e-1));
-  test_print("{\"float\":\"0.000001\"}", Node(1e-6));
-  test_print("{\"float\":\"1e-7\"}", Node(1e-7));
-  test_print("{\"float\":\"0.0000011\"}", Node(1.1e-6));
-  test_print("{\"float\":\"1.1e-7\"}", Node(1.1e-7));
-  test_print("{\"float\":\"100000000001\"}", Node(100000000001.0));
-  test_print("{\"float\":\"10000000000.1\"}", Node(10000000000.1));
-  test_print("{\"float\":\"1.7976931348623157e+308\"}",
-             Node(1.7976931348623157e+308));
-  test_print("{\"float\":\"-1.7976931348623157e+308\"}",
-             Node(-1.7976931348623157e+308));
-  test_print("{\"float\":\"5e-324\"}", Node(5e-324));
-  test_print("{\"float\":\"-5e-324\"}", Node(-5e-324));
+  test_print("{\"float\":\"3.141592653589793\"}", Node(0x1.921fb54442d18p+1));
+  test_print("{\"float\":\"-123456.78\"}", Node(-0x1.e240c7ae147aep+16));
+  test_print("{\"float\":\"123456.78\"}", Node(0x1.e240c7ae147aep+16));
+  test_print("{\"float\":\"100000000000000000000\"}",
+             Node(0x1.5af1d78b58c4p+66));
+  test_print("{\"float\":\"0.1\"}", Node(0x1.999999999999ap-4));
+  test_print("{\"float\":\"1e-7\"}", Node(0x1.ad7f29abcaf48p-24));
+  test_print("{\"float\":\"0.0000011\"}", Node(0x1.27476ca61b882p-20));
+  test_print("{\"float\":\"1.1e-7\"}", Node(0x1.d87247702c0dp-24));
+  test_print("{\"float\":\"100000000001\"}", Node(0x1.74876e801p+36));
+  test_print("{\"float\":\"10000000000.1\"}", Node(0x1.2a05f2000cccdp+33));
   test_print("{\"float\":\"-1.000000000000001e-308\"}",
-             Node(-1.000000000000001e-308));
+             Node(-0x0.730d67819e8d4p-1022));
   test_print("{\"float\":\"-1.0000000000000004e-308\"}",
-             Node(-1.0000000000000004e-308));
+             Node(-0x0.730d67819e8d3p-1022));
 }
 
 TEST(JSONWriteTest, Bool) {
