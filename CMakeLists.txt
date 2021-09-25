@@ -110,6 +110,7 @@ include_directories(${LLVM_INCLUDE_DIR})
 
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories("${PROJECT_SOURCE_DIR}/third_party/dragonbox/include")
 
 add_subdirectory(lib)
 add_subdirectory(test)

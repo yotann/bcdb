@@ -1,5 +1,6 @@
 #include "memodb/Node.h"
 
+#include <dragonbox/dragonbox.h>
 #include <limits>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/ConvertUTF.h>
@@ -272,6 +273,41 @@ Range<Node::List::const_iterator> Node::list_range() const {
   return Range(value.begin(), value.end());
 }
 
+static llvm::raw_ostream &writeJSONFloat(llvm::raw_ostream &os, double value) {
+  // https://tc39.es/ecma262/#sec-numeric-types-number-tostring
+  // exception: -0.0 is printed as "-0"
+  if (std::isnan(value))
+    return os << "NaN";
+  if (std::signbit(value)) {
+    os << '-';
+    return writeJSONFloat(os, -value);
+  }
+  if (std::isinf(value))
+    return os << "Infinity";
+  if (value == 0.0)
+    return os << "0";
+
+  auto decimal =
+      jkj::dragonbox::to_decimal(value, jkj::dragonbox::policy::sign::ignore);
+  llvm::SmallString<20> s;
+  llvm::raw_svector_ostream(s) << decimal.significand;
+  auto k = static_cast<int>(s.size());
+  auto n = decimal.exponent + k;
+  static const llvm::StringRef zeros("00000000000000000000");
+  if (k <= n && n <= 21) {
+    return os << s << zeros.take_front(n - k);
+  } else if (n > 0 && n <= 21) {
+    return os << s.substr(0, n) << '.' << s.substr(n);
+  } else if (n <= 0 && n > -6) {
+    return os << "0." << zeros.take_front(-n) << s;
+  } else {
+    os << s[0];
+    if (k > 1)
+      os << '.' << s.substr(1);
+    return os << 'e' << (n >= 1 ? "+" : "") << (n - 1);
+  }
+}
+
 static llvm::raw_ostream &writeJSONString(llvm::raw_ostream &os,
                                           llvm::StringRef str) {
   os << '"';
@@ -302,15 +338,7 @@ llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os,
     return os << value.as<int64_t>();
   case Kind::Float:
     os << "{\"float\":\"";
-    if (std::isnan(value.as<double>())) {
-      os << "NaN";
-    } else if (std::isinf(value.as<double>())) {
-      os << (value.as<double>() < 0.0 ? "-Infinity" : "Infinity");
-    } else {
-      os << llvm::format("%.*g", std::numeric_limits<double>::max_digits10,
-                         value.as<double>());
-    }
-    return os << "\"}";
+    return writeJSONFloat(os, value.as<double>()) << "\"}";
   case Kind::String:
     return writeJSONString(os, value.as<llvm::StringRef>());
   case Kind::Bytes:

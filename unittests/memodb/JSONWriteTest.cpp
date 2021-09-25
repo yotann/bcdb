@@ -26,20 +26,37 @@ TEST(JSONWriteTest, Integer) {
 }
 
 TEST(JSONWriteTest, Float) {
+  test_print("{\"float\":\"NaN\"}", Node(NAN));
+  test_print("{\"float\":\"Infinity\"}", Node(INFINITY));
+  test_print("{\"float\":\"-Infinity\"}", Node(-INFINITY));
+  test_print("{\"float\":\"0\"}", Node(0.0));
+  test_print("{\"float\":\"-0\"}", Node(-0.0));
   test_print("{\"float\":\"1\"}", Node(1.0));
+  test_print("{\"float\":\"-1\"}", Node(-1.0));
   test_print("{\"float\":\"1.5\"}", Node(1.5));
   test_print("{\"float\":\"-4.5\"}", Node(-4.5));
-  // This is a weird value--the correct value is closer to
-  // -1.00000000000000065e-308 than -1.0000000000000009e-308--but it still
-  // rounds to the correct 64-bit float.
-  test_print("{\"float\":\"-1.0000000000000009e-308\"}",
+  test_print("{\"float\":\"3.141592653589793\"}", Node(3.141592653589793));
+  test_print("{\"float\":\"-123456.78\"}", Node(-123456.78));
+  test_print("{\"float\":\"123456.78\"}", Node(123456.78));
+  test_print("{\"float\":\"100000000000000000000\"}", Node(1e20));
+  test_print("{\"float\":\"1e+21\"}", Node(1e21));
+  test_print("{\"float\":\"0.1\"}", Node(1e-1));
+  test_print("{\"float\":\"0.000001\"}", Node(1e-6));
+  test_print("{\"float\":\"1e-7\"}", Node(1e-7));
+  test_print("{\"float\":\"0.0000011\"}", Node(1.1e-6));
+  test_print("{\"float\":\"1.1e-7\"}", Node(1.1e-7));
+  test_print("{\"float\":\"100000000001\"}", Node(100000000001.0));
+  test_print("{\"float\":\"10000000000.1\"}", Node(10000000000.1));
+  test_print("{\"float\":\"1.7976931348623157e+308\"}",
+             Node(1.7976931348623157e+308));
+  test_print("{\"float\":\"-1.7976931348623157e+308\"}",
+             Node(-1.7976931348623157e+308));
+  test_print("{\"float\":\"5e-324\"}", Node(5e-324));
+  test_print("{\"float\":\"-5e-324\"}", Node(-5e-324));
+  test_print("{\"float\":\"-1.000000000000001e-308\"}",
              Node(-1.000000000000001e-308));
   test_print("{\"float\":\"-1.0000000000000004e-308\"}",
              Node(-1.0000000000000004e-308));
-  test_print("{\"float\":\"-0\"}", Node(-0.0));
-  test_print("{\"float\":\"Infinity\"}", Node(INFINITY));
-  test_print("{\"float\":\"-Infinity\"}", Node(-INFINITY));
-  test_print("{\"float\":\"NaN\"}", Node(NAN));
 }
 
 TEST(JSONWriteTest, Bool) {

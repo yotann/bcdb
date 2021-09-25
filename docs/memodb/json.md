@@ -259,12 +259,14 @@ decisions nondeterministically as long as the result is valid JSON.
 The MemoDB server will produce deterministic JSON for a given Node, using the
 following rules:
 
-- No unnecessary whitespace will be used.
+- No whitespace will be used between tokens.
 - Object elements will be in the same order that would be used for
   deterministically encoded CBOR. That is, shorter names come before longer
   ones, and names with the same length are ordered lexicographically.
 - Strings will be formatted according to [RFC 8785].
-- Floats will be formatted in an unspecified but deterministic manner.
+- Integers will be formatted the obvious way.
+- Floats will be formatted according to [ECMAScript Number::toString], except
+  that negative zero will become `-0`.
 
 #### Rationale
 
@@ -274,14 +276,14 @@ them. Clients that prefer to be deterministic can use CBOR instead.
 The server needs to produce deterministic JSON in order for the HTTP ETag
 header to be valid, allowing cached JSON responses to be validated.
 
-The exact details of the server's JSON encoding are partially unspecified in
-order to allow the server to switch to a different JSON implementation in the
-future. It might be nice to use the other rules in [RFC 8785], but some of the
-requirements there are a poor match for MemoDB (for instance, the required use
-of UTF-16 for sorting).
+The server's JSON encoding is based on [RFC 8785], but with support added for
+large integers and negative zero. The object element ordering is also
+different; ordering according to [RFC 8785] would be much slower and have no
+real advantages.
 
 [DAG-JSON]: https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-json.md
 [Diagnostic Notation]: https://www.rfc-editor.org/rfc/rfc8949.html#name-diagnostic-notation
+[ECMAScript Number::toString]: https://tc39.es/ecma262/#sec-numeric-types-number-tostring
 [Extended Diagnostic Notation]: https://datatracker.ietf.org/doc/html/rfc8610#appendix-G
 [PHP]: https://github.com/php/php-src/pull/7234
 [RFC 8785]: https://www.rfc-editor.org/info/rfc8785
