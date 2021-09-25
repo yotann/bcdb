@@ -282,7 +282,15 @@ static void writeJSON(llvm::json::OStream &os, const Node &value) {
     break;
   case Kind::Integer:
     if (value.is<int64_t>()) {
-      os.value(value.as<int64_t>());
+#if LLVM_VERSION_MAJOR >= 12
+      os.rawValue(
+          [&value](llvm::raw_ostream &os) { os << value.as<int64_t>(); });
+#else
+      llvm::SmallVector<char, 64> buffer;
+      llvm::raw_svector_ostream raw_os(buffer);
+      raw_os << value.as<int64_t>();
+      os.value(raw_os.str());
+#endif
     } else {
 #if LLVM_VERSION_MAJOR >= 12
       os.rawValue(
