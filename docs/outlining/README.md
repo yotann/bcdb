@@ -12,7 +12,6 @@ These instruction also assume you have gone through the [MemoDB tutorial].
 ```shell
 cd ~/bcdb
 git pull
-git submodule update --init --depth=1
 nix-env -f . -iA bcdb
 ```
 

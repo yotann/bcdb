@@ -45,7 +45,6 @@ more efficiently by using deduplication.
 ## Install
 
 ```shell
-git submodule update --init --depth=1
 mkdir build
 cd build
 cmake ..
@@ -81,7 +80,6 @@ automatically build BCDB along with known-working versions of its dependencies.
 See `default.nix` for the list of attributes you can build. For example:
 
 ```shell
-git submodule update --init --depth=1
 nix-build -A bcdb
 result/bin/bcdb -help
 ```
@@ -90,7 +88,6 @@ If you want to modify the BCDB code, you can instead build just the
 dependencies with Nix, and enter a shell that has them installed:
 
 ```shell
-git submodule update --init --depth=1
 nix-shell -A bcdb
 mkdir build
 cd build
