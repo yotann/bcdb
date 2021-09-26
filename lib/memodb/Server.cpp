@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
@@ -22,6 +23,8 @@ static const unsigned DEFAULT_CALL_TIMEOUT = 600;
 using namespace memodb;
 using llvm::SmallVector;
 using llvm::StringRef;
+namespace chrono = std::chrono;
+using std::chrono::steady_clock;
 
 static bool isLegalUTF8(llvm::StringRef str) {
   auto source = reinterpret_cast<const llvm::UTF8 *>(str.data());
@@ -397,9 +400,16 @@ void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
   if (item.second) {
     // New PendingCall, add it to the queue.
     call_group.unstarted_calls.push_back(&pending_call);
-  } else {
-    // TODO: if the pending_call has already been started, check whether the
-    // worker has timed out.
+  } else if (pending_call.started) {
+    // Print a warning if the job was started many minutes ago. Maybe the
+    // worker crashed.
+    auto minutes = chrono::floor<chrono::minutes>(steady_clock::now() -
+                                                  pending_call.start_time);
+    if (minutes.count() >= pending_call.minutes_to_report) {
+      llvm::errs() << "Job in progress for " << minutes.count()
+                   << " minutes: " << pending_call.call << "\n";
+      pending_call.minutes_to_report *= 2;
+    }
   }
 }
 
@@ -435,5 +445,7 @@ void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
     node["args"].emplace_back(arg);
   worker.sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
   pending_call.started = true;
-  // TODO: record the start time.
+  pending_call.start_time = steady_clock::now();
+  // Report long-running job after 4 minutes.
+  pending_call.minutes_to_report = 4;
 }

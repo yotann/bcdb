@@ -2,6 +2,7 @@
 #define MEMODB_SERVER_H
 
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <map>
 #include <memory>
@@ -124,6 +125,9 @@ public:
 
   // Whether the evaluation has been assigned to a worker.
   bool started = false;
+
+  std::chrono::time_point<std::chrono::steady_clock> start_time;
+  unsigned minutes_to_report;
 
   // Whether the evaluation has been completed.
   bool finished = false;
