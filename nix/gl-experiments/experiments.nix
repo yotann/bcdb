@@ -303,7 +303,7 @@
       cat ${./python-benchmarks.txt} | while read BENCH; do
         BENCH=''${BENCH#* }
         bin/python3 \
-          ${../../third_party/pyperformance/pyperformance/benchmarks}/$BENCH \
+          ${third_party/pyperformance/pyperformance/benchmarks}/$BENCH \
           --no-locale \
           --processes 1 \
           --values 1 \

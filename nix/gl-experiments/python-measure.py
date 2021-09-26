@@ -31,7 +31,7 @@ def generate_args_env(exe_path, benchmark, out, affinity):
     bm, extra_args = benchmarks[benchmark]
     args = [
         f"{exe_path}/bin/python",
-        f"../../third_party/pyperformance/pyperformance/benchmarks/{bm}",
+        f"third_party/pyperformance/pyperformance/benchmarks/{bm}",
         "--no-locale",
         "--affinity",
         affinity,

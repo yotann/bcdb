@@ -29,7 +29,6 @@ in stdenv.mkDerivation {
       /docs/
       /flake.lock
       /nix/
-      /third_party/pyperformance/
     ''] ../..;
   };
 
