@@ -57,7 +57,7 @@ class GoogleTest(TestFormat):
         for ln in output.splitlines(False):  # Don't keep newlines.
             ln = lit.util.to_string(ln)
 
-            if 'Running main() from gtest_main.cc' in ln:
+            if 'Running main() from ' in ln and 'gtest_main.cc' in ln:
                 # Upstream googletest prints this to stdout prior to running
                 # tests. LLVM removed that print statement in r61540, but we
                 # handle it here in case upstream googletest is being used.
