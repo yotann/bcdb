@@ -157,13 +157,14 @@ TEST(JSONLoadTest, String) {
   test_load("\" \"", Node(" ")); // y_string_u+2028_line_sep
   test_load("\" \"", Node(" ")); // y_string_u+2029_par_sep
 
-  test_load("\"\\uDADA\"", Node("�")); // i_string_1st_surrogate_but_2nd_missing
+  test_load("\"\\uDADA\"",
+            Node("\ufffd")); // i_string_1st_surrogate_but_2nd_missing
   test_load("\"\\uD888\\u1234\"",
-            Node("�ሴ")); // i_string_1st_valid_surrogate_2nd_invalid
+            Node("\ufffd\u1234")); // i_string_1st_valid_surrogate_2nd_invalid
   test_load("\"\\uD800\\n\"",
-            Node("�\n")); // i_string_incomplete_surrogate_and_escape_valid
+            Node("\ufffd\n")); // i_string_incomplete_surrogate_and_escape_valid
   test_load("\"\\uDd1ea\"",
-            Node("�a")); // i_string_incomplete_surrogate_pair
+            Node("\ufffda")); // i_string_incomplete_surrogate_pair
 }
 
 TEST(JSONLoadTest, Array) {
