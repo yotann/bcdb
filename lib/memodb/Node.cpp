@@ -824,9 +824,10 @@ static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
     if (json.consumeInteger(10, value))
       return createInvalidJSONError("Invalid integer");
     return Node(value);
-  } else if (c >= '0' && c <= '9') {
-    if (json.consume_front("0"))
-      return Node(0);
+  } else if (c == '0') {
+    json = json.drop_front();
+    return Node(0);
+  } else if (c >= '1' && c <= '9') {
     uint64_t value;
     // MemoDB JSON allows only integers.
     if (json.consumeInteger(10, value))
