@@ -315,7 +315,7 @@
   clang = {
     lto-flags = "-O3";
     profile-commands = ''
-      bin/clang -fPIC -shared -O3 ${./../../third_party/sqlite/sqlite-amalgamation-3320000.c} -ldl -lpthread -o /dev/null \
+      bin/clang -fPIC -shared -O3 ${./third_party/sqlite/sqlite-amalgamation-3320000.c} -ldl -lpthread -o /dev/null \
         ${(import ./clang-cmdline.nix { exepath = "."; }).args}
     '';
     packages = with pkgsBitcode.llvmPackages_12; [ bintools clang clang-unwrapped llvm ];

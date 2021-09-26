@@ -43,7 +43,7 @@ def generate_args_env(exe_path, benchmark, out, affinity):
         "-fPIC",
         "-shared",
         "-O3",
-        "../../third_party/sqlite/sqlite-amalgamation-3320000.c",
+        "third_party/sqlite/sqlite-amalgamation-3320000.c",
         "-ldl",
         "-lpthread",
         "-o",

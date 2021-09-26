@@ -30,7 +30,6 @@ in stdenv.mkDerivation {
       /flake.lock
       /nix/
       /third_party/pyperformance/
-      /third_party/sqlite/
     ''] ../..;
   };
 
