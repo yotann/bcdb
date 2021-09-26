@@ -137,8 +137,8 @@ TEST(HTTPTest, GetContentNodeJSONInvalidSyntax) {
   EXPECT_EQ(
       request.response_body,
       "{\"type\":\"/problems/invalid-or-unsupported-json\",\"title\":\"Invalid "
-      "or unsupported JSON\",\"status\":400,\"detail\":\"[1:1, byte=1]: "
-      "Expected object key\"}");
+      "or unsupported JSON\",\"status\":400,\"detail\":\"Invalid MemoDB JSON: "
+      "Expected '\\\"'\"}");
 }
 
 TEST(HTTPTest, GetContentNodeJSONInvalidNode) {

@@ -775,77 +775,156 @@ static llvm::Error createInvalidJSONError(llvm::StringRef message) {
       "Invalid MemoDB JSON: " + message);
 }
 
-static llvm::Expected<Node> loadFromJSONValue(const llvm::json::Value &value) {
-  switch (value.kind()) {
-  case llvm::json::Value::Null:
-    return Node(nullptr);
-  case llvm::json::Value::Boolean:
-    return Node(*value.getAsBoolean());
-  case llvm::json::Value::Number:
-    // FIXME: LLVM can't parse integers greater than int64_t::max
-    return Node(*value.getAsInteger());
-  case llvm::json::Value::String:
-    return Node(utf8_string_arg, *value.getAsString());
-  case llvm::json::Value::Array: {
-    Node result(node_list_arg);
-    for (const auto &item : *value.getAsArray()) {
-      auto nodeOrErr = loadFromJSONValue(item);
-      if (!nodeOrErr)
-        return nodeOrErr.takeError();
-      result.emplace_back(std::move(*nodeOrErr));
-    }
-    return result;
+static void skipJSONSpace(llvm::StringRef &json) {
+  json = json.ltrim(" \t\r\n");
+}
+
+static llvm::Expected<llvm::json::Value>
+consumeJSONString(llvm::StringRef &json) {
+  skipJSONSpace(json);
+  if (!json.startswith("\""))
+    return createInvalidJSONError("Expected '\"'");
+  size_t i = 1;
+  while (i < json.size() && json[i] != '"') {
+    i = json.find_first_of("\"\\", i);
+    if (i < json.size() && json[i] == '\\')
+      i += 2;
   }
-  case llvm::json::Value::Object: {
-    const auto &outer = *value.getAsObject();
-    if (outer.size() == 1) {
-      if (auto f = outer.getString("float")) {
-        double d;
-        if (*f == "NaN")
-          return NAN;
-        if (*f == "Infinity")
-          return INFINITY;
-        if (*f == "-Infinity")
-          return -INFINITY;
-        if (f->getAsDouble(d))
-          return createInvalidJSONError("Invalid float");
-        return Node(d);
-      }
-      if (auto base64 = outer.getString("base64")) {
-        auto bytes = Multibase::base64pad.decodeWithoutPrefix(*base64);
-        if (!bytes)
-          return createInvalidJSONError("Invalid base64");
-        return Node(std::move(*bytes));
-      }
-      if (auto cid_str = outer.getString("cid")) {
-        if (!cid_str->startswith("u"))
-          return createInvalidJSONError("JSON CIDs must be base64url");
-        auto cid_or_err = CID::parse(*cid_str);
-        if (!cid_or_err)
-          return createInvalidJSONError("Invalid or unsupported CID");
-        return Node(std::move(*cid_or_err));
-      }
-      if (auto inner = outer.getObject("map")) {
-        Node result(node_map_arg);
-        for (const auto &item : *inner) {
-          auto valueOrErr = loadFromJSONValue(item.second);
-          if (!valueOrErr)
-            return valueOrErr.takeError();
-          result[item.first] = *valueOrErr;
-        }
-        return result;
-      }
+  if (i >= json.size())
+    return createInvalidJSONError("Invalid string");
+  i += 1;
+  auto valueOrErr = llvm::json::parse(json.take_front(i));
+  json = json.drop_front(i);
+  return valueOrErr;
+}
+
+static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
+                                        bool special_object = true) {
+  // llvm::json::parse doesn't support the full range of uint64_t. It also
+  // creates an intermediate data structure llvm::json::Value that we don't
+  // really need. So we parse the JSON ourselves.
+  skipJSONSpace(json);
+  if (json.empty())
+    return createInvalidJSONError("Missing value");
+  char c = json.front();
+  if (c == 'f') {
+    if (json.consume_front("false"))
+      return Node(false);
+  } else if (c == 't') {
+    if (json.consume_front("true"))
+      return Node(true);
+  } else if (c == 'n') {
+    if (json.consume_front("null"))
+      return Node(nullptr);
+  } else if (c == '-') {
+    if (json.consume_front("-0"))
+      return Node(0);
+    int64_t value;
+    // MemoDB JSON allows only integers.
+    if (json.consumeInteger(10, value))
+      return createInvalidJSONError("Invalid integer");
+    return Node(value);
+  } else if (c >= '0' && c <= '9') {
+    if (json.consume_front("0"))
+      return Node(0);
+    uint64_t value;
+    // MemoDB JSON allows only integers.
+    if (json.consumeInteger(10, value))
+      return createInvalidJSONError("Invalid integer");
+    return Node(value);
+  } else if (c == '"') {
+    auto valueOrErr = consumeJSONString(json);
+    if (!valueOrErr)
+      return valueOrErr.takeError();
+    return Node(utf8_string_arg, *valueOrErr->getAsString());
+  } else if (c == '[') {
+    Node result(node_list_arg);
+    json = json.drop_front();
+    skipJSONSpace(json);
+    if (!json.startswith("]")) {
+      do {
+        auto valueOrErr = consumeJSON(json);
+        if (!valueOrErr)
+          return valueOrErr.takeError();
+        result.emplace_back(std::move(*valueOrErr));
+        skipJSONSpace(json);
+      } while (json.consume_front(","));
+    }
+    if (!json.consume_front("]"))
+      return createInvalidJSONError("Unexpected character");
+    return result;
+  } else if (c == '{') {
+    Node result(node_map_arg);
+    json = json.drop_front();
+    skipJSONSpace(json);
+    if (!json.startswith("}")) {
+      do {
+        auto keyOrErr = consumeJSONString(json);
+        if (!keyOrErr)
+          return keyOrErr.takeError();
+        skipJSONSpace(json);
+        if (!json.consume_front(":"))
+          return createInvalidJSONError("Expected ':' in object");
+        auto valueOrErr = consumeJSON(json, !special_object);
+        if (!valueOrErr)
+          return valueOrErr.takeError();
+        auto emplaced = result.try_emplace(*keyOrErr->getAsString(),
+                                           std::move(*valueOrErr));
+        if (!emplaced.second)
+          return createInvalidJSONError("Duplicate key in map");
+        skipJSONSpace(json);
+      } while (json.consume_front(","));
+    }
+    if (!json.consume_front("}"))
+      return createInvalidJSONError("Expected '}'");
+    if (!special_object)
+      return result;
+    if (result.size() != 1)
+      return createInvalidJSONError("Invalid special object");
+    auto &item = *result.map_range().begin();
+    if (item.key() == "map" && item.value().is_map()) {
+      return std::move(item.value());
+    }
+    if (item.key() == "cid" && item.value().is<llvm::StringRef>()) {
+      auto value = item.value().as<llvm::StringRef>();
+      if (!value.startswith("u"))
+        return createInvalidJSONError("JSON CIDs must be base64url");
+      auto cid_or_err = CID::parse(value);
+      if (!cid_or_err)
+        return createInvalidJSONError("Invalid or unsupported CID");
+      return Node(std::move(*cid_or_err));
+    }
+    if (item.key() == "base64" && item.value().is<llvm::StringRef>()) {
+      auto value = item.value().as<llvm::StringRef>();
+      auto bytes = Multibase::base64pad.decodeWithoutPrefix(value);
+      if (!bytes)
+        return createInvalidJSONError("Invalid base64");
+      return Node(std::move(*bytes));
+    }
+    if (item.key() == "float" && item.value().is<llvm::StringRef>()) {
+      auto value = item.value().as<llvm::StringRef>();
+      if (value == "NaN")
+        return Node(NAN);
+      if (value == "Infinity")
+        return Node(INFINITY);
+      if (value == "-Infinity")
+        return Node(-INFINITY);
+      double d;
+      if (value.getAsDouble(d))
+        return createInvalidJSONError("Invalid float");
+      return Node(d);
     }
     return createInvalidJSONError("Invalid special JSON object");
   }
-  default:
-    llvm_unreachable("impossible JSON type");
-  }
+  return createInvalidJSONError("Unexpected character");
 }
 
 llvm::Expected<Node> Node::loadFromJSON(llvm::StringRef json) {
-  auto valueOrErr = llvm::json::parse(json);
+  auto valueOrErr = consumeJSON(json);
   if (!valueOrErr)
     return valueOrErr.takeError();
-  return loadFromJSONValue(*valueOrErr);
+  skipJSONSpace(json);
+  if (!json.empty())
+    return createInvalidJSONError("Extra characters after JSON value");
+  return *valueOrErr;
 }
