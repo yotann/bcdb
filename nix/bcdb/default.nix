@@ -9,9 +9,15 @@ let
   # In order to determine REVISION_DESCRIPTION_FINAL the normal way, we would
   # have to copy all of .git/ into the Nix store, which is very slow. Instead,
   # we can determine the current revision using Nix.
+  resolveRef = ref:
+    let path = ../../.git + ("/" + symref);
+    in if builtins.pathExists path
+       then lib.fileContents path
+       else let lines = lib.splitString "\n" (builtins.readFile ../../.git/packed-refs);
+            in lib.findFirst (lib.hasSuffix " ${symref}") "unknown" lines;
   symref = lib.removePrefix "ref: " (lib.fileContents ../../.git/HEAD);
   revision = if lib.hasInfix "/" symref
-             then lib.fileContents (../../.git + ("/" + symref))
+             then resolveRef symref
              else symref;
   revision-short = builtins.substring 0 7 revision;
 
