@@ -273,13 +273,13 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
   return Multibase::base64pad.encodeWithoutPrefix(node.saveAsCBOR());
 }
 
-static bool isGroupWorthExtracting(NodeRef &options, const Node &group) {
+static bool isGroupWorthExtracting(Link &options, const Node &group) {
   auto min_callee_size = group["min_callee_size"].as<int64_t>();
   auto total_caller_savings = group["total_caller_savings"].as<int64_t>();
   return total_caller_savings > min_callee_size;
 }
 
-NodeOrCID smout::actual_size(Evaluator &evaluator, NodeRef func) {
+NodeOrCID smout::actual_size(Evaluator &evaluator, Link func) {
   LLVMContext context;
   auto m = cantFail(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
@@ -287,8 +287,7 @@ NodeOrCID smout::actual_size(Evaluator &evaluator, NodeRef func) {
   return Node(SizeModelResults(f).this_function_total_size);
 }
 
-NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
-                            NodeRef func) {
+NodeOrCID smout::candidates(Evaluator &evaluator, Link options, Link func) {
   ExitOnError Err("smout.candidates: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(
@@ -314,8 +313,8 @@ NodeOrCID smout::candidates(Evaluator &evaluator, NodeRef options,
   return result;
 }
 
-NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
-                                    NodeRef mod) {
+NodeOrCID smout::grouped_candidates(Evaluator &evaluator, Link options,
+                                    Link mod) {
   std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
@@ -339,7 +338,7 @@ NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
         group.min_callee_size = std::min(
             group.min_callee_size, candidate["callee_size"].as<int64_t>());
         Node candidate_changed = candidate;
-        candidate_changed["function"] = Node(func_cid);
+        candidate_changed["function"] = Node(evaluator.getStore(), func_cid);
         group.members.emplace_back(std::move(candidate_changed));
       }
     }
@@ -353,13 +352,14 @@ NodeOrCID smout::grouped_candidates(Evaluator &evaluator, NodeRef options,
              {{"total_caller_savings", group.total_caller_savings},
               {"min_callee_size", group.min_callee_size},
               {"num_members", group.members.size()},
-              {"members", Node(evaluator.getStore().put(group.members))}});
+              {"members", Node(evaluator.getStore(),
+                               evaluator.getStore().put(group.members))}});
   }
   return groups_node;
 }
 
-NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
-                                   NodeRef node_sets) {
+NodeOrCID smout::extracted_callees(Evaluator &evaluator, Link func,
+                                   Link node_sets) {
   ExitOnError Err("smout.extracted_callees: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(
@@ -383,19 +383,20 @@ NodeOrCID smout::extracted_callees(Evaluator &evaluator, NodeRef func,
     auto mpart = splitter.SplitGlobal(callee);
     SmallVector<char, 0> buffer;
     bcdb::WriteAlignedModule(*mpart, buffer);
-    result.emplace_back(
-        Node(node_map_arg, {{"callee", Node(evaluator.getStore().put(
-                                           Node(byte_string_arg, buffer)))},
-                            {"size", size}}));
+    result.emplace_back(Node(
+        node_map_arg,
+        {{"callee", Node(evaluator.getStore(), evaluator.getStore().put(Node(
+                                                   byte_string_arg, buffer)))},
+         {"size", size}}));
   }
   assert(node_sets->size() == result.size());
   return result;
 }
 
 NodeOrCID smout::grouped_callees_for_function(Evaluator &evaluator,
-                                              NodeRef options,
-                                              NodeRef grouped_candidates,
-                                              NodeRef func) {
+                                              Link options,
+                                              Link grouped_candidates,
+                                              Link func) {
   auto candidates = evaluator.evaluate(candidates_version, options, func);
   std::vector<std::string> candidate_group;
   std::vector<Node> candidate_node;
@@ -448,8 +449,7 @@ NodeOrCID smout::grouped_callees_for_function(Evaluator &evaluator,
   return result;
 }
 
-NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
-                                 NodeRef mod) {
+NodeOrCID smout::grouped_callees(Evaluator &evaluator, Link options, Link mod) {
   StringSet original_cids;
   auto grouped_candidates =
       evaluator.evaluate(grouped_candidates_version, options, mod);
@@ -479,7 +479,7 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
         if (!unique_callees.insert(key).second)
           duplicated_callees.insert(key);
         Node candidate_changed = candidate;
-        candidate_changed["function"] = Node(func_cid);
+        candidate_changed["function"] = Node(evaluator.getStore(), func_cid);
         group.emplace_back(candidate_changed);
       }
       group_unique_callees[item.key()] = unique_callees.size();
@@ -490,7 +490,8 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
   Node result(node_map_arg);
   for (auto &item : groups) {
     Node group = (*grouped_candidates)[item.getKey()];
-    group["members"] = Node(evaluator.getStore().put(item.getValue()));
+    group["members"] =
+        Node(evaluator.getStore(), evaluator.getStore().put(item.getValue()));
     group["num_unique_callees"] = group_unique_callees[item.getKey()];
     group["num_callees_without_duplicates"] =
         group_callees_without_duplicates[item.getKey()];
@@ -499,8 +500,7 @@ NodeOrCID smout::grouped_callees(Evaluator &evaluator, NodeRef options,
   return result;
 }
 
-NodeOrCID smout::ilp_problem(Evaluator &evaluator, NodeRef options,
-                             NodeRef mod) {
+NodeOrCID smout::ilp_problem(Evaluator &evaluator, Link options, Link mod) {
   report_fatal_error("This part of BCDB is broken and needs to be updated!");
   std::vector<std::pair<CID, Future>> func_candidates;
   for (auto &item : (*mod)["functions"].map_range()) {
@@ -984,8 +984,7 @@ struct OutliningProblem {
 } // end anonymous namespace
 } // end namespace smout
 
-NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
-                                 NodeRef mod) {
+NodeOrCID smout::greedy_solution(Evaluator &evaluator, Link options, Link mod) {
   Node stripped_options = *options;
   int min_benefit = stripped_options.get_value_or<int>("min_benefit", 1);
   int min_caller_savings =
@@ -1055,15 +1054,16 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
       cands_node.emplace_back(
           Node(node_map_arg,
                {{"nodes", nodes},
-                {"callee", Node(callee_info.cid)},
+                {"callee", Node(evaluator.getStore(), callee_info.cid)},
                 {"caller_savings", cand_info.savings},
                 {"estimated_caller_savings", cand_info.estimated_savings},
                 {"callee_size", callee_info.size}}));
     }
     const CID &cid = fi.cid;
     auto key = cid.asString(Multibase::base64url);
-    result_functions[key] = Node(
-        node_map_arg, {{"function", Node(cid)}, {"candidates", cands_node}});
+    result_functions[key] =
+        Node(node_map_arg, {{"function", Node(evaluator.getStore(), cid)},
+                            {"candidates", cands_node}});
   }
   return Node(node_map_arg, {
                                 {"functions", result_functions},
@@ -1071,8 +1071,8 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, NodeRef options,
                             });
 }
 
-NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
-                                  NodeRef callees) {
+NodeOrCID smout::extracted_caller(Evaluator &evaluator, Link func,
+                                  Link callees) {
   ExitOnError Err("smout.extracted_caller: ");
   LLVMContext context;
   auto m = Err(parseBitcodeFile(
@@ -1109,8 +1109,8 @@ NodeOrCID smout::extracted_caller(Evaluator &evaluator, NodeRef func,
   return Node(byte_string_arg, buffer);
 }
 
-NodeOrCID smout::outlined_module(Evaluator &evaluator, NodeRef mod,
-                                 NodeRef solution) {
+NodeOrCID smout::outlined_module(Evaluator &evaluator, Link mod,
+                                 Link solution) {
   Node mod_node = *mod;
   ExitOnError err("smout.optimized: ");
   LLVMContext context;
@@ -1137,7 +1137,7 @@ NodeOrCID smout::outlined_module(Evaluator &evaluator, NodeRef mod,
           name += "_";
         callee_names[cid_key(cid)] = name;
 
-        mod_node["functions"][name] = Node(cid);
+        mod_node["functions"][name] = Node(evaluator.getStore(), cid);
 
         // Copy callee declaration into remainder module.
         Node callee_bc = evaluator.getStore().get(cid);
@@ -1173,25 +1173,27 @@ NodeOrCID smout::outlined_module(Evaluator &evaluator, NodeRef mod,
     auto orig = item.value().as<CID>();
     auto caller_iter = callers.find(cid_key(orig));
     if (caller_iter != callers.end())
-      item.value() = Node(caller_iter->getValue().getCID());
+      item.value() =
+          Node(evaluator.getStore(), caller_iter->getValue().getCID());
   }
 
   // Replace remainder module.
   SmallVector<char, 0> buffer;
   bcdb::WriteAlignedModule(*remainder, buffer);
   mod_node["remainder"] =
-      Node(evaluator.getStore().put(Node(byte_string_arg, buffer)));
+      Node(evaluator.getStore(),
+           evaluator.getStore().put(Node(byte_string_arg, buffer)));
 
   return mod_node;
 }
 
-NodeOrCID smout::optimized(Evaluator &evaluator, NodeRef options, NodeRef mod) {
-  NodeRef solution = evaluator.evaluate(greedy_solution_version, options, mod);
+NodeOrCID smout::optimized(Evaluator &evaluator, Link options, Link mod) {
+  Link solution = evaluator.evaluate(greedy_solution_version, options, mod);
   return evaluator.evaluate(outlined_module_version, mod, solution).getCID();
 }
 
-NodeOrCID smout::refinements_for_set(Evaluator &evaluator, NodeRef options,
-                                     NodeRef members) {
+NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
+                                     Link members) {
   // Precondition: members is not empty.
   // Precondition: members is sorted by CID.
   // Precondition: members contains no duplicates.
@@ -1324,7 +1326,7 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, NodeRef options,
     // (due to not matching alive.tv's behavior). Either way, we should remove
     // first_cid from the set to prevent infinite recursion.
     auto range = clusters[0].list_range();
-    if (*range.begin() == Node(first_cid))
+    if (*range.begin() == Node(evaluator.getStore(), first_cid))
       clusters[0] = Node(node_list_arg, range.begin() + 1, range.end());
   }
 
@@ -1345,7 +1347,7 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, NodeRef options,
       first = false;
       // Put functions equivalent to first_cid in result[0].
       result.emplace_back(node_list_arg);
-      result[0].emplace_back(first_cid);
+      result[0].emplace_back(evaluator.getStore(), first_cid);
       for (std::size_t i : equivalent_to_first)
         result[0].emplace_back((*members)[i]);
       if (!node.empty() && node[0][0].as<CID>() == first_cid) {
@@ -1367,8 +1369,8 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, NodeRef options,
   return result;
 }
 
-NodeOrCID smout::refinements_for_group(Evaluator &evaluator, NodeRef options,
-                                       NodeRef members) {
+NodeOrCID smout::refinements_for_group(Evaluator &evaluator, Link options,
+                                       Link members) {
   StringSet unique_set;
   std::vector<CID> unique;
   for (const auto &item : members->list_range())
@@ -1379,13 +1381,13 @@ NodeOrCID smout::refinements_for_group(Evaluator &evaluator, NodeRef options,
 
   Node set_node(node_list_arg);
   for (const CID &cid : unique)
-    set_node.emplace_back(cid);
+    set_node.emplace_back(evaluator.getStore(), cid);
   return evaluator.evaluate(refinements_for_set_version, options, set_node)
       .getCID();
 }
 
-NodeOrCID smout::grouped_refinements(Evaluator &evaluator, NodeRef options,
-                                     NodeRef mod) {
+NodeOrCID smout::grouped_refinements(Evaluator &evaluator, Link options,
+                                     Link mod) {
   Node grouped_callees =
       *evaluator.evaluate(grouped_callees_version, options, mod);
   std::vector<Future> futures;
@@ -1395,7 +1397,8 @@ NodeOrCID smout::grouped_refinements(Evaluator &evaluator, NodeRef options,
                                 item.value()["members"].as<CID>()));
   size_t i = 0;
   for (auto &item : grouped_callees.map_range()) {
-    item.value()["refinements"] = Node(futures[i].getCID());
+    item.value()["refinements"] =
+        Node(evaluator.getStore(), futures[i].getCID());
     item.value()["num_valid_refinements"] = futures[i]->size();
     futures[i].freeNode();
     i++;

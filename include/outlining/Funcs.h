@@ -7,31 +7,26 @@
 namespace smout {
 
 using memodb::Evaluator;
+using memodb::Link;
 using memodb::Node;
 using memodb::NodeOrCID;
-using memodb::NodeRef;
 
-NodeOrCID actual_size(Evaluator &evaluator, NodeRef func);
-NodeOrCID candidates(Evaluator &evaluator, NodeRef options, NodeRef func);
-NodeOrCID grouped_candidates(Evaluator &evaluator, NodeRef options,
-                             NodeRef mod);
-NodeOrCID extracted_callees(Evaluator &evaluator, NodeRef func,
-                            NodeRef node_sets);
-NodeOrCID grouped_callees_for_function(Evaluator &evaluator, NodeRef options,
-                                       NodeRef grouped_candidates,
-                                       NodeRef func);
-NodeOrCID grouped_callees(Evaluator &evaluator, NodeRef options, NodeRef mod);
-NodeOrCID ilp_problem(Evaluator &evaluator, NodeRef options, NodeRef mod);
-NodeOrCID greedy_solution(Evaluator &evaluator, NodeRef options, NodeRef mod);
-NodeOrCID extracted_caller(Evaluator &evaluator, NodeRef func, NodeRef callees);
-NodeOrCID outlined_module(Evaluator &evaluator, NodeRef mod, NodeRef solution);
-NodeOrCID optimized(Evaluator &evaluator, NodeRef options, NodeRef mod);
-NodeOrCID refinements_for_set(Evaluator &evaluator, NodeRef options,
-                              NodeRef members);
-NodeOrCID refinements_for_group(Evaluator &evaluator, NodeRef options,
-                                NodeRef members);
-NodeOrCID grouped_refinements(Evaluator &evaluator, NodeRef options,
-                              NodeRef mod);
+NodeOrCID actual_size(Evaluator &evaluator, Link func);
+NodeOrCID candidates(Evaluator &evaluator, Link options, Link func);
+NodeOrCID grouped_candidates(Evaluator &evaluator, Link options, Link mod);
+NodeOrCID extracted_callees(Evaluator &evaluator, Link func, Link node_sets);
+NodeOrCID grouped_callees_for_function(Evaluator &evaluator, Link options,
+                                       Link grouped_candidates, Link func);
+NodeOrCID grouped_callees(Evaluator &evaluator, Link options, Link mod);
+NodeOrCID ilp_problem(Evaluator &evaluator, Link options, Link mod);
+NodeOrCID greedy_solution(Evaluator &evaluator, Link options, Link mod);
+NodeOrCID extracted_caller(Evaluator &evaluator, Link func, Link callees);
+NodeOrCID outlined_module(Evaluator &evaluator, Link mod, Link solution);
+NodeOrCID optimized(Evaluator &evaluator, Link options, Link mod);
+NodeOrCID refinements_for_set(Evaluator &evaluator, Link options, Link members);
+NodeOrCID refinements_for_group(Evaluator &evaluator, Link options,
+                                Link members);
+NodeOrCID grouped_refinements(Evaluator &evaluator, Link options, Link mod);
 
 extern const char *actual_size_version;
 extern const char *candidates_version;

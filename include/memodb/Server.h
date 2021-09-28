@@ -68,7 +68,8 @@ public:
   // there's some other error reading the body, this function should send an
   // error response and return std::nullopt.
   virtual std::optional<Node>
-  getContentNode(const std::optional<Node> &default_node = std::nullopt) = 0;
+  getContentNode(Store &store,
+                 const std::optional<Node> &default_node = std::nullopt) = 0;
 
   virtual void sendContentNode(const Node &node,
                                const std::optional<CID> &cid_if_known,
@@ -170,7 +171,7 @@ private:
                          std::optional<llvm::StringRef> sub_str);
   void handleRequestWorker(Request &request);
   void handleEvaluateCall(Request &request, Call call, unsigned timeout);
-  void handleCallResult(const Call &call, NodeRef result);
+  void handleCallResult(const Call &call, Link result);
   void sendCallToWorker(PendingCall &pending_call, Request &worker);
 
   Store &store;

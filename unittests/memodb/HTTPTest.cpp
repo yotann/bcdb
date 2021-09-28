@@ -7,6 +7,7 @@
 
 #include "memodb/CID.h"
 #include "memodb/Node.h"
+#include "memodb/Store.h"
 #include "memodb/URI.h"
 #include "gtest/gtest.h"
 
@@ -81,31 +82,35 @@ TEST(HTTPTest, GetMethod) {
 }
 
 TEST(HTTPTest, GetContentNodeCBOR) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", StringRef("\x82\x01\x61\x32", 4));
   request.request_headers["content-type"] = "application/cbor";
-  EXPECT_EQ(request.getContentNode(), Node(node_list_arg, {1, "2"}));
+  EXPECT_EQ(request.getContentNode(*store), Node(node_list_arg, {1, "2"}));
   EXPECT_EQ(request.response_status, std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeJSON) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", "[1,\"2\"]");
   request.request_headers["content-type"] = "application/json";
-  EXPECT_EQ(request.getContentNode(), Node(node_list_arg, {1, "2"}));
+  EXPECT_EQ(request.getContentNode(*store), Node(node_list_arg, {1, "2"}));
   EXPECT_EQ(request.response_status, std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeOctetStream) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", "test");
   request.request_headers["content-type"] = "application/octet-stream";
-  EXPECT_EQ(request.getContentNode(),
+  EXPECT_EQ(request.getContentNode(*store),
             Node(byte_string_arg, StringRef("test", 4)));
   EXPECT_EQ(request.response_status, std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeUnsupported) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", "test");
   request.request_headers["content-type"] = "text/plain";
-  EXPECT_EQ(request.getContentNode(), std::nullopt);
+  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
   EXPECT_EQ(request.response_status, 415);
   EXPECT_EQ(request.response_headers["content-type"],
             "application/problem+json");
@@ -114,9 +119,10 @@ TEST(HTTPTest, GetContentNodeUnsupported) {
 }
 
 TEST(HTTPTest, GetContentNodeCBORInvalid) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", StringRef("\x82\x01\x61", 3));
   request.request_headers["content-type"] = "application/cbor";
-  EXPECT_EQ(request.getContentNode(), std::nullopt);
+  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
   EXPECT_EQ(request.response_status, 400);
   EXPECT_EQ(request.response_headers["content-type"],
             "application/problem+json");
@@ -128,9 +134,10 @@ TEST(HTTPTest, GetContentNodeCBORInvalid) {
 }
 
 TEST(HTTPTest, GetContentNodeJSONInvalidSyntax) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", "{");
   request.request_headers["content-type"] = "application/json";
-  EXPECT_EQ(request.getContentNode(), std::nullopt);
+  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
   EXPECT_EQ(request.response_status, 400);
   EXPECT_EQ(request.response_headers["content-type"],
             "application/problem+json");
@@ -142,9 +149,10 @@ TEST(HTTPTest, GetContentNodeJSONInvalidSyntax) {
 }
 
 TEST(HTTPTest, GetContentNodeJSONInvalidNode) {
+  auto store = Store::open("sqlite:test?mode=memory", true);
   TestHTTPRequest request("POST", "/cid", "{\"one\":1}");
   request.request_headers["content-type"] = "application/json";
-  EXPECT_EQ(request.getContentNode(), std::nullopt);
+  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
   EXPECT_EQ(request.response_status, 400);
   EXPECT_EQ(request.response_headers["content-type"],
             "application/problem+json");

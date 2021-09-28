@@ -134,7 +134,7 @@ void Server::handleRequestCID(Request &request,
     if (request.getMethod() != Request::Method::POST)
       return request.sendMethodNotAllowed("POST");
     // POST /cid
-    auto node_or_null = request.getContentNode();
+    auto node_or_null = request.getContentNode(store);
     if (!node_or_null)
       return;
     auto cid = store.put(*node_or_null);
@@ -155,7 +155,7 @@ void Server::handleRequestHead(Request &request,
         return request.sendError(
             Request::Status::NotFound, std::nullopt, "Not Found",
             "Head \"" + *head_str + "\" not found in store.");
-      return request.sendContentNode(Node(*cid), std::nullopt,
+      return request.sendContentNode(Node(store, *cid), std::nullopt,
                                      Request::CacheControl::Mutable);
     } else if (request.getMethod() == Request::Method::PUT) {
       // PUT /head/...
@@ -163,7 +163,7 @@ void Server::handleRequestHead(Request &request,
         return request.sendError(
             Request::Status::BadRequest, "/problems/invalid-string",
             "Invalid UTF-8 or unexpected empty string", std::nullopt);
-      auto node_or_null = request.getContentNode();
+      auto node_or_null = request.getContentNode(store);
       if (!node_or_null)
         return;
       if (!node_or_null->is<CID>())
@@ -224,7 +224,7 @@ void Server::handleRequestCall(Request &request,
       return request.sendMethodNotAllowed("POST");
     // POST /call/.../.../evaluate
     unsigned timeout = DEFAULT_CALL_TIMEOUT;
-    auto body = request.getContentNode(Node(node_map_arg));
+    auto body = request.getContentNode(store, Node(node_map_arg));
     if (!body)
       return;
     if (!body->is_map())
@@ -249,11 +249,11 @@ void Server::handleRequestCall(Request &request,
       if (!cid)
         return request.sendError(Request::Status::NotFound, std::nullopt,
                                  "Not Found", "Call not found in store.");
-      return request.sendContentNode(Node(*cid), std::nullopt,
+      return request.sendContentNode(Node(store, *cid), std::nullopt,
                                      Request::CacheControl::Mutable);
     } else {
       // PUT /call/.../...
-      auto node_or_null = request.getContentNode();
+      auto node_or_null = request.getContentNode(store);
       if (!node_or_null)
         return;
       if (!node_or_null->is<CID>())
@@ -261,7 +261,7 @@ void Server::handleRequestCall(Request &request,
             Request::Status::BadRequest, "/problems/expected-cid",
             "Expected CID but got another kind of node", std::nullopt);
       store.set(*call, node_or_null->as<CID>());
-      handleCallResult(*call, NodeRef(store, node_or_null->as<CID>()));
+      handleCallResult(*call, Link(store, node_or_null->as<CID>()));
       return request.sendCreated(std::nullopt);
     }
   } else if (func_str) {
@@ -303,7 +303,7 @@ void Server::handleRequestWorker(Request &request) {
   if (request.getMethod() != Request::Method::POST)
     return request.sendMethodNotAllowed("POST");
   // POST /worker
-  auto node_or_null = request.getContentNode();
+  auto node_or_null = request.getContentNode(store);
   if (!node_or_null)
     return;
   if (!node_or_null->is<CID>())
@@ -372,7 +372,7 @@ void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
   // check for that case before we bother locking any mutexes.
   auto result = store.resolveOptional(call);
   if (result) {
-    request.sendContentNode(Node(*result), std::nullopt,
+    request.sendContentNode(Node(store, *result), std::nullopt,
                             Request::CacheControl::Mutable);
     return;
   }
@@ -388,7 +388,7 @@ void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
   // potentially creating a new PendingCall.
   result = store.resolveOptional(call);
   if (result) {
-    request.sendContentNode(Node(*result), std::nullopt,
+    request.sendContentNode(Node(store, *result), std::nullopt,
                             Request::CacheControl::Mutable);
     return;
   }
@@ -413,7 +413,7 @@ void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
   }
 }
 
-void Server::handleCallResult(const Call &call, NodeRef result) {
+void Server::handleCallResult(const Call &call, Link result) {
   // Remove the PendingCall.
   // No deadlock: we don't hold any other mutexes.
   std::unique_lock<std::mutex> lock(mutex);
@@ -442,7 +442,7 @@ void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
                 {"args", Node(node_list_arg)},
             });
   for (const CID &arg : pending_call.call.Args)
-    node["args"].emplace_back(arg);
+    node["args"].emplace_back(store, arg);
   worker.sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
   pending_call.started = true;
   pending_call.start_time = steady_clock::now();

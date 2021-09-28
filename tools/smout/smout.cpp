@@ -179,8 +179,8 @@ static Node getCandidatesOptions() {
 static int Candidates() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::grouped_candidates_version,
-                                       getCandidatesOptions(), mod);
+  Link result = evaluator->evaluate(smout::grouped_candidates_version,
+                                    getCandidatesOptions(), mod);
   unsigned total = 0, total_maybe_profitable = 0;
   unsigned group_count = result->size();
   unsigned group_count_singleton = 0;
@@ -225,8 +225,8 @@ static int Candidates() {
 static int CreateILPProblem() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::ilp_problem_version,
-                                       getCandidatesOptions(), mod);
+  Link result = evaluator->evaluate(smout::ilp_problem_version,
+                                    getCandidatesOptions(), mod);
   llvm::outs() << result->as<StringRef>();
   return 0;
 }
@@ -236,8 +236,8 @@ static int CreateILPProblem() {
 static int Equivalence() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::grouped_refinements_version,
-                                       getCandidatesOptions(), mod);
+  Link result = evaluator->evaluate(smout::grouped_refinements_version,
+                                    getCandidatesOptions(), mod);
   llvm::outs() << "\nEquivalent pairs: " << *result << "\n";
   return 0;
 }
@@ -265,8 +265,8 @@ static int Evaluate() {
 static int ExtractCallees() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::grouped_callees_version,
-                                       getCandidatesOptions(), mod);
+  Link result = evaluator->evaluate(smout::grouped_callees_version,
+                                    getCandidatesOptions(), mod);
   unsigned total = 0, unique = 0, without_duplicates = 0;
   unsigned group_count = result->size();
   for (const auto &item : result->map_range()) {
@@ -292,8 +292,8 @@ static int ExtractCallees() {
 static int Optimize() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::optimized_version,
-                                       getCandidatesOptions(), mod);
+  Link result = evaluator->evaluate(smout::optimized_version,
+                                    getCandidatesOptions(), mod);
   llvm::outs() << Name(result.getCID()) << "\n";
   return 0;
 }
@@ -303,8 +303,8 @@ static int Optimize() {
 static int SolveGreedy() {
   auto evaluator = createEvaluator();
   CID mod = evaluator->getStore().resolve(Head(ModuleName));
-  NodeRef result = evaluator->evaluate(smout::greedy_solution_version,
-                                       getCandidatesOptions(), mod);
+  Link result = evaluator->evaluate(smout::greedy_solution_version,
+                                    getCandidatesOptions(), mod);
   llvm::outs() << *result;
   return 0;
 }

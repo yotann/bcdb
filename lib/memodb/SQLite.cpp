@@ -419,7 +419,7 @@ sqlite3_int64 sqlite_db::cid_to_bid(const CID &ref) {
 
   if (!ref.isIdentity())
     fatal_error();
-  Node Value = llvm::cantFail(Node::loadFromIPLD(ref, {}));
+  Node Value = llvm::cantFail(Node::loadFromIPLD(*this, ref, {}));
   return putInternal(ref, Value.saveAsCBOR(), Value);
 }
 
@@ -485,7 +485,8 @@ Call sqlite_db::identifyCall(sqlite3_int64 callid) {
   requireRow(stmt.step());
 
   std::vector<CID> Args;
-  Node ArgsValue = llvm::cantFail(Node::loadFromCBOR(stmt.columnBytes(1)));
+  Node ArgsValue =
+      llvm::cantFail(Node::loadFromCBOR(*this, stmt.columnBytes(1)));
   for (const Node &ArgValue : ArgsValue.list_range())
     Args.emplace_back(bid_to_cid(ArgValue.as<sqlite3_int64>()));
 
@@ -570,7 +571,7 @@ void sqlite_db::add_refs_from(sqlite3_int64 id, const Node &value) {
 
 llvm::Optional<Node> sqlite_db::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return llvm::cantFail(Node::loadFromIPLD(CID, {}));
+    return llvm::cantFail(Node::loadFromIPLD(*this, CID, {}));
   sqlite3 *db = get_db();
   Stmt stmt(db, "SELECT codec, content FROM blocks WHERE cid = ?1");
   stmt.bind_blob(1, CID.asBytes());
@@ -578,7 +579,7 @@ llvm::Optional<Node> sqlite_db::getOptional(const CID &CID) {
     return llvm::None;
   if (stmt.columnInt(0) != CODEC_RAW)
     llvm::report_fatal_error("unsupported compression codec");
-  return llvm::cantFail(Node::loadFromIPLD(CID, stmt.columnBytes(1)));
+  return llvm::cantFail(Node::loadFromIPLD(*this, CID, stmt.columnBytes(1)));
 }
 
 llvm::Optional<CID> sqlite_db::resolveOptional(const Name &Name) {

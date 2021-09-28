@@ -109,7 +109,7 @@ Node CARStore::readValue(std::uint64_t *Pos, std::uint64_t Size) {
   std::vector<std::uint8_t> Buf(Size);
   if (!readBytes(Buf, Pos))
     llvm::report_fatal_error("Unexpected end of file in value");
-  return llvm::cantFail(Node::loadFromCBOR(Buf));
+  return llvm::cantFail(Node::loadFromCBOR(*this, Buf));
 }
 
 void CARStore::open(llvm::StringRef uri, bool create_if_missing) {
@@ -155,7 +155,7 @@ CARStore::~CARStore() {
 
 llvm::Optional<Node> CARStore::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return llvm::cantFail(Node::loadFromIPLD(CID, {}));
+    return llvm::cantFail(Node::loadFromIPLD(*this, CID, {}));
   if (!BlockPositions.count(CID))
     return {};
   auto Pos = BlockPositions[CID];
@@ -167,7 +167,7 @@ llvm::Optional<Node> CARStore::getOptional(const CID &CID) {
   std::vector<std::uint8_t> Buffer(BlockEnd - Pos);
   if (!readBytes(Buffer, &Pos))
     llvm::report_fatal_error("Unexpected end of file in content");
-  return llvm::cantFail(Node::loadFromIPLD(CID, Buffer));
+  return llvm::cantFail(Node::loadFromIPLD(*this, CID, Buffer));
 }
 
 llvm::Optional<memodb::CID> CARStore::resolveOptional(const Name &Name) {
@@ -326,9 +326,9 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
     llvm::errs() << "exporting " << Name << "\n";
     if (const CID *Ref = std::get_if<CID>(&Name)) {
       exportRef(*Ref);
-      IDs.emplace_back(*Ref);
+      IDs.emplace_back(store, *Ref);
     } else if (const Head *head = std::get_if<Head>(&Name)) {
-      Heads[head->Name] = Node(store.resolve(Name));
+      Heads[head->Name] = Node(store, store.resolve(Name));
       exportRef(Heads[head->Name].as<CID>());
     } else if (const Call *call = std::get_if<Call>(&Name)) {
       Node &FuncCalls = Calls[call->Name];
@@ -338,12 +338,13 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
       std::string Key;
       for (const CID &Arg : call->Args) {
         exportRef(Arg);
-        Args.emplace_back(Arg);
+        Args.emplace_back(store, Arg);
         Key += std::string(Arg) + "/";
       }
       Key.pop_back();
       auto Result = store.resolve(Name);
-      FuncCalls[Key] = Node::Map({{"args", Args}, {"result", Node(Result)}});
+      FuncCalls[Key] =
+          Node::Map({{"args", Args}, {"result", Node(store, Result)}});
       exportRef(Result);
     } else {
       llvm_unreachable("impossible Name type");
@@ -368,7 +369,7 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
   CID RootRef = exportValue(Root);
 
   Node Header = Node::Map(
-      {{"roots", Node(node_list_arg, {Node(RootRef)})}, {"version", 1}});
+      {{"roots", Node(node_list_arg, {Node(store, RootRef)})}, {"version", 1}});
   auto Buffer = Header.saveAsCBOR();
   os.seek(0);
   writeVarInt(Buffer.size());

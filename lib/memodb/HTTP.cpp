@@ -148,7 +148,8 @@ unsigned HTTPRequest::getAcceptQuality(ContentType content_type) const {
 }
 
 std::optional<Node>
-HTTPRequest::getContentNode(const std::optional<Node> &default_node) {
+HTTPRequest::getContentNode(Store &store,
+                            const std::optional<Node> &default_node) {
   llvm::StringRef body_str = getBody();
   if (body_str.empty()) {
     if (default_node)
@@ -165,7 +166,7 @@ HTTPRequest::getContentNode(const std::optional<Node> &default_node) {
   if (type_str.equals_lower("application/cbor")) {
     BytesRef body_bytes(reinterpret_cast<const std::uint8_t *>(body_str.data()),
                         body_str.size());
-    auto node_or_err = Node::loadFromCBOR(body_bytes);
+    auto node_or_err = Node::loadFromCBOR(store, body_bytes);
     if (!node_or_err) {
       sendError(Status::BadRequest, "/problems/invalid-or-unsupported-cbor",
                 "Invalid or unsupported CBOR",
@@ -178,7 +179,7 @@ HTTPRequest::getContentNode(const std::optional<Node> &default_node) {
     return Node(byte_string_arg, body_str);
 
   } else if (type_str.equals_lower("application/json")) {
-    auto node_or_err = Node::loadFromJSON(body_str);
+    auto node_or_err = Node::loadFromJSON(store, body_str);
     if (!node_or_err) {
       sendError(Status::BadRequest, "/problems/invalid-or-unsupported-json",
                 "Invalid or unsupported JSON",

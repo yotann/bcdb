@@ -2,18 +2,24 @@
 
 #include "gtest/gtest.h"
 
+#include "memodb/Store.h"
+
 using namespace memodb;
 
 namespace {
 
 void test_load(const Node &expected, const std::vector<uint8_t> &cbor) {
-  auto actual = Node::loadFromCBOR(cbor);
+  // FIXME: use a mock store.
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  auto actual = Node::loadFromCBOR(*store, cbor);
   EXPECT_TRUE(static_cast<bool>(actual));
   EXPECT_EQ(expected, *actual);
 }
 
 void test_invalid(const std::vector<uint8_t> &cbor) {
-  auto actual = Node::loadFromCBOR(cbor);
+  // FIXME: use a mock store.
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  auto actual = Node::loadFromCBOR(*store, cbor);
   ASSERT_FALSE(static_cast<bool>(actual));
   llvm::consumeError(actual.takeError());
 }
@@ -46,7 +52,9 @@ TEST(CborLoadTest, Integer) {
 
 TEST(CborLoadTest, Float) {
   auto check = [](double expected, const std::vector<uint8_t> &cbor) {
-    auto value = Node::loadFromCBOR(cbor);
+    // FIXME: use a mock store.
+    auto store = Store::open("sqlite:test?mode=memory", true);
+    auto value = Node::loadFromCBOR(*store, cbor);
     ASSERT_TRUE(static_cast<bool>(value));
     ASSERT_EQ(Kind::Float, value->kind());
     double actual = value->as<double>();
@@ -167,13 +175,16 @@ TEST(CborLoadTest, Mixed) {
 }
 
 TEST(CborLoadTest, Ref) {
-  test_load(Node(*CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})),
+  // FIXME: use a mock store.
+  auto store = Store::open("sqlite:test?mode=memory", true);
+  test_load(Node(*store, *CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})),
             {0xd8, 0x2a, 0x46, 0x00, 0x01, 0x71, 0x00, 0x01, 0xf6});
-  test_load(Node(*CID::fromBytes(
-                {0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20, 0x03, 0x17, 0x0a, 0x2e,
-                 0x75, 0x97, 0xb7, 0xb7, 0xe3, 0xd8, 0x4c, 0x05, 0x39, 0x1d,
-                 0x13, 0x9a, 0x62, 0xb1, 0x57, 0xe7, 0x87, 0x86, 0xd8, 0xc0,
-                 0x82, 0xf2, 0x9d, 0xcf, 0x4c, 0x11, 0x13, 0x14})),
+  test_load(Node(*store, *CID::fromBytes(
+                             {0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20, 0x03, 0x17,
+                              0x0a, 0x2e, 0x75, 0x97, 0xb7, 0xb7, 0xe3, 0xd8,
+                              0x4c, 0x05, 0x39, 0x1d, 0x13, 0x9a, 0x62, 0xb1,
+                              0x57, 0xe7, 0x87, 0x86, 0xd8, 0xc0, 0x82, 0xf2,
+                              0x9d, 0xcf, 0x4c, 0x11, 0x13, 0x14})),
             {0xd8, 0x2a, 0x58, 0x27, 0x00, 0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20,
              0x03, 0x17, 0x0a, 0x2e, 0x75, 0x97, 0xb7, 0xb7, 0xe3, 0xd8, 0x4c,
              0x05, 0x39, 0x1d, 0x13, 0x9a, 0x62, 0xb1, 0x57, 0xe7, 0x87, 0x86,

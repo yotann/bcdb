@@ -234,7 +234,7 @@ void HTTPStore::set(const Name &Name, const CID &ref) {
   SmallVector<char, 128> buffer;
   raw_svector_ostream os(buffer);
   os << Name;
-  auto response = request("PUT", os.str(), Node(ref));
+  auto response = request("PUT", os.str(), Node(*this, ref));
   if (response.status != 201)
     response.raiseError();
 }
@@ -331,8 +331,9 @@ Response HTTPStore::getResponse(nng_http_res *res) {
   nng_http_res_get_data(res, &res_data, &res_size);
   const char *content_type = nng_http_res_get_header(res, "Content-Type");
   if (content_type && StringRef(content_type) == "application/cbor")
-    response.body = cantFail(Node::loadFromCBOR(ArrayRef<uint8_t>(
-        reinterpret_cast<const uint8_t *>(res_data), res_size)));
+    response.body = cantFail(Node::loadFromCBOR(
+        *this, ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(res_data),
+                                 res_size)));
   else
     response.error =
         StringRef(reinterpret_cast<const char *>(res_data), res_size).str();
@@ -371,16 +372,16 @@ public:
   ClientEvaluator(std::unique_ptr<HTTPStore> store, unsigned num_threads);
   ~ClientEvaluator() override;
   Store &getStore() override;
-  NodeRef evaluate(const Call &call) override;
+  Link evaluate(const Call &call) override;
   Future evaluateAsync(const Call &call) override;
   void registerFunc(
       llvm::StringRef name,
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
 
 private:
-  std::optional<NodeRef> tryEvaluate(const Call &call,
-                                     bool inc_started_if_success);
-  NodeRef evaluateDeferred(const Call &call);
+  std::optional<Link> tryEvaluate(const Call &call,
+                                  bool inc_started_if_success);
+  Link evaluateDeferred(const Call &call);
   bool workOnce(nng_aio *aio);
 
   std::unique_ptr<HTTPStore> store;
@@ -424,8 +425,8 @@ ClientEvaluator::~ClientEvaluator() {
 
 Store &ClientEvaluator::getStore() { return *store; }
 
-std::optional<NodeRef>
-ClientEvaluator::tryEvaluate(const Call &call, bool inc_started_if_success) {
+std::optional<Link> ClientEvaluator::tryEvaluate(const Call &call,
+                                                 bool inc_started_if_success) {
   // TODO: we need some way to set the timeout parameter.
 
   SmallVector<char, 256> buffer;
@@ -450,10 +451,10 @@ ClientEvaluator::tryEvaluate(const Call &call, bool inc_started_if_success) {
     llvm::errs() << " finished " << call << "\n";
   }
 
-  return NodeRef(*store, response.body.as<CID>());
+  return Link(*store, response.body.as<CID>());
 }
 
-NodeRef ClientEvaluator::evaluate(const Call &call) {
+Link ClientEvaluator::evaluate(const Call &call) {
   ++num_requested;
   if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
     printProgress();
@@ -462,7 +463,7 @@ NodeRef ClientEvaluator::evaluate(const Call &call) {
   return evaluateDeferred(call);
 }
 
-NodeRef ClientEvaluator::evaluateDeferred(const Call &call) {
+Link ClientEvaluator::evaluateDeferred(const Call &call) {
   ++num_started;
   auto aio = aio_alloc();
   while (true) {
@@ -489,7 +490,7 @@ Future ClientEvaluator::evaluateAsync(const Call &call) {
   }
   auto early_result = tryEvaluate(call, true);
   if (early_result) {
-    std::promise<NodeRef> promise;
+    std::promise<Link> promise;
     promise.set_value(*early_result);
     return makeFuture(promise.get_future().share());
   }
@@ -532,7 +533,7 @@ bool ClientEvaluator::workOnce(nng_aio *aio) {
     return false;
   }
   auto res = http_res_alloc();
-  auto req = store->buildRequest("POST", "/worker", Node(*cid));
+  auto req = store->buildRequest("POST", "/worker", Node(*store, *cid));
   nng_http_conn_transact(store->getConn(), req.get(), res.get(), aio);
   nng_aio_wait(aio);
   if (nng_aio_result(aio) == NNG_ECANCELED)
@@ -556,13 +557,13 @@ bool ClientEvaluator::workOnce(nng_aio *aio) {
 
   std::optional<PrettyStackTraceCall> stack_printer;
   stack_printer.emplace(call);
-  NodeRef result = NodeRef(*store, func(*this, call));
+  Link result(*store, func(*this, call));
   stack_printer.reset();
 
   SmallVector<char, 256> buffer;
   llvm::raw_svector_ostream os(buffer);
   os << call;
-  response = store->request("PUT", os.str(), Node(result.getCID()));
+  response = store->request("PUT", os.str(), Node(*store, result.getCID()));
   if (response.status != 201)
     response.raiseError();
   return true;

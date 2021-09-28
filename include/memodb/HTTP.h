@@ -12,10 +12,13 @@
 
 namespace memodb {
 
+class Store;
+
 class HTTPRequest : public Request {
 public:
   std::optional<Method> getMethod() const override;
   std::optional<Node> getContentNode(
+      Store &store,
       const std::optional<Node> &default_node = std::nullopt) override;
 
   void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,

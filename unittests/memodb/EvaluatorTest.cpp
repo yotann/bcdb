@@ -14,11 +14,11 @@ namespace {
 
 NodeOrCID nullary(Evaluator &) { return Node("nullary"); }
 
-NodeOrCID unary(Evaluator &, NodeRef arg) {
+NodeOrCID unary(Evaluator &, Link arg) {
   return Node(node_map_arg, {{"unary", *arg}});
 }
 
-NodeOrCID binary(Evaluator &, NodeRef arg0, NodeRef arg1) {
+NodeOrCID binary(Evaluator &, Link arg0, Link arg1) {
   return Node(arg0->as<int>() - arg1->as<int>());
 }
 

@@ -25,7 +25,7 @@ void NodeVisitor::visitNode(const Node &value) {
           [this](const Node::BytesStorage &value) { visitBytes(value); },
           [this](const Node::List &value) { visitList(value); },
           [this](const Node::Map &value) { visitMap(value); },
-          [this](const CID &value) { visitLink(value); },
+          [this](const Link &value) { visitLink(value.getCID()); },
       },
       value.variant_);
 }

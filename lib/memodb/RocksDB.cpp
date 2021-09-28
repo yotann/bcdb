@@ -309,12 +309,12 @@ RocksDBStore::~RocksDBStore() {
 
 llvm::Optional<Node> RocksDBStore::getOptional(const CID &CID) {
   if (CID.isIdentity())
-    return llvm::cantFail(Node::loadFromIPLD(CID, {}));
+    return llvm::cantFail(Node::loadFromIPLD(*this, CID, {}));
   rocksdb::PinnableSlice Fetched;
   if (!checkFound(
           DB->Get({}, BlocksFamily, makeSlice(CID.asBytes()), &Fetched)))
     return {};
-  return llvm::cantFail(Node::loadFromIPLD(CID, makeBytes(Fetched)));
+  return llvm::cantFail(Node::loadFromIPLD(*this, CID, makeBytes(Fetched)));
 }
 
 llvm::Optional<CID> RocksDBStore::resolveOptional(const Name &Name) {
@@ -403,8 +403,8 @@ std::vector<Name> RocksDBStore::list_names_using(const CID &ref) {
     } else if (Type == TYPE_CALL) {
       auto Bytes = makeBytes(Ref);
       Call Call("", {});
-      Call.Name =
-          llvm::cantFail(Node::loadFromCBORSequence(Bytes)).as<std::string>();
+      Call.Name = llvm::cantFail(Node::loadFromCBORSequence(*this, Bytes))
+                      .as<std::string>();
       while (!Bytes.empty())
         Call.Args.emplace_back(*CID::loadFromSequence(Bytes));
       Result.emplace_back(std::move(Call));
@@ -421,7 +421,7 @@ std::vector<std::string> RocksDBStore::list_funcs() {
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->SeekToFirst(); Iterator->Valid();) {
     auto Bytes = makeBytes(Iterator->key());
-    Result.emplace_back(llvm::cantFail(Node::loadFromCBORSequence(Bytes))
+    Result.emplace_back(llvm::cantFail(Node::loadFromCBORSequence(*this, Bytes))
                             .as<llvm::StringRef>());
 
     std::vector<std::uint8_t> NextKey =

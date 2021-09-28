@@ -135,8 +135,8 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
   switch (format_option) {
   case Format_CBOR: {
     Value = llvm::cantFail(Node::loadFromCBOR(
-        {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
-         Buffer->getBufferSize()}));
+        Db, {reinterpret_cast<const std::uint8_t *>(Buffer->getBufferStart()),
+             Buffer->getBufferSize()}));
     break;
   }
   case Format_Raw:
@@ -144,7 +144,7 @@ static llvm::Optional<CID> ReadRef(Store &Db, llvm::StringRef URI) {
     break;
   case Format_Auto:
   case Format_JSON:
-    Value = Err(Node::loadFromJSON(Buffer->getBuffer()));
+    Value = Err(Node::loadFromJSON(Db, Buffer->getBuffer()));
     break;
   }
   return Db.put(Value);
@@ -216,7 +216,8 @@ public:
   std::optional<URI> getURI() const override { return uri; }
 
   std::optional<Node>
-  getContentNode(const std::optional<Node> &default_node) override {
+  getContentNode(Store &store,
+                 const std::optional<Node> &default_node) override {
     return std::nullopt;
   }
 

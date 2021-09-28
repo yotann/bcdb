@@ -81,51 +81,6 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Name &name);
 
 using Path = std::pair<Name, std::vector<Node>>;
 
-class Store;
-
-/// Either a Node or a CID referring to a Node. This class is used as the
-/// return value of functions called by Evaluator, which will normally return a
-/// Node, but have the option of returning a CID instead if that would be more
-/// efficient.
-class NodeOrCID : private std::variant<CID, Node> {
-public:
-  constexpr NodeOrCID(const CID &cid) : variant(cid) {}
-  constexpr NodeOrCID(const Node &node) : variant(node) {}
-  constexpr NodeOrCID(CID &&cid) : variant(std::move(cid)) {}
-  constexpr NodeOrCID(Node &&node) : variant(std::move(node)) {}
-
-private:
-  friend class NodeRef;
-  typedef std::variant<CID, Node> BaseType;
-};
-
-/// Refers to a Node in a Store that may or may not be loaded in memory. If the
-/// Node is not yet loaded in memory, it will be automatically loaded from the
-/// Store when needed.
-class NodeRef {
-  Store &store;
-  std::optional<CID> cid = std::nullopt;
-  std::optional<Node> node = std::nullopt;
-
-public:
-  NodeRef(Store &store, const NodeRef &other);
-  NodeRef(Store &store, const NodeOrCID &node_or_cid);
-  NodeRef(Store &store, const CID &cid);
-  NodeRef(Store &store, const CID &cid, const Node &node);
-
-  /// Fetch the Node, if necessary, and return a reference to it.
-  const Node &operator*();
-
-  /// Fetch the Node, if necessary, and access a member of it.
-  const Node *operator->();
-
-  /// Get the CID of the Node.
-  const CID &getCID();
-
-  /// Free the stored Node, if any. Useful to reduce memory usage.
-  void freeNode();
-};
-
 /// A MemoDB store, containing Nodes, Heads, and Calls. The store may be backed
 /// by some sort of database, or it may be backed by a separately running
 /// server.

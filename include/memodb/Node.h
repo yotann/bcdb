@@ -11,6 +11,7 @@
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -23,6 +24,8 @@
 namespace memodb {
 
 class Node;
+class NodeOrCID;
+class Store;
 
 /// \defgroup utility MemoDB utility classes
 
@@ -196,6 +199,43 @@ template <class T, class Enable = void> struct NodeTypeTraits {
   }
 };
 
+/// Refers to a Node that may be present in memory, in a Store, or both. It
+/// will automatically be loaded or stored when needed.
+class Link {
+public:
+  Link() = delete;
+  Link(const Link &other) = default;
+  Link(Link &&other) = default;
+  Link &operator=(const Link &other) = default;
+  Link &operator=(Link &&other) = default;
+
+  Link(Store &store, const Link &other);
+  Link(Store &store, NodeOrCID &&node_or_cid);
+  Link(Store &store, const CID &cid);
+
+  /// Fetch the Node, if necessary, and return a reference to it.
+  const Node &operator*() const;
+
+  /// Fetch the Node, if necessary, and access a member of it.
+  const Node *operator->() const;
+
+  /// Add the Node to the Store, if necessary, and get its CID.
+  const CID &getCID() const;
+
+  /// Free the stored Node, if any. Useful to reduce memory usage.
+  void freeNode() const;
+
+  bool operator==(const Link &other) const;
+  bool operator<(const Link &other) const;
+
+private:
+  friend class Node;
+
+  Store *store;
+  mutable std::optional<CID> cid = std::nullopt;
+  mutable std::shared_ptr<Node> node;
+};
+
 /// The essential kinds of data that can be stored by a Node.
 /// https://github.com/ipld/specs/blob/master/data-model-layer/data-model.md
 /// \ingroup core
@@ -239,7 +279,7 @@ private:
 
   // The monostate represents null.
   std::variant<std::monostate, bool, std::int64_t, std::uint64_t, double,
-               BytesStorage, StringStorage, CID, List, Map>
+               BytesStorage, StringStorage, Link, List, Map>
       variant_;
 
   void validateUTF8() const;
@@ -338,12 +378,10 @@ public:
   /// Construct a byte string Node.
   Node(BytesRef bytes);
 
-  // Explicit so we don't confuse Node values with links when setting up e.g.
-  // call arguments.
   /// Construct a link Node.
-  explicit Node(const CID &val);
+  Node(Store &store, const CID &val);
   /// Construct a link Node.
-  explicit Node(CID &&val);
+  Node(Store &store, CID &&val);
 
   /// @}
 
@@ -410,11 +448,11 @@ public:
 
   /// Load a Node from CBOR bytes:
   /// https://www.rfc-editor.org/rfc/rfc8949.html
-  static llvm::Expected<Node> loadFromCBOR(BytesRef in);
+  static llvm::Expected<Node> loadFromCBOR(Store &store, BytesRef in);
 
   /// Load a Node from CBOR bytes at the beginning of a sequence. When this
   /// returns, "in" will refer to the rest of the bytes after the CBOR value.
-  static llvm::Expected<Node> loadFromCBORSequence(BytesRef &in);
+  static llvm::Expected<Node> loadFromCBORSequence(Store &store, BytesRef &in);
 
   struct CBORInfo {
     /// The encoded CBOR includes links (CIDs, tag 42).
@@ -430,7 +468,8 @@ public:
   /// content type may be Raw (bytes returned as a bytestring Node), DAG-CBOR,
   /// or DAG-CBOR-Unrestricted. The CID hash type may be Identity, in which
   /// case the value is loaded directly from the CID.
-  static llvm::Expected<Node> loadFromIPLD(const CID &CID, BytesRef Content);
+  static llvm::Expected<Node> loadFromIPLD(Store &store, const CID &CID,
+                                           BytesRef Content);
 
   /// Save a Node as a CID and the corresponding content bytes. The CID content
   /// type will be either Raw (if this is a bytestring Node), DAG-CBOR, or
@@ -441,7 +480,7 @@ public:
   saveAsIPLD(bool noIdentity = false) const;
 
   /// Load a Node from the MemoDB JSON format.
-  static llvm::Expected<Node> loadFromJSON(llvm::StringRef json);
+  static llvm::Expected<Node> loadFromJSON(Store &store, llvm::StringRef json);
 
   /// @}
 
@@ -479,7 +518,7 @@ public:
   }
 
   constexpr bool is_link() const noexcept {
-    return std::holds_alternative<CID>(variant_);
+    return std::holds_alternative<Link>(variant_);
   }
 
   /// @}
@@ -617,7 +656,7 @@ public:
   /// Traverse this Node and call func for each CID found.
   template <typename T> void eachLink(T func) const {
     std::visit(Overloaded{
-                   [&](const CID &Link) { func(Link); },
+                   [&](const Link &link) { func(link.getCID()); },
                    [&](const List &List) {
                      for (const auto &Item : List)
                        Item.eachLink(func);
@@ -637,6 +676,22 @@ public:
 // Print a Node in MemoDB's JSON format.
 std::ostream &operator<<(std::ostream &os, const Node &value);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Node &value);
+
+/// Either a Node or a CID referring to a Node. This class is used as the
+/// return value of functions called by Evaluator, which will normally return a
+/// Node, but have the option of returning a CID instead if that would be more
+/// efficient.
+class NodeOrCID : private std::variant<CID, Node> {
+public:
+  constexpr NodeOrCID(const CID &cid) : variant(cid) {}
+  constexpr NodeOrCID(const Node &node) : variant(node) {}
+  constexpr NodeOrCID(CID &&cid) : variant(std::move(cid)) {}
+  constexpr NodeOrCID(Node &&node) : variant(std::move(node)) {}
+
+private:
+  friend class Link;
+  typedef std::variant<CID, Node> BaseType;
+};
 
 // Various basic types to be used with Node::is and Node::as.
 
@@ -817,7 +872,7 @@ template <> struct NodeTypeTraits<CID> {
   static constexpr bool is(const Node &node) noexcept { return node.is_link(); }
 
   static const CID &as(const Node &node) {
-    return std::get<CID>(node.variant_);
+    return std::get<Link>(node.variant_).getCID();
   }
 };
 

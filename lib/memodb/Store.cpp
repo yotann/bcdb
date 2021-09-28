@@ -22,42 +22,6 @@ bool Call::operator==(const Call &other) const {
 
 bool Call::operator!=(const Call &other) const { return !(*this == other); }
 
-NodeRef::NodeRef(Store &store, const NodeRef &other)
-    : store(store), cid(other.cid), node(other.node) {}
-
-NodeRef::NodeRef(Store &store, const NodeOrCID &node_or_cid) : store(store) {
-  const NodeOrCID::BaseType &base = node_or_cid;
-  std::visit(Overloaded{
-                 [&](const CID &cid) { this->cid = cid; },
-                 [&](const Node &node) { this->node = node; },
-             },
-             base);
-}
-
-NodeRef::NodeRef(Store &store, const CID &cid) : store(store), cid(cid) {}
-
-NodeRef::NodeRef(Store &store, const CID &cid, const Node &node)
-    : store(store), cid(cid), node(node) {}
-
-const Node &NodeRef::operator*() {
-  if (!node)
-    node = store.get(*cid);
-  return *node;
-}
-
-const Node *NodeRef::operator->() { return &operator*(); }
-
-const CID &NodeRef::getCID() {
-  if (!cid)
-    cid = store.put(*node);
-  return *cid;
-}
-
-void NodeRef::freeNode() {
-  getCID();
-  node.reset();
-}
-
 std::unique_ptr<Store> Store::open(llvm::StringRef uri,
                                    bool create_if_missing) {
   if (uri.startswith("sqlite:")) {

@@ -19,9 +19,9 @@ docs/Doxyfile` in the top-level BCDB directory; documentation will go in
   [jsoncons::basic_json]. Users can specialize `memodb::NodeTypeTraits` in
   order to easy convert their data types to and from Nodes.
 - `memodb::Store`: Accesses a database following the [MemoDB data model].
-- `memodb::NodeRef`: Represents a stored Node for which either the CID or the
-  Node value is known, or both. The value is automatically loaded from or
-  stored in the Store as necessary.
+- `memodb::Link`: Represents a stored Node for which either the CID or the Node
+  value is known, or both. The value is automatically loaded from or stored in
+  the Store as necessary.
 
 ## Func evaluation
 

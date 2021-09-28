@@ -13,11 +13,55 @@
 #include "memodb/CBOREncoder.h"
 #include "memodb/JSONEncoder.h"
 #include "memodb/Multibase.h"
+#include "memodb/Store.h"
 
 using namespace memodb;
 
 using std::int64_t;
 using std::uint64_t;
+
+Link::Link(Store &store, const Link &other)
+    : store(other.store), cid(other.cid), node(other.node) {}
+
+Link::Link(Store &store, NodeOrCID &&node_or_cid) : store(&store) {
+  NodeOrCID::BaseType &&base = std::move(node_or_cid);
+  std::visit(Overloaded{
+                 [&](CID &&cid) { this->cid = std::move(cid); },
+                 [&](Node &&node) {
+                   this->node = std::make_shared<Node>(std::move(node));
+                 },
+             },
+             std::move(base));
+}
+
+Link::Link(Store &store, const CID &cid) : store(&store), cid(cid) {}
+
+const Node &Link::operator*() const {
+  if (!node)
+    node = std::make_shared<Node>(store->get(*cid));
+  return *node;
+}
+
+const Node *Link::operator->() const { return &operator*(); }
+
+const CID &Link::getCID() const {
+  if (!cid)
+    cid = store->put(*node);
+  return *cid;
+}
+
+void Link::freeNode() const {
+  getCID();
+  node.reset();
+}
+
+bool Link::operator==(const Link &other) const {
+  return getCID() == other.getCID();
+}
+
+bool Link::operator<(const Link &other) const {
+  return getCID() < other.getCID();
+}
 
 void Node::validateUTF8() const {
   auto Str = std::get<StringStorage>(variant_);
@@ -91,8 +135,9 @@ Node::Node(NodeMapArg,
 Node::Node(const Map &map) : variant_(map) { validateKeysUTF8(); }
 Node::Node(Map &&map) : variant_(std::forward<Map>(map)) { validateKeysUTF8(); }
 
-Node::Node(const CID &val) : variant_(val) {}
-Node::Node(CID &&val) : variant_(std::forward<CID>(val)) {}
+Node::Node(Store &store, const CID &val) : variant_(Link(store, val)) {}
+Node::Node(Store &store, CID &&val)
+    : variant_(Link(store, std::forward<CID>(val))) {}
 
 bool Node::operator==(const Node &other) const { return compare(other) == 0; }
 
@@ -128,8 +173,8 @@ int Node::compare(const Node &other) const {
   return variant_ < other.variant_ ? -1 : variant_ == other.variant_ ? 0 : 1;
 }
 
-llvm::Expected<Node> Node::loadFromCBOR(BytesRef in) {
-  auto result = loadFromCBORSequence(in);
+llvm::Expected<Node> Node::loadFromCBOR(Store &store, BytesRef in) {
+  auto result = loadFromCBORSequence(store, in);
   if (!result)
     return result.takeError();
   if (!in.empty())
@@ -149,7 +194,7 @@ Kind Node::kind() const {
                         [](const BytesStorage &) { return Kind::Bytes; },
                         [](const List &) { return Kind::List; },
                         [](const Map &) { return Kind::Map; },
-                        [](const CID &) { return Kind::Link; },
+                        [](const Link &) { return Kind::Link; },
                     },
                     variant_);
 }
@@ -316,7 +361,7 @@ static llvm::Error createUnsupportedCBORError(llvm::StringRef message) {
 }
 
 llvm::Expected<Node>
-Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
+Node::loadFromCBORSequence(Store &store, llvm::ArrayRef<std::uint8_t> &in) {
   auto start = [&](int &major_type, int &minor_type, std::uint64_t &additional,
                    bool &indefinite) -> llvm::Error {
     if (in.empty())
@@ -428,7 +473,7 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
           CID::fromBytes(llvm::ArrayRef<std::uint8_t>(result).drop_front(1));
       if (!CID)
         return createUnsupportedCBORError("unsupported or invalid CID");
-      return Node(*CID);
+      return Node(store, *CID);
     }
     Node node;
     node.variant_ = result;
@@ -455,7 +500,7 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
   case 4: {
     List result;
     while (next_item()) {
-      auto item = loadFromCBORSequence(in);
+      auto item = loadFromCBORSequence(store, in);
       if (!item)
         return item.takeError();
       result.emplace_back(*item);
@@ -465,12 +510,12 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
   case 5: {
     Map result;
     while (next_item()) {
-      auto key = loadFromCBORSequence(in);
+      auto key = loadFromCBORSequence(store, in);
       if (!key)
         return key.takeError();
       if (!key->is<llvm::StringRef>())
         return createUnsupportedCBORError("map keys must be strings");
-      auto value = loadFromCBORSequence(in);
+      auto value = loadFromCBORSequence(store, in);
       if (!value)
         return value.takeError();
       result.insert_or_assign(key->as<llvm::StringRef>(), *value);
@@ -517,7 +562,7 @@ static llvm::Error createUnsupportedIPLDError(llvm::StringRef message) {
                                  "Unsupported IPLD block: " + message);
 }
 
-llvm::Expected<Node> Node::loadFromIPLD(const CID &CID,
+llvm::Expected<Node> Node::loadFromIPLD(Store &store, const CID &CID,
                                         llvm::ArrayRef<std::uint8_t> Content) {
   if (CID.isIdentity()) {
     if (!Content.empty())
@@ -528,7 +573,7 @@ llvm::Expected<Node> Node::loadFromIPLD(const CID &CID,
     return Node(Content);
   if (CID.getContentType() == Multicodec::DAG_CBOR ||
       CID.getContentType() == Multicodec::DAG_CBOR_Unrestricted)
-    return Node::loadFromCBOR(Content);
+    return Node::loadFromCBOR(store, Content);
   return createUnsupportedIPLDError("unsupported CID content type");
 }
 
@@ -584,7 +629,7 @@ consumeJSONString(llvm::StringRef &json) {
   return valueOrErr;
 }
 
-static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
+static llvm::Expected<Node> consumeJSON(Store &store, llvm::StringRef &json,
                                         bool special_object = true) {
   // llvm::json::parse doesn't support the full range of uint64_t. It also
   // creates an intermediate data structure llvm::json::Value that we don't
@@ -630,7 +675,7 @@ static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
     skipJSONSpace(json);
     if (!json.startswith("]")) {
       do {
-        auto valueOrErr = consumeJSON(json);
+        auto valueOrErr = consumeJSON(store, json);
         if (!valueOrErr)
           return valueOrErr.takeError();
         result.emplace_back(std::move(*valueOrErr));
@@ -652,7 +697,7 @@ static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
         skipJSONSpace(json);
         if (!json.consume_front(":"))
           return createInvalidJSONError("Expected ':' in object");
-        auto valueOrErr = consumeJSON(json, !special_object);
+        auto valueOrErr = consumeJSON(store, json, !special_object);
         if (!valueOrErr)
           return valueOrErr.takeError();
         auto emplaced = result.try_emplace(*keyOrErr->getAsString(),
@@ -679,7 +724,7 @@ static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
       auto cid_or_err = CID::parse(value);
       if (!cid_or_err)
         return createInvalidJSONError("Invalid or unsupported CID");
-      return Node(std::move(*cid_or_err));
+      return Node(store, std::move(*cid_or_err));
     }
     if (item.key() == "base64" && item.value().is<llvm::StringRef>()) {
       auto value = item.value().as<llvm::StringRef>();
@@ -706,8 +751,8 @@ static llvm::Expected<Node> consumeJSON(llvm::StringRef &json,
   return createInvalidJSONError("Unexpected character");
 }
 
-llvm::Expected<Node> Node::loadFromJSON(llvm::StringRef json) {
-  auto valueOrErr = consumeJSON(json);
+llvm::Expected<Node> Node::loadFromJSON(Store &store, llvm::StringRef json) {
+  auto valueOrErr = consumeJSON(store, json);
   if (!valueOrErr)
     return valueOrErr.takeError();
   skipJSONSpace(json);

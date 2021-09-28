@@ -26,13 +26,11 @@
 
 using namespace memodb;
 
-NodeRef &Future::get() {
-  // We need to return a non-const reference so NodeRef::operator*() and
-  // NodeRef::getCID() will work. The const_cast is safe because the
-  // shared_future's state is only used in two places (this Future, and
-  // Evaluator::workerThreadImpl) and only this Future will actually access the
-  // NodeRef.
-  return const_cast<NodeRef &>(future.get());
+const Link &Future::get() {
+  // The shared_future's state will be accessed from two places: this Future,
+  // and Evaluator::workerThreadImpl. Only this Future will actually access the
+  // Link, so there's no race condition on the fields of the Link.
+  return future.get();
 }
 
 void Future::wait() { future.wait(); }
@@ -49,8 +47,7 @@ const CID &Future::getCID() { return get().getCID(); }
 
 void Future::freeNode() { get().freeNode(); }
 
-Future::Future(std::shared_future<NodeRef> &&future)
-    : future(std::move(future)) {}
+Future::Future(std::shared_future<Link> &&future) : future(std::move(future)) {}
 
 namespace {
 class ThreadPoolEvaluator : public Evaluator {
@@ -58,7 +55,7 @@ public:
   ThreadPoolEvaluator(std::unique_ptr<Store> store, unsigned num_threads = 0);
   ~ThreadPoolEvaluator() override;
   Store &getStore() override;
-  NodeRef evaluate(const Call &call) override;
+  Link evaluate(const Call &call) override;
   Future evaluateAsync(const Call &call) override;
   void registerFunc(
       llvm::StringRef name,
@@ -71,7 +68,7 @@ private:
   std::vector<std::thread> threads;
   std::mutex work_mutex;
   std::condition_variable work_cv;
-  std::queue<std::shared_future<NodeRef>> work_queue;
+  std::queue<std::shared_future<Link>> work_queue;
   bool work_done = false;
 
   // These counters only increase, never decrease.
@@ -80,7 +77,7 @@ private:
 
   void workerThreadImpl();
 
-  NodeRef evaluateDeferred(const Call &call);
+  Link evaluateDeferred(const Call &call);
 
   void printProgress();
 };
@@ -106,23 +103,23 @@ ThreadPoolEvaluator::~ThreadPoolEvaluator() {
 
 Store &ThreadPoolEvaluator::getStore() { return *store; }
 
-NodeRef ThreadPoolEvaluator::evaluate(const Call &call) {
+Link ThreadPoolEvaluator::evaluate(const Call &call) {
   auto cid_or_null = getStore().resolveOptional(call);
   if (cid_or_null)
-    return NodeRef(getStore(), *cid_or_null);
+    return Link(getStore(), *cid_or_null);
   const auto func_iter = funcs.find(call.Name);
   if (func_iter == funcs.end())
     llvm::report_fatal_error("No implementation of " + call.Name +
                              " available");
   PrettyStackTraceCall pretty_stack_trace(call);
-  auto result = NodeRef(getStore(), func_iter->getValue()(*this, call));
+  auto result = Link(getStore(), func_iter->getValue()(*this, call));
   getStore().set(call, result.getCID());
   return result;
 }
 
 Future ThreadPoolEvaluator::evaluateAsync(const Call &call) {
   num_queued++;
-  std::shared_future<NodeRef> future =
+  std::shared_future<Link> future =
       std::async(std::launch::deferred, &ThreadPoolEvaluator::evaluateDeferred,
                  this, call);
 
@@ -149,14 +146,14 @@ void ThreadPoolEvaluator::workerThreadImpl() {
     work_cv.wait(lock, [this] { return work_done || !work_queue.empty(); });
     if (work_done)
       break;
-    std::shared_future<NodeRef> future = std::move(work_queue.front());
+    std::shared_future<Link> future = std::move(work_queue.front());
     work_queue.pop();
     lock.unlock();
     future.get();
   }
 }
 
-NodeRef ThreadPoolEvaluator::evaluateDeferred(const Call &call) {
+Link ThreadPoolEvaluator::evaluateDeferred(const Call &call) {
   llvm::PrettyStackTraceString stack_printer("Worker thread (single process)");
 
   num_started++;
@@ -192,8 +189,7 @@ void ThreadPoolEvaluator::printProgress() {
                << finished;
 }
 
-static NodeOrCID test_add(Evaluator &evaluator, NodeRef lhs_node,
-                          NodeRef rhs_node) {
+static NodeOrCID test_add(Evaluator &evaluator, Link lhs_node, Link rhs_node) {
   int64_t lhs = lhs_node->as<int64_t>();
   int64_t rhs = rhs_node->as<int64_t>();
   return Node(lhs + rhs);
@@ -207,7 +203,7 @@ Evaluator::Evaluator() {}
 
 Evaluator::~Evaluator() {}
 
-Future Evaluator::makeFuture(std::shared_future<NodeRef> &&future) {
+Future Evaluator::makeFuture(std::shared_future<Link> &&future) {
   return Future(std::move(future));
 }
 

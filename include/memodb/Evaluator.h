@@ -27,8 +27,8 @@ public:
   Future &operator=(const Future &) = delete;
   Future &operator=(Future &&) = default;
 
-  /// Wait for the result and return it as a NodeRef.
-  NodeRef &get();
+  /// Wait for the result and return it as a Link.
+  const Link &get();
 
   /// Wait for the result.
   void wait();
@@ -53,9 +53,9 @@ public:
 
 private:
   friend class Evaluator;
-  explicit Future(std::shared_future<NodeRef> &&future);
+  explicit Future(std::shared_future<Link> &&future);
 
-  std::shared_future<NodeRef> future;
+  std::shared_future<Link> future;
 };
 
 /// Used to register and call MemoDB funcs. Depending on how the Evaluator is
@@ -85,13 +85,13 @@ public:
   virtual Store &getStore() = 0;
 
   /// Evaluate a call and wait until evaluation is done.
-  virtual NodeRef evaluate(const Call &call) = 0;
+  virtual Link evaluate(const Call &call) = 0;
 
   /// Evaluate a call and wait until evaluation is done. \p args can be Node or
   /// CID values.
   template <typename... Params>
-  NodeRef evaluate(llvm::StringRef name, Params... args) {
-    return evaluate(Call(name, {NodeRef(getStore(), args).getCID()...}));
+  Link evaluate(llvm::StringRef name, Params... args) {
+    return evaluate(Call(name, {Link(getStore(), args).getCID()...}));
   }
 
   /// Start evaluation of a call, returning a Future.
@@ -101,7 +101,7 @@ public:
   /// CID values.
   template <typename... Params>
   Future evaluateAsync(llvm::StringRef name, Params... args) {
-    return evaluateAsync(Call(name, {NodeRef(getStore(), args).getCID()...}));
+    return evaluateAsync(Call(name, {Link(getStore(), args).getCID()...}));
   }
 
   /// Register a function that can be evaluated locally and cached. This
@@ -114,7 +114,7 @@ public:
   /// Register a function that can be evaluated locally and cached. This
   /// function is not thread-safe, and must be called before any calls of
   /// evaluate() or evaluateAsync(). The passed function must return a
-  /// NodeOrCID, and must take an Evaluator & as the first argument and NodeRef
+  /// NodeOrCID, and must take an Evaluator & as the first argument and Link
   /// as the remaining arguments.
   template <typename... Params>
   void registerFunc(llvm::StringRef name,
@@ -126,7 +126,7 @@ public:
 protected:
   friend class Future;
 
-  Future makeFuture(std::shared_future<NodeRef> &&future);
+  Future makeFuture(std::shared_future<Link> &&future);
 
 private:
   template <typename... Params, std::size_t... indexes>
@@ -136,8 +136,7 @@ private:
     return [=](Evaluator &evaluator, const Call &call) -> NodeOrCID {
       if (call.Args.size() != sizeof...(Params))
         llvm::report_fatal_error("Incorrect number of arguments for " + name);
-      return func(evaluator,
-                  NodeRef(evaluator.getStore(), call.Args[indexes])...);
+      return func(evaluator, Link(evaluator.getStore(), call.Args[indexes])...);
     };
   }
 };

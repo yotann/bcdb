@@ -1,7 +1,9 @@
 #include "memodb/Node.h"
 
-#include "gtest/gtest.h"
 #include <sstream>
+
+#include "memodb/Store.h"
+#include "gtest/gtest.h"
 
 using namespace memodb;
 
@@ -134,11 +136,14 @@ TEST(JSONWriteTest, Map) {
 }
 
 TEST(JSONWriteTest, Link) {
+  // FIXME: use a mock store.
+  auto store = Store::open("sqlite:test?mode=memory", true);
   test_print("{\"cid\":\"uAXEAAfY\"}",
-             Node(*CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})));
+             Node(*store, *CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})));
   test_print(
       "{\"cid\":\"uAXGg5AIgAxcKLnWXt7fj2EwFOR0TmmKxV-eHhtjAgvKdz0wRExQ\"}",
-      Node(*CID::fromBytes({0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20, 0x03, 0x17,
+      Node(*store,
+           *CID::fromBytes({0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20, 0x03, 0x17,
                             0x0a, 0x2e, 0x75, 0x97, 0xb7, 0xb7, 0xe3, 0xd8,
                             0x4c, 0x05, 0x39, 0x1d, 0x13, 0x9a, 0x62, 0xb1,
                             0x57, 0xe7, 0x87, 0x86, 0xd8, 0xc0, 0x82, 0xf2,
