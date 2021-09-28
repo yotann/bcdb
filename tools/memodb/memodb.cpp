@@ -179,8 +179,7 @@ static void WriteValue(const Node &Value) {
   if (OutputFile) {
     switch (format_option) {
     case Format_CBOR: {
-      std::vector<std::uint8_t> Buffer;
-      Value.save_cbor(Buffer);
+      auto Buffer = Value.saveAsCBOR();
       OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
                              Buffer.size());
       break;

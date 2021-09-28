@@ -245,6 +245,7 @@ private:
   void validateUTF8() const;
   void validateKeysUTF8() const;
 
+  friend class NodeVisitor;
   friend struct NodeTypeTraits<bool>;
   friend struct NodeTypeTraits<std::int64_t>;
   friend struct NodeTypeTraits<std::uint64_t>;
@@ -423,8 +424,7 @@ public:
   };
 
   /// Save a Node to CBOR bytes.
-  void save_cbor(std::vector<std::uint8_t> &out,
-                 CBORInfo *info = nullptr) const;
+  std::vector<std::uint8_t> saveAsCBOR() const;
 
   /// Load a Node from a CID and the corresponding content bytes. The CID
   /// content type may be Raw (bytes returned as a bytestring Node), DAG-CBOR,

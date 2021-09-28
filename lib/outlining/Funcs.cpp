@@ -270,10 +270,7 @@ getGroupName(const OutliningCandidates::Candidate &candidate) {
     results.emplace_back(getTypeName(type));
   for (GlobalValue *gv : candidate.globals_used)
     globals[gv->getName()] = nullptr;
-
-  std::vector<std::uint8_t> bytes;
-  node.save_cbor(bytes);
-  return Multibase::base64pad.encodeWithoutPrefix(bytes);
+  return Multibase::base64pad.encodeWithoutPrefix(node.saveAsCBOR());
 }
 
 static bool isGroupWorthExtracting(NodeRef &options, const Node &group) {

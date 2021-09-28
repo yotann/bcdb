@@ -419,10 +419,8 @@ sqlite3_int64 sqlite_db::cid_to_bid(const CID &ref) {
 
   if (!ref.isIdentity())
     fatal_error();
-  std::vector<std::uint8_t> Content;
   Node Value = llvm::cantFail(Node::loadFromIPLD(ref, {}));
-  Value.save_cbor(Content);
-  return putInternal(ref, Content, Value);
+  return putInternal(ref, Value.saveAsCBOR(), Value);
 }
 
 sqlite3_int64 sqlite_db::putInternal(const CID &CID,
@@ -476,9 +474,7 @@ std::vector<std::uint8_t> sqlite_db::encodeArgs(const Call &Call) {
   Node ArgsValue = Node(node_list_arg);
   for (const CID &Arg : Call.Args)
     ArgsValue.emplace_back(cid_to_bid(Arg));
-  std::vector<std::uint8_t> Result;
-  ArgsValue.save_cbor(Result);
-  return Result;
+  return ArgsValue.saveAsCBOR();
 }
 
 Call sqlite_db::identifyCall(sqlite3_int64 callid) {

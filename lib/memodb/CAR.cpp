@@ -369,8 +369,7 @@ CID memodb::exportToCARFile(llvm::raw_fd_ostream &os, Store &store,
 
   Node Header = Node::Map(
       {{"roots", Node(node_list_arg, {Node(RootRef)})}, {"version", 1}});
-  std::vector<std::uint8_t> Buffer;
-  Header.save_cbor(Buffer);
+  auto Buffer = Header.saveAsCBOR();
   os.seek(0);
   writeVarInt(Buffer.size());
   os.write(reinterpret_cast<const char *>(Buffer.data()), Buffer.size());

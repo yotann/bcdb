@@ -1,6 +1,5 @@
 #include "memodb/Node.h"
 
-#include <dragonbox/dragonbox.h>
 #include <limits>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/ConvertUTF.h>
@@ -11,6 +10,8 @@
 #include <sstream>
 #include <system_error>
 
+#include "memodb/CBOREncoder.h"
+#include "memodb/JSONEncoder.h"
 #include "memodb/Multibase.h"
 
 using namespace memodb;
@@ -274,104 +275,10 @@ Range<Node::List::const_iterator> Node::list_range() const {
   return Range(value.begin(), value.end());
 }
 
-static llvm::raw_ostream &writeJSONFloat(llvm::raw_ostream &os, double value) {
-  // https://tc39.es/ecma262/#sec-numeric-types-number-tostring
-  // exception: -0.0 is printed as "-0"
-  if (std::isnan(value))
-    return os << "NaN";
-  if (std::signbit(value)) {
-    os << '-';
-    return writeJSONFloat(os, -value);
-  }
-  if (std::isinf(value))
-    return os << "Infinity";
-  if (value == 0.0)
-    return os << "0";
-
-  auto decimal =
-      jkj::dragonbox::to_decimal(value, jkj::dragonbox::policy::sign::ignore);
-  llvm::SmallString<20> s;
-  llvm::raw_svector_ostream(s) << decimal.significand;
-  auto k = static_cast<int>(s.size());
-  auto n = decimal.exponent + k;
-  static const llvm::StringRef zeros("00000000000000000000");
-  if (k <= n && n <= 21) {
-    return os << s << zeros.take_front(n - k);
-  } else if (n > 0 && n <= 21) {
-    return os << s.substr(0, n) << '.' << s.substr(n);
-  } else if (n <= 0 && n > -6) {
-    return os << "0." << zeros.take_front(-n) << s;
-  } else {
-    os << s[0];
-    if (k > 1)
-      os << '.' << s.substr(1);
-    return os << 'e' << (n >= 1 ? "+" : "") << (n - 1);
-  }
-}
-
-static llvm::raw_ostream &writeJSONString(llvm::raw_ostream &os,
-                                          llvm::StringRef str) {
-  os << '"';
-  for (char c : str) {
-    if (c >= 0x08 && c <= 0x0d && c != 0x0b) {
-      os << '\\' << "btn.fr"[c - 0x08];
-    } else if (c >= 0 && c < 0x20) {
-      os << "\\u" << llvm::format_hex_no_prefix(c, 4);
-    } else {
-      if (c == '\\' || c == '"')
-        os << '\\';
-      os << c;
-    }
-  }
-  return os << '"';
-}
-
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os,
                                       const Node &value) {
-  switch (value.kind()) {
-  case Kind::Null:
-    return os << "null";
-  case Kind::Boolean:
-    return os << (value.as<bool>() ? "true" : "false");
-  case Kind::Integer:
-    if (value.is<uint64_t>())
-      return os << value.as<uint64_t>();
-    return os << value.as<int64_t>();
-  case Kind::Float:
-    os << "{\"float\":\"";
-    return writeJSONFloat(os, value.as<double>()) << "\"}";
-  case Kind::String:
-    return writeJSONString(os, value.as<llvm::StringRef>());
-  case Kind::Bytes:
-    return os << "{\"base64\":\""
-              << Multibase::base64pad.encodeWithoutPrefix(value.as<BytesRef>())
-              << "\"}";
-  case Kind::List: {
-    bool first = true;
-    os << '[';
-    for (const Node &item : value.list_range()) {
-      if (!first)
-        os << ',';
-      first = false;
-      os << item;
-    }
-    return os << ']';
-  }
-  case Kind::Map: {
-    bool first = true;
-    os << "{\"map\":{";
-    for (const auto &item : value.map_range()) {
-      if (!first)
-        os << ',';
-      first = false;
-      writeJSONString(os, item.key()) << ':' << item.value();
-    }
-    return os << "}}";
-  }
-  case Kind::Link:
-    return os << "{\"cid\":\"" << value.as<CID>().asString(Multibase::base64url)
-              << "\"}";
-  }
+  JSONEncoder(os).visitNode(value);
+  return os;
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
@@ -395,49 +302,6 @@ static double decode_float(std::uint64_t value, int total_size,
     result = std::ldexp(mantissa + (1ull << mantissa_size),
                         exponent - (mantissa_size + exponent_bias));
   return value & (1ull << (total_size - 1)) ? -result : result;
-}
-
-static bool encode_float(std::uint64_t &result, double value, int total_size,
-                         int mantissa_size, int exponent_bias) {
-  std::uint64_t exponent_mask = (1ull << (total_size - mantissa_size - 1)) - 1;
-  int exponent;
-  std::uint64_t mantissa;
-  bool exact = true;
-  bool sign = std::signbit(value);
-  if (std::isnan(value)) {
-    // This is the default NaN on most platforms.
-    exponent = exponent_mask;
-    mantissa = 1ull << (mantissa_size - 1);
-    sign = false;
-  } else if (std::isinf(value)) {
-    exponent = exponent_mask;
-    mantissa = 0;
-  } else if (value == 0.0) {
-    exponent = 0;
-    mantissa = 0;
-  } else {
-    value = std::frexp(std::abs(value), &exponent);
-    exponent += exponent_bias - 1;
-    if (exponent >=
-        static_cast<int>(exponent_mask)) { // too large, use infinity
-      exponent = exponent_mask;
-      mantissa = 0;
-      exact = false;
-    } else {
-      if (exponent <= 0) { // denormal
-        value = std::ldexp(value, exponent);
-        exponent = 0;
-      } else {
-        value = std::ldexp(value, 1) - 1.0;
-      }
-      value = std::ldexp(value, mantissa_size);
-      mantissa = (std::uint64_t)value;
-      exact = static_cast<double>(mantissa) == value;
-    }
-  }
-  result = (sign ? (1ull << (total_size - 1)) : 0) |
-           (std::uint64_t(exponent) << mantissa_size) | mantissa;
-  return exact;
 }
 
 static llvm::Error createInvalidCBORError(llvm::StringRef message) {
@@ -636,88 +500,10 @@ Node::loadFromCBORSequence(llvm::ArrayRef<std::uint8_t> &in) {
   }
 }
 
-void Node::save_cbor(std::vector<std::uint8_t> &out, CBORInfo *info) const {
-  // Save the value in CBOR format.
-  // https://www.rfc-editor.org/rfc/rfc8949.html
-
-  auto start = [&](int major_type, std::uint64_t additional,
-                   int force_minor = 0) {
-    int num_bytes;
-    if (force_minor == 0 && additional < 24) {
-      out.push_back(major_type << 5 | additional);
-      num_bytes = 0;
-    } else if (force_minor ? force_minor == 24 : additional < 0x100) {
-      out.push_back(major_type << 5 | 24);
-      num_bytes = 1;
-    } else if (force_minor ? force_minor == 25 : additional < 0x10000) {
-      out.push_back(major_type << 5 | 25);
-      num_bytes = 2;
-    } else if (force_minor ? force_minor == 26 : additional < 0x100000000) {
-      out.push_back(major_type << 5 | 26);
-      num_bytes = 4;
-    } else {
-      out.push_back(major_type << 5 | 27);
-      num_bytes = 8;
-    }
-    for (int i = 0; i < num_bytes; i++)
-      out.push_back((additional >> 8 * (num_bytes - i - 1)) & 0xff);
-  };
-
-  std::visit(
-      Overloaded{
-          [&](const std::monostate &) { start(7, 22); },
-          [&](const bool &x) { start(7, x ? 21 : 20); },
-          [&](const std::int64_t &x) {
-            if (x < 0)
-              start(1, -(x + 1));
-            else
-              start(0, x);
-          },
-          [&](const uint64_t &x) {
-            start(0, x);
-            if (info && x > uint64_t(std::numeric_limits<int64_t>::max()))
-              info->not_dag_cbor = true;
-          },
-          [&](const double &x) {
-            if (info && !std::isfinite(x))
-              info->not_dag_cbor = true;
-            std::uint64_t additional;
-            encode_float(additional, x, 64, 52, 1023);
-            start(7, additional, 27);
-          },
-          [&](const BytesStorage &x) {
-            start(2, x.size());
-            out.insert(out.end(), x.begin(), x.end());
-          },
-          [&](const StringStorage &x) {
-            start(3, x.size());
-            out.insert(out.end(), x.begin(), x.end());
-          },
-          [&](const CID &x) {
-            // https://github.com/ipld/cid-cbor/
-            auto Bytes = x.asBytes();
-            start(6, 42); // CID tag
-            start(2, Bytes.size() + 1);
-            out.push_back(0x00); // DAG-CBOR requires multibase prefix
-            out.insert(out.end(), Bytes.begin(), Bytes.end());
-            if (info)
-              info->has_links = true;
-          },
-          [&](const List &x) {
-            start(4, x.size());
-            for (const Node &item : x)
-              item.save_cbor(out, info);
-          },
-          [&](const Map &x) {
-            start(5, x.size());
-            for (const auto &item : x) {
-              start(3, item.key().size());
-              out.insert(out.end(), item.key().begin(), item.key().end());
-              item.value().save_cbor(out, info);
-            }
-          },
-      },
-      variant_);
+std::vector<std::uint8_t> Node::saveAsCBOR() const {
+  std::vector<std::uint8_t> out;
+  CBOREncoder(out).visitNode(*this);
+  return out;
 }
 
 static llvm::Error createInvalidIPLDError(llvm::StringRef message) {
@@ -755,10 +541,10 @@ Node::saveAsIPLD(bool noIdentity) const {
     Bytes = llvm::ArrayRef<std::uint8_t>(std::get<BytesStorage>(variant_));
     codec = Multicodec::Raw;
   } else {
-    CBORInfo info;
-    save_cbor(Bytes, &info);
-    codec = info.not_dag_cbor ? Multicodec::DAG_CBOR_Unrestricted
-                              : Multicodec::DAG_CBOR;
+    CBOREncoder encoder(Bytes);
+    encoder.visitNode(*this);
+    codec = encoder.isValidDAGCBOR() ? Multicodec::DAG_CBOR
+                                     : Multicodec::DAG_CBOR_Unrestricted;
   }
   CID Ref = CID::calculate(codec, Bytes,
                            noIdentity ? std::optional(Multicodec::Blake2b_256)

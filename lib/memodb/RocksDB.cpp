@@ -163,8 +163,8 @@ void RocksDBStore::addRefs(rocksdb::WriteBatch &Batch, char Type,
 
 std::string RocksDBStore::makeKeyForCall(const Call &Call) {
   std::vector<std::uint8_t> Buffer;
-  Node(utf8_string_arg, Call.Name).save_cbor(Buffer);
-  std::string Key = makeSlice(Buffer).ToString();
+  std::string Key =
+      makeSlice(Node(utf8_string_arg, Call.Name).saveAsCBOR()).ToString();
   for (const CID &Arg : Call.Args) {
     auto CID = Arg.asBytes();
     Key.insert(Key.end(), CID.begin(), CID.end());
@@ -445,8 +445,7 @@ void RocksDBStore::eachHead(std::function<bool(const Head &)> F) {
 
 void RocksDBStore::eachCall(llvm::StringRef Func,
                             std::function<bool(const Call &)> F) {
-  std::vector<std::uint8_t> Prefix;
-  Node(utf8_string_arg, Func).save_cbor(Prefix);
+  auto Prefix = Node(utf8_string_arg, Func).saveAsCBOR();
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->Seek(makeSlice(Prefix)); Iterator->Valid(); Iterator->Next()) {
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))
@@ -475,8 +474,7 @@ void RocksDBStore::head_delete(const Head &Head) {
 }
 
 void RocksDBStore::call_invalidate(llvm::StringRef name) {
-  std::vector<std::uint8_t> Prefix;
-  Node(utf8_string_arg, name).save_cbor(Prefix);
+  auto Prefix = Node(utf8_string_arg, name).saveAsCBOR();
   std::unique_ptr<rocksdb::Iterator> Iterator(DB->NewIterator({}, CallsFamily));
   for (Iterator->Seek(makeSlice(Prefix)); Iterator->Valid(); Iterator->Next()) {
     if (!makeBytes(Iterator->key()).take_front(Prefix.size()).equals(Prefix))

@@ -7,8 +7,7 @@ using namespace memodb;
 namespace {
 
 void test_save(const Node &value, const std::vector<uint8_t> &expected) {
-  std::vector<uint8_t> out;
-  value.save_cbor(out);
+  std::vector<uint8_t> out = value.saveAsCBOR();
   EXPECT_EQ(expected, out);
 }
 
@@ -38,8 +37,7 @@ TEST(CborSaveTest, Integer) {
 
 TEST(CborSaveTest, Float) {
   auto check = [](double value, const std::vector<uint8_t> &expected) {
-    std::vector<uint8_t> out;
-    Node(value).save_cbor(out);
+    std::vector<uint8_t> out = Node(value).saveAsCBOR();
     EXPECT_EQ(expected, out);
   };
   check(0.0, {0xfb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});

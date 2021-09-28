@@ -7,12 +7,15 @@ set(LLVM_LINK_COMPONENTS
 )
 add_llvm_library(libmemodb
   CAR.cpp
+  CBOREncoder.cpp
   CID.cpp
   Client.cpp
   Evaluator.cpp
   HTTP.cpp
+  JSONEncoder.cpp
   Multibase.cpp
   Node.cpp
+  NodeVisitor.cpp
   RocksDB.cpp
   Server.cpp
   SQLite.cpp

@@ -311,9 +311,8 @@ HTTPStore::buildRequest(const Twine &method, const Twine &path,
   checkErr(nng_http_req_set_uri(req.get(),
                                 path.toNullTerminatedStringRef(buffer).data()));
   checkErr(nng_http_req_set_header(req.get(), "Accept", "application/cbor"));
-  std::vector<uint8_t> bytes;
   if (body) {
-    body->save_cbor(bytes);
+    auto bytes = body->saveAsCBOR();
     checkErr(
         nng_http_req_set_header(req.get(), "Content-Type", "application/cbor"));
     checkErr(nng_http_req_copy_data(req.get(), bytes.data(), bytes.size()));

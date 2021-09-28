@@ -377,8 +377,7 @@ void HTTPRequest::sendContentNode(const Node &node,
                     "</title>\n<h1>" + llvm::StringRef(cid_string) +
                     "</h1>\n<pre>" + escapeForHTML(stream.str()) + "</pre>\n");
   } else if (type == ContentType::CBOR) {
-    std::vector<std::uint8_t> buffer;
-    node.save_cbor(buffer);
+    auto buffer = node.saveAsCBOR();
     sendContent(cache_control, etag, "application/cbor",
                 llvm::StringRef(reinterpret_cast<const char *>(buffer.data()),
                                 buffer.size()));
