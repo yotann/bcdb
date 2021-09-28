@@ -12,6 +12,12 @@
 
 using namespace memodb;
 
+bool Head::operator<(const Head &other) const { return Name < other.Name; }
+
+bool Head::operator==(const Head &other) const { return Name == other.Name; }
+
+bool Head::operator!=(const Head &other) const { return Name != other.Name; }
+
 bool Call::operator<(const Call &other) const {
   return Name != other.Name ? Name < other.Name : Args < other.Args;
 }

@@ -5,269 +5,446 @@
 #include <optional>
 #include <string>
 
+#include "MockStore.h"
 #include "memodb/CID.h"
 #include "memodb/Node.h"
-#include "memodb/Store.h"
 #include "memodb/URI.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 using namespace memodb;
 using llvm::StringRef;
+using ::testing::_;
+using ::testing::AnyNumber;
+using ::testing::Expectation;
+using ::testing::ExpectationSet;
+using ::testing::Return;
+using ::testing::StrCaseEq;
 
 namespace {
 
-// TODO: use a mock class.
-class TestHTTPRequest : public HTTPRequest {
+MATCHER_P(TwineEq, string, "") { return StringRef(string).equals(arg.str()); }
+
+MATCHER_P(TwineCaseEq, string, "") {
+  return StringRef(string).equals_lower(arg.str());
+}
+
+class MockHTTPRequest : public HTTPRequest {
 public:
-  TestHTTPRequest(StringRef method_str, std::optional<StringRef> uri_str,
-                  StringRef body = "")
-      : request_method_str(method_str),
-        request_uri(uri_str ? URI::parse(*uri_str) : std::nullopt),
-        request_body(body) {}
-
-  StringRef getMethodString() const override { return request_method_str; }
-
-  std::optional<URI> getURI() const override { return request_uri; }
-
-  std::optional<llvm::StringRef>
-  getHeader(const llvm::Twine &key) const override {
-    auto key_lower = StringRef(key.str()).lower();
-    auto iter = request_headers.find(key_lower);
-    if (iter == request_headers.end())
-      return std::nullopt;
-    return iter->getValue();
-  }
-
-  StringRef getBody() const override { return request_body; }
-
-  void sendStatus(std::uint16_t status) override {
-    EXPECT_EQ(response_status, std::nullopt);
-    response_status = status;
-  }
-
-  void sendHeader(StringRef key, const llvm::Twine &value) override {
-    EXPECT_NE(response_status, std::nullopt);
-    EXPECT_EQ(response_body, std::nullopt);
-    auto key_lower = key.lower();
-    EXPECT_EQ(response_headers.count(key_lower), 0);
-    response_headers[key_lower] = value.str();
-  }
-
-  void sendBody(const llvm::Twine &body) override {
-    EXPECT_NE(response_status, std::nullopt);
-    EXPECT_EQ(response_body, std::nullopt);
-    response_body = body.str();
-  }
-
-  void sendEmptyBody() override {
-    EXPECT_NE(response_status, std::nullopt);
-    EXPECT_EQ(response_body, std::nullopt);
-    response_body = "";
-  }
-
-  std::string request_method_str;
-  std::optional<URI> request_uri;
-  llvm::StringMap<std::string> request_headers;
-  std::string request_body;
-
-  std::optional<std::uint16_t> response_status;
-  llvm::StringMap<std::optional<std::string>> response_headers;
-  std::optional<std::string> response_body;
+  MOCK_METHOD(StringRef, getMethodString, (), (const, override));
+  MOCK_METHOD(std::optional<URI>, getURI, (), (const, override));
+  MOCK_METHOD(std::optional<llvm::StringRef>, getHeader,
+              (const llvm::Twine &key), (const, override));
+  MOCK_METHOD(StringRef, getBody, (), (const, override));
+  MOCK_METHOD(void, sendStatus, (std::uint16_t status), (override));
+  MOCK_METHOD(void, sendHeader, (StringRef key, const llvm::Twine &value),
+              (override));
+  MOCK_METHOD(void, sendBody, (const llvm::Twine &body), (override));
+  MOCK_METHOD(void, sendEmptyBody, (), (override));
 };
 
-TEST(HTTPTest, GetMethod) {
-  EXPECT_EQ(TestHTTPRequest("get", "/cid").getMethod(), Request::Method::GET);
-  EXPECT_EQ(TestHTTPRequest("POST", "/cid").getMethod(), Request::Method::POST);
-  EXPECT_EQ(TestHTTPRequest("DANCE", "/cid").getMethod(), std::nullopt);
+TEST(HTTPTest, GetMethodLowercase) {
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getMethodString).WillOnce(Return("get"));
+  EXPECT_EQ(request.getMethod(), Request::Method::GET);
+}
+
+TEST(HTTPTest, GetMethodUppercase) {
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getMethodString).WillOnce(Return("POST"));
+  EXPECT_EQ(request.getMethod(), Request::Method::POST);
+}
+
+TEST(HTTPTest, GetMethodUnknown) {
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getMethodString).WillOnce(Return("DANCE"));
+  EXPECT_EQ(request.getMethod(), std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeCBOR) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", StringRef("\x82\x01\x61\x32", 4));
-  request.request_headers["content-type"] = "application/cbor";
-  EXPECT_EQ(request.getContentNode(*store), Node(node_list_arg, {1, "2"}));
-  EXPECT_EQ(request.response_status, std::nullopt);
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody)
+      .WillOnce(Return(StringRef("\x82\x01\x61\x32", 4)));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("application/cbor"));
+  EXPECT_CALL(request, sendStatus).Times(0);
+  EXPECT_EQ(request.getContentNode(store), Node(node_list_arg, {1, "2"}));
 }
 
 TEST(HTTPTest, GetContentNodeJSON) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", "[1,\"2\"]");
-  request.request_headers["content-type"] = "application/json";
-  EXPECT_EQ(request.getContentNode(*store), Node(node_list_arg, {1, "2"}));
-  EXPECT_EQ(request.response_status, std::nullopt);
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody).WillOnce(Return("[1,\"2\"]"));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("application/json"));
+  EXPECT_CALL(request, sendStatus).Times(0);
+  EXPECT_EQ(request.getContentNode(store), Node(node_list_arg, {1, "2"}));
 }
 
 TEST(HTTPTest, GetContentNodeOctetStream) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", "test");
-  request.request_headers["content-type"] = "application/octet-stream";
-  EXPECT_EQ(request.getContentNode(*store),
-            Node(byte_string_arg, StringRef("test", 4)));
-  EXPECT_EQ(request.response_status, std::nullopt);
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody).WillOnce(Return("test"));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("application/octet-stream"));
+  EXPECT_CALL(request, sendStatus).Times(0);
+  EXPECT_EQ(request.getContentNode(store),
+            Node(byte_string_arg, StringRef("test")));
 }
 
 TEST(HTTPTest, GetContentNodeUnsupported) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", "test");
-  request.request_headers["content-type"] = "text/plain";
-  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
-  EXPECT_EQ(request.response_status, 415);
-  EXPECT_EQ(request.response_headers["content-type"],
-            "application/problem+json");
-  EXPECT_EQ(request.response_body,
-            "{\"title\":\"Unsupported Media Type\",\"status\":415}");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody).WillOnce(Return("test"));
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("text/plain"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(415)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                      TwineEq("application/problem+json")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request,
+              sendBody(TwineEq(
+                  "{\"title\":\"Unsupported Media Type\",\"status\":415}")))
+      .Times(1)
+      .After(headers);
+  EXPECT_EQ(request.getContentNode(store), std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeCBORInvalid) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", StringRef("\x82\x01\x61", 3));
-  request.request_headers["content-type"] = "application/cbor";
-  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
-  EXPECT_EQ(request.response_status, 400);
-  EXPECT_EQ(request.response_headers["content-type"],
-            "application/problem+json");
-  EXPECT_EQ(
-      request.response_body,
-      "{\"type\":\"/problems/invalid-or-unsupported-cbor\",\"title\":\"Invalid "
-      "or unsupported CBOR\",\"status\":400,\"detail\":\"Invalid CBOR: missing "
-      "data from string\"}");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody).WillOnce(Return(StringRef("\x82\x01\x61", 3)));
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("application/cbor"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(400)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                      TwineEq("application/problem+json")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request,
+              sendBody(TwineEq(
+                  "{\"type\":\"/problems/"
+                  "invalid-or-unsupported-cbor\",\"title\":\"Invalid "
+                  "or unsupported CBOR\",\"status\":400,\"detail\":\"Invalid "
+                  "CBOR: missing "
+                  "data from string\"}")))
+      .Times(1)
+      .After(headers);
+  EXPECT_EQ(request.getContentNode(store), std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeJSONInvalidSyntax) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", "{");
-  request.request_headers["content-type"] = "application/json";
-  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
-  EXPECT_EQ(request.response_status, 400);
-  EXPECT_EQ(request.response_headers["content-type"],
-            "application/problem+json");
-  EXPECT_EQ(
-      request.response_body,
-      "{\"type\":\"/problems/invalid-or-unsupported-json\",\"title\":\"Invalid "
-      "or unsupported JSON\",\"status\":400,\"detail\":\"Invalid MemoDB JSON: "
-      "Expected '\\\"'\"}");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody).WillOnce(Return("{"));
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("application/json"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(400)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                      TwineEq("application/problem+json")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request,
+              sendBody(TwineEq(
+                  "{\"type\":\"/problems/"
+                  "invalid-or-unsupported-json\",\"title\":\"Invalid "
+                  "or unsupported JSON\",\"status\":400,\"detail\":\"Invalid "
+                  "MemoDB JSON: "
+                  "Expected '\\\"'\"}")))
+      .Times(1)
+      .After(headers);
+  EXPECT_EQ(request.getContentNode(store), std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeJSONInvalidNode) {
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  TestHTTPRequest request("POST", "/cid", "{\"one\":1}");
-  request.request_headers["content-type"] = "application/json";
-  EXPECT_EQ(request.getContentNode(*store), std::nullopt);
-  EXPECT_EQ(request.response_status, 400);
-  EXPECT_EQ(request.response_headers["content-type"],
-            "application/problem+json");
-  EXPECT_EQ(
-      request.response_body,
-      "{\"type\":\"/problems/invalid-or-unsupported-json\",\"title\":\"Invalid "
-      "or unsupported JSON\",\"status\":400,\"detail\":\"Invalid MemoDB JSON: "
-      "Invalid special JSON object\"}");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getBody).WillOnce(Return("{\"one\":1}"));
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("content-type")))
+      .WillOnce(Return("application/json"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(400)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                      TwineEq("application/problem+json")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request,
+              sendBody(TwineEq(
+                  "{\"type\":\"/problems/"
+                  "invalid-or-unsupported-json\",\"title\":\"Invalid "
+                  "or unsupported JSON\",\"status\":400,\"detail\":\"Invalid "
+                  "MemoDB JSON: "
+                  "Invalid special JSON object\"}")))
+      .Times(1)
+      .After(headers);
+  EXPECT_EQ(request.getContentNode(store), std::nullopt);
 }
 
 TEST(HTTPTest, SendContentNodeCBOR) {
-  TestHTTPRequest request("GET", "/cid/foo");
-  request.request_headers["accept"] = "application/cbor";
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("accept")))
+      .WillRepeatedly(Return("application/cbor"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(200)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=0, must-revalidate")))
+          .Times(1)
+          .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                             TwineEq("application/cbor")))
+                 .Times(1)
+                 .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
+                                             TwineEq("\"cbor+uAXEAAQw\"")))
+                 .Times(1)
+                 .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendBody(TwineEq(StringRef("\x0c", 1))))
+      .Times(1)
+      .After(headers);
   request.sendContentNode(Node(12), *CID::parse("uAXEAAQw"),
                           Request::CacheControl::Mutable);
-  EXPECT_EQ(request.response_status, 200);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=0, must-revalidate");
-  EXPECT_EQ(request.response_headers["content-type"], "application/cbor");
-  EXPECT_EQ(request.response_headers["etag"], "\"cbor+uAXEAAQw\"");
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, StringRef("\x0c", 1));
 }
 
 TEST(HTTPTest, SendContentNodeJSON) {
-  TestHTTPRequest request("GET", "/cid/foo");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("accept")))
+      .WillRepeatedly(Return("application/json"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(200)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=0, must-revalidate")))
+          .Times(1)
+          .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                             TwineEq("application/json")))
+                 .Times(1)
+                 .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
+                                             TwineEq("\"json+uAXEAAQw\"")))
+                 .Times(1)
+                 .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendBody(TwineEq("12"))).Times(1).After(headers);
   request.sendContentNode(Node(12), std::nullopt,
                           Request::CacheControl::Ephemeral);
-  EXPECT_EQ(request.response_status, 200);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=0, must-revalidate");
-  EXPECT_EQ(request.response_headers["content-type"], "application/json");
-  EXPECT_EQ(request.response_headers["etag"], "\"json+uAXEAAQw\"");
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, "12");
 }
 
 TEST(HTTPTest, SendContentNodeAcceptAll) {
   // Curl, and Python's requests module, send "Accept: */*" by default. We want
   // to respond with JSON in these cases.
-  TestHTTPRequest request("GET", "/cid/foo");
-  request.request_headers["accept"] = "*/*";
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("accept")))
+      .WillRepeatedly(Return("*/*"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(200)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=0, must-revalidate")))
+          .Times(1)
+          .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                             TwineEq("application/json")))
+                 .Times(1)
+                 .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
+                                             TwineEq("\"json+uAXEAAQw\"")))
+                 .Times(1)
+                 .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendBody(TwineEq("12"))).Times(1).After(headers);
   request.sendContentNode(Node(12), std::nullopt,
                           Request::CacheControl::Ephemeral);
-  EXPECT_EQ(request.response_status, 200);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=0, must-revalidate");
-  EXPECT_EQ(request.response_headers["content-type"], "application/json");
-  EXPECT_EQ(request.response_headers["etag"], "\"json+uAXEAAQw\"");
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, "12");
 }
 
 TEST(HTTPTest, SendContentNodeOctetStream) {
-  TestHTTPRequest request("GET", "/cid/foo");
-  request.request_headers["accept"] =
-      "application/octet-stream;q=0.1,application/json;q=0.01";
-  request.sendContentNode(Node(byte_string_arg, StringRef("12", 2)),
-                          std::nullopt, Request::CacheControl::Immutable);
-  EXPECT_EQ(request.response_status, 200);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=604800, immutable");
-  EXPECT_EQ(request.response_headers["content-type"],
-            "application/octet-stream");
-  EXPECT_EQ(request.response_headers["etag"], "\"raw+uAVUAAjEy\"");
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, StringRef("12", 2));
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, getHeader(TwineCaseEq("accept")))
+      .WillRepeatedly(
+          Return("application/octet-stream;q=0.1,application/json;q=0.01"));
+  EXPECT_CALL(request, sendEmptyBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(200)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=604800, immutable")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"),
+                                      TwineEq("application/octet-stream")))
+          .Times(1)
+          .After(status);
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
+                                             TwineEq("\"raw+uAVUAAjEy\"")))
+                 .Times(1)
+                 .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendBody(TwineEq("12"))).Times(1).After(headers);
+  request.sendContentNode(Node(byte_string_arg, StringRef("12")), std::nullopt,
+                          Request::CacheControl::Immutable);
 }
 
 TEST(HTTPTest, SendCreated) {
-  TestHTTPRequest request("POST", "/cid");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, sendBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(201)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=0, must-revalidate")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"), _)).Times(0);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"), _)).Times(0);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("location"), _)).Times(0);
+  EXPECT_CALL(request, sendEmptyBody).Times(1).After(headers);
   request.sendCreated(std::nullopt);
-  EXPECT_EQ(request.response_status, 201);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=0, must-revalidate");
-  EXPECT_EQ(request.response_headers["content-type"], std::nullopt);
-  EXPECT_EQ(request.response_headers["etag"], std::nullopt);
-  EXPECT_EQ(request.response_headers["location"], std::nullopt);
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, "");
 }
 
 TEST(HTTPTest, SendCreatedPath) {
-  TestHTTPRequest request("POST", "/cid");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, sendBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(201)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=0, must-revalidate")))
+          .Times(1)
+          .After(status);
+  headers += EXPECT_CALL(request,
+                         sendHeader(TwineCaseEq("location"), TwineEq("/cid/2")))
+                 .Times(1)
+                 .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"), _)).Times(0);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"), _)).Times(0);
+  EXPECT_CALL(request, sendEmptyBody).Times(1).After(headers);
   URI path;
   path.path_segments = {"cid", "2"};
   request.sendCreated(path);
-  EXPECT_EQ(request.response_status, 201);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=0, must-revalidate");
-  EXPECT_EQ(request.response_headers["content-type"], std::nullopt);
-  EXPECT_EQ(request.response_headers["etag"], std::nullopt);
-  EXPECT_EQ(request.response_headers["location"], "/cid/2");
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, "");
 }
 
 TEST(HTTPTest, SendDeleted) {
-  TestHTTPRequest request("POST", "/cid");
+  MockStore store;
+  MockHTTPRequest request;
+  EXPECT_CALL(request, getHeader).WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(request, sendBody).Times(0);
+  Expectation status = EXPECT_CALL(request, sendStatus(204)).Times(1);
+  ExpectationSet headers;
+  headers += EXPECT_CALL(request, sendHeader).Times(AnyNumber()).After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("cache-control"),
+                                      TwineEq("max-age=0, must-revalidate")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("server"), TwineEq("MemoDB")))
+          .Times(1)
+          .After(status);
+  headers +=
+      EXPECT_CALL(request, sendHeader(TwineCaseEq("vary"),
+                                      TwineEq("Accept, Accept-Encoding")))
+          .Times(1)
+          .After(status);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("content-type"), _)).Times(0);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"), _)).Times(0);
+  EXPECT_CALL(request, sendHeader(TwineCaseEq("location"), _)).Times(0);
+  EXPECT_CALL(request, sendEmptyBody).Times(1).After(headers);
   request.sendDeleted();
-  EXPECT_EQ(request.response_status, 204);
-  EXPECT_EQ(request.response_headers["cache-control"],
-            "max-age=0, must-revalidate");
-  EXPECT_EQ(request.response_headers["content-type"], std::nullopt);
-  EXPECT_EQ(request.response_headers["etag"], std::nullopt);
-  EXPECT_EQ(request.response_headers["location"], std::nullopt);
-  EXPECT_EQ(request.response_headers["server"], "MemoDB");
-  EXPECT_EQ(request.response_headers["vary"], "Accept, Accept-Encoding");
-  EXPECT_EQ(request.response_body, "");
 }
 
 } // end anonymous namespace

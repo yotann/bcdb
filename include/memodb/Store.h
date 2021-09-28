@@ -31,6 +31,10 @@ struct Head {
   explicit Head(const char *Name) : Name(Name) {}
   explicit Head(std::string &&Name) : Name(Name) {}
   explicit Head(llvm::StringRef Name) : Name(Name) {}
+
+  bool operator<(const Head &other) const;
+  bool operator==(const Head &other) const;
+  bool operator!=(const Head &other) const;
 };
 
 std::ostream &operator<<(std::ostream &os, const Head &head);

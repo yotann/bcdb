@@ -3,7 +3,7 @@
 #include <cmath>
 #include <sstream>
 
-#include "memodb/Store.h"
+#include "MockStore.h"
 #include "gtest/gtest.h"
 
 using namespace memodb;
@@ -13,17 +13,15 @@ using namespace memodb;
 namespace {
 
 void test_load(llvm::StringRef json, const Node &expected) {
-  // FIXME: use mock store
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  auto actualOrErr = Node::loadFromJSON(*store, json);
+  MockStore store;
+  auto actualOrErr = Node::loadFromJSON(store, json);
   EXPECT_EQ(true, (bool)actualOrErr) << json.str();
   EXPECT_EQ(expected, *actualOrErr);
 }
 
 void test_invalid(llvm::StringRef json) {
-  // FIXME: use mock store
-  auto store = Store::open("sqlite:test?mode=memory", true);
-  auto actualOrErr = Node::loadFromJSON(*store, json);
+  MockStore store;
+  auto actualOrErr = Node::loadFromJSON(store, json);
   ASSERT_FALSE(static_cast<bool>(actualOrErr)) << json.str();
   llvm::consumeError(actualOrErr.takeError());
 }
@@ -42,11 +40,10 @@ TEST(JSONLoadTest, Integer) {
 }
 
 TEST(JSONLoadTest, Float) {
-  // FIXME: use mock store
-  auto store = Store::open("sqlite:test?mode=memory", true);
   // RFC8785 Appendix B
   test_load("{\"float\":\"0\"}", Node(0.0));
-  auto actualOrErr = Node::loadFromJSON(*store, "{\"float\":\"-0\"}");
+  MockStore store;
+  auto actualOrErr = Node::loadFromJSON(store, "{\"float\":\"-0\"}");
   EXPECT_EQ(true, (bool)actualOrErr);
   EXPECT_EQ(Node(0.0), *actualOrErr);
   EXPECT_TRUE(std::signbit(actualOrErr->as<double>()));
@@ -59,7 +56,7 @@ TEST(JSONLoadTest, Float) {
   test_load("{\"float\":\"9007199254740992\"}", Node(0x1.0p+53));
   test_load("{\"float\":\"-9007199254740992\"}", Node(-0x1.0p+53));
   test_load("{\"float\":\"295147905179352830000\"}", Node(0x1.0p+68));
-  actualOrErr = Node::loadFromJSON(*store, "{\"float\":\"NaN\"}");
+  actualOrErr = Node::loadFromJSON(store, "{\"float\":\"NaN\"}");
   EXPECT_EQ(true, (bool)actualOrErr);
   EXPECT_TRUE(std::isnan(actualOrErr->as<double>()));
   test_load("{\"float\":\"Infinity\"}", Node(INFINITY));
@@ -201,13 +198,12 @@ TEST(JSONLoadTest, Map) {
 }
 
 TEST(JSONLoadTest, Link) {
-  // FIXME: use a mock store.
-  auto store = Store::open("sqlite:test?mode=memory", true);
+  MockStore store;
   test_load("{\"cid\":\"uAXEAAfY\"}",
-            Node(*store, *CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})));
+            Node(store, *CID::fromBytes({0x01, 0x71, 0x00, 0x01, 0xf6})));
   test_load(
       "{\"cid\":\"uAXGg5AIgAxcKLnWXt7fj2EwFOR0TmmKxV-eHhtjAgvKdz0wRExQ\"}",
-      Node(*store,
+      Node(store,
            *CID::fromBytes({0x01, 0x71, 0xa0, 0xe4, 0x02, 0x20, 0x03, 0x17,
                             0x0a, 0x2e, 0x75, 0x97, 0xb7, 0xb7, 0xe3, 0xd8,
                             0x4c, 0x05, 0x39, 0x1d, 0x13, 0x9a, 0x62, 0xb1,
