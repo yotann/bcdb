@@ -53,9 +53,8 @@ public:
 
 private:
   friend class Evaluator;
-  explicit Future(Evaluator *evaluator, std::shared_future<NodeRef> &&future);
+  explicit Future(std::shared_future<NodeRef> &&future);
 
-  Evaluator *evaluator;
   std::shared_future<NodeRef> future;
 };
 

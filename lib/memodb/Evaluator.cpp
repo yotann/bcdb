@@ -49,8 +49,8 @@ const CID &Future::getCID() { return get().getCID(); }
 
 void Future::freeNode() { get().freeNode(); }
 
-Future::Future(Evaluator *evaluator, std::shared_future<NodeRef> &&future)
-    : evaluator(evaluator), future(std::move(future)) {}
+Future::Future(std::shared_future<NodeRef> &&future)
+    : future(std::move(future)) {}
 
 namespace {
 class ThreadPoolEvaluator : public Evaluator {
@@ -208,7 +208,7 @@ Evaluator::Evaluator() {}
 Evaluator::~Evaluator() {}
 
 Future Evaluator::makeFuture(std::shared_future<NodeRef> &&future) {
-  return Future(this, std::move(future));
+  return Future(std::move(future));
 }
 
 std::unique_ptr<Evaluator> Evaluator::createLocal(std::unique_ptr<Store> store,
