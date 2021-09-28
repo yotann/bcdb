@@ -74,10 +74,9 @@ std::unique_ptr<Store> Store::open(llvm::StringRef uri,
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Head &head) {
-  URI uri;
-  uri.path_segments = {"head", head.Name};
-  uri.escape_slashes_in_segments = false;
-  return os << uri.encode();
+  llvm::raw_os_ostream raw_os(os);
+  raw_os << head;
+  return os;
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Head &head) {
@@ -88,13 +87,9 @@ llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Head &head) {
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Call &call) {
-  std::string args;
-  for (const CID &arg : call.Args)
-    args += arg.asString(Multibase::base64url) + ",";
-  args.pop_back();
-  URI uri;
-  uri.path_segments = {"call", call.Name, std::move(args)};
-  return os << uri.encode();
+  llvm::raw_os_ostream raw_os(os);
+  raw_os << call;
+  return os;
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Call &call) {
@@ -141,13 +136,8 @@ std::optional<Name> Name::parse(llvm::StringRef uri_str) {
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Name &name) {
-  if (const CID *cid = std::get_if<CID>(&name)) {
-    URI uri;
-    uri.path_segments = {"cid", cid->asString(Multibase::base64url)};
-    os << uri.encode();
-  } else {
-    name.visit([&](auto X) { os << X; });
-  }
+  llvm::raw_os_ostream raw_os(os);
+  raw_os << name;
   return os;
 }
 

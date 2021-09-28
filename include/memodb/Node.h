@@ -245,7 +245,6 @@ private:
   void validateUTF8() const;
   void validateKeysUTF8() const;
 
-  friend std::ostream &operator<<(std::ostream &, const Node &);
   friend struct NodeTypeTraits<bool>;
   friend struct NodeTypeTraits<std::int64_t>;
   friend struct NodeTypeTraits<std::uint64_t>;

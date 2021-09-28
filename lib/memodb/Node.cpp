@@ -6,6 +6,7 @@
 #include <llvm/Support/ConvertUTF.h>
 #include <llvm/Support/Format.h>
 #include <llvm/Support/JSON.h>
+#include <llvm/Support/raw_os_ostream.h>
 #include <llvm/Support/raw_ostream.h>
 #include <sstream>
 #include <system_error>
@@ -374,10 +375,9 @@ llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os,
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Node &value) {
-  std::string str;
-  llvm::raw_string_ostream sstr(str);
-  sstr << value;
-  return os << sstr.str();
+  llvm::raw_os_ostream raw_os(os);
+  raw_os << value;
+  return os;
 }
 
 static double decode_float(std::uint64_t value, int total_size,
