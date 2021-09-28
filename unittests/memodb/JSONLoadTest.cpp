@@ -180,7 +180,7 @@ TEST(JSONLoadTest, Array) {
   test_load("[1,2]", Node(node_list_arg, {1, 2}));
   test_load("[[]   ]", Node(node_list_arg,
                             {Node(node_list_arg)})); // y_array_arraysWithSpaces
-  test_load("[1\n]", Node(node_list_arg, {1})); // y_array_with_1_and_newline
+  test_load("[1\n]", Node(node_list_arg, {1}));  // y_array_with_1_and_newline
   test_load("   [1]", Node(node_list_arg, {1})); // y_array_with_leading_space
   test_load("[2] ", Node(node_list_arg, {2}));   // y_array_with_trailing_space
 }
