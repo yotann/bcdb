@@ -97,8 +97,8 @@ void JSONEncoder::visitBytes(BytesRef value) {
      << "\"}";
 }
 
-void JSONEncoder::visitLink(const CID &value) {
-  os << "{\"cid\":\"" << value.asString(Multibase::base64url) << "\"}";
+void JSONEncoder::visitLink(const Link &value) {
+  os << "{\"cid\":\"" << value.getCID().asString(Multibase::base64url) << "\"}";
 }
 
 void JSONEncoder::startList(const Node::List &value) {

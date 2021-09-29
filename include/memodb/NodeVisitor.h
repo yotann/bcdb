@@ -5,7 +5,6 @@
 
 #include <llvm/ADT/StringRef.h>
 
-#include "CID.h"
 #include "Node.h"
 
 namespace memodb {
@@ -27,7 +26,7 @@ public:
   virtual void visitBytes(BytesRef value);
   virtual void visitList(const Node::List &value);
   virtual void visitMap(const Node::Map &value);
-  virtual void visitLink(const CID &value);
+  virtual void visitLink(const Link &value);
   virtual void startList(const Node::List &value);
   virtual void endList();
   virtual void startMap(const Node::Map &value);

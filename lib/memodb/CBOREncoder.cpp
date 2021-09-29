@@ -128,9 +128,9 @@ void CBOREncoder::visitBytes(BytesRef value) {
   out.insert(out.end(), value.begin(), value.end());
 }
 
-void CBOREncoder::visitLink(const CID &value) {
+void CBOREncoder::visitLink(const Link &value) {
   // https://github.com/ipld/cid-cbor/
-  auto bytes = value.asBytes();
+  auto bytes = value.getCID().asBytes();
   encodeHead(6, 42); // CID tag
   encodeHead(2, bytes.size() + 1);
   out.push_back(0x00); // DAG-CBOR requires multibase prefix

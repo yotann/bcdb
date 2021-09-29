@@ -6,7 +6,6 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "CID.h"
 #include "NodeVisitor.h"
 
 namespace memodb {
@@ -24,7 +23,7 @@ public:
   virtual void visitFloat(double value) override;
   virtual void visitString(llvm::StringRef value) override;
   virtual void visitBytes(BytesRef value) override;
-  virtual void visitLink(const CID &value) override;
+  virtual void visitLink(const Link &value) override;
   virtual void startList(const Node::List &value) override;
   virtual void endList() override;
   virtual void startMap(const Node::Map &value) override;
