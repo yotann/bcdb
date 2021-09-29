@@ -40,13 +40,12 @@ public:
   MOCK_METHOD(std::optional<Node>, getContentNode,
               (Store & store, const std::optional<Node> &default_node),
               (override));
-  MOCK_METHOD(void, sendContentNode,
-              (const Node &node, const std::optional<CID> &cid_if_known,
-               CacheControl cache_control),
+  MOCK_METHOD(ContentType, chooseNodeContentType, (const Node &node),
               (override));
-  MOCK_METHOD(void, sendContentURIs,
-              (const ArrayRef<URI> uris, CacheControl cache_control),
+  MOCK_METHOD(bool, sendETag, (std::uint64_t etag, CacheControl cache_control),
               (override));
+  MOCK_METHOD(void, sendContent,
+              (ContentType type, const llvm::StringRef &body), (override));
   MOCK_METHOD(void, sendAccepted, (), (override));
   MOCK_METHOD(void, sendCreated, (const std::optional<URI> &path), (override));
   MOCK_METHOD(void, sendDeleted, (), (override));
@@ -55,16 +54,17 @@ public:
                const std::optional<llvm::Twine> &detail),
               (override));
   MOCK_METHOD(void, sendMethodNotAllowed, (StringRef allow), (override));
+  MOCK_METHOD(void, sendContentNode,
+              (const Node &node, const std::optional<CID> &cid_if_known,
+               CacheControl cache_control),
+              (override));
+  MOCK_METHOD(void, sendContentURIs,
+              (const llvm::ArrayRef<URI> uris, CacheControl cache_control),
+              (override));
 
   void setWillByDefault() {
-    ON_CALL(*this, sendContentNode)
-        .WillByDefault(
-            [this](const Node &, const std::optional<CID> &, CacheControl) {
-              ASSERT_FALSE(responded);
-              responded = true;
-            });
-    ON_CALL(*this, sendContentURIs)
-        .WillByDefault([this](const ArrayRef<URI>, CacheControl) {
+    ON_CALL(*this, sendContent)
+        .WillByDefault([this](ContentType type, const llvm::StringRef &body) {
           ASSERT_FALSE(responded);
           responded = true;
         });
@@ -91,6 +91,17 @@ public:
       ASSERT_FALSE(responded);
       responded = true;
     });
+    ON_CALL(*this, sendContentNode)
+        .WillByDefault(
+            [this](const Node &, const std::optional<CID> &, CacheControl) {
+              ASSERT_FALSE(responded);
+              responded = true;
+            });
+    ON_CALL(*this, sendContentURIs)
+        .WillByDefault([this](const llvm::ArrayRef<URI>, CacheControl) {
+          ASSERT_FALSE(responded);
+          responded = true;
+        });
   }
 
   void expectGets(Method method, StringRef uri_str) {

@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
@@ -24,6 +25,8 @@ namespace memodb {
 class PendingCall;
 class WorkerGroup;
 
+std::string escapeForHTML(llvm::StringRef str);
+
 // A single request for the MemoDB server to respond to.
 // This class is intended to work not only for HTTP requests but also CoAP
 // requests, if a suitable subclass is implemented.
@@ -36,12 +39,24 @@ public:
     DELETE,
   };
 
-  enum class ContentType {
-    OctetStream,
-    JSON,
-    CBOR,
-    HTML,
-    ProblemJSON,
+  /// One of the content types supported by the server.
+  ///
+  /// Numbers are based on the [CoAP
+  /// Content-Formats](https://www.iana.org/assignments/core-parameters/core-parameters.xhtml#content-formats),
+  /// using the "experimental use" range when appropriate.
+  enum class ContentType : std::uint16_t {
+    /// `text/plain;charset=utf-8`
+    Plain = 0,
+    /// `application/octet-stream`
+    OctetStream = 42,
+    /// `application/json`
+    JSON = 50,
+    /// `application/cbor`
+    CBOR = 60,
+    /// `text/html`
+    HTML = 65000,
+    /// `application/problem+json`
+    ProblemJSON = 65001,
   };
 
   enum class Status {
@@ -71,12 +86,12 @@ public:
   getContentNode(Store &store,
                  const std::optional<Node> &default_node = std::nullopt) = 0;
 
-  virtual void sendContentNode(const Node &node,
-                               const std::optional<CID> &cid_if_known,
-                               CacheControl cache_control) = 0;
+  virtual ContentType chooseNodeContentType(const Node &node) = 0;
 
-  virtual void sendContentURIs(const llvm::ArrayRef<URI> uris,
-                               CacheControl cache_control);
+  // Returns true if no further response is necessary.
+  virtual bool sendETag(std::uint64_t etag, CacheControl cache_control) = 0;
+
+  virtual void sendContent(ContentType type, const llvm::StringRef &body) = 0;
 
   virtual void sendAccepted() = 0;
 
@@ -89,6 +104,13 @@ public:
                          const std::optional<llvm::Twine> &detail) = 0;
 
   virtual void sendMethodNotAllowed(llvm::StringRef allow) = 0;
+
+  virtual void sendContentNode(const Node &node,
+                               const std::optional<CID> &cid_if_known,
+                               CacheControl cache_control);
+
+  virtual void sendContentURIs(const llvm::ArrayRef<URI> uris,
+                               CacheControl cache_control);
 
   // The Request subclass should set this to true when any of the sendXXX
   // functions is called.

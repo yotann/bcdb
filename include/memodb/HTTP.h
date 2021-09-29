@@ -21,11 +21,11 @@ public:
       Store &store,
       const std::optional<Node> &default_node = std::nullopt) override;
 
-  void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
-                       CacheControl cache_control) override;
+  ContentType chooseNodeContentType(const Node &node) override;
 
-  void sendContentURIs(const llvm::ArrayRef<URI> uris,
-                       CacheControl cache_control) override;
+  bool sendETag(std::uint64_t etag, CacheControl cache_control) override;
+
+  void sendContent(ContentType type, const llvm::StringRef &body) override;
 
   void sendAccepted() override;
 
@@ -67,9 +67,6 @@ private:
   bool hasIfNoneMatch(llvm::StringRef etag);
 
   void startResponse(std::uint16_t status, CacheControl cache_control);
-
-  void sendContent(CacheControl cache_control, llvm::StringRef etag,
-                   llvm::StringRef content_type, const llvm::Twine &content);
 
   void sendErrorAfterStatus(Status status, std::optional<llvm::StringRef> type,
                             llvm::StringRef title,

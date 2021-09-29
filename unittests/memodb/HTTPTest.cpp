@@ -6,6 +6,7 @@
 #include <string>
 
 #include "MockStore.h"
+#include "TestingSupport.h"
 #include "memodb/CID.h"
 #include "memodb/Node.h"
 #include "memodb/URI.h"
@@ -22,12 +23,6 @@ using ::testing::Return;
 using ::testing::StrCaseEq;
 
 namespace {
-
-MATCHER_P(TwineEq, string, "") { return StringRef(string).equals(arg.str()); }
-
-MATCHER_P(TwineCaseEq, string, "") {
-  return StringRef(string).equals_lower(arg.str());
-}
 
 class MockHTTPRequest : public HTTPRequest {
 public:
@@ -221,7 +216,7 @@ TEST(HTTPTest, SendContentNodeCBOR) {
                  .Times(1)
                  .After(status);
   headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
-                                             TwineEq("\"cbor+uAXEAAQw\"")))
+                                             TwineEq("\"20de116d0a7d7df0\"")))
                  .Times(1)
                  .After(status);
   headers +=
@@ -260,7 +255,7 @@ TEST(HTTPTest, SendContentNodeJSON) {
                  .Times(1)
                  .After(status);
   headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
-                                             TwineEq("\"json+uAXEAAQw\"")))
+                                             TwineEq("\"5460f49adbe7abd4\"")))
                  .Times(1)
                  .After(status);
   headers +=
@@ -298,8 +293,7 @@ TEST(HTTPTest, SendContentNodeAcceptAll) {
                                              TwineEq("application/json")))
                  .Times(1)
                  .After(status);
-  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
-                                             TwineEq("\"json+uAXEAAQw\"")))
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"), _))
                  .Times(1)
                  .After(status);
   headers +=
@@ -337,8 +331,7 @@ TEST(HTTPTest, SendContentNodeOctetStream) {
                                       TwineEq("application/octet-stream")))
           .Times(1)
           .After(status);
-  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"),
-                                             TwineEq("\"raw+uAVUAAjEy\"")))
+  headers += EXPECT_CALL(request, sendHeader(TwineCaseEq("etag"), _))
                  .Times(1)
                  .After(status);
   headers +=

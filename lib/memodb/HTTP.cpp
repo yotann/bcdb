@@ -5,6 +5,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/Support/JSON.h>
+#include <llvm/Support/ScopedPrinter.h>
 #include <llvm/Support/raw_ostream.h>
 #include <optional>
 #include <string>
@@ -17,21 +18,6 @@
 
 using namespace memodb;
 using llvm::StringRef;
-
-static std::string escapeForHTML(llvm::StringRef str) {
-  std::string escaped;
-  std::size_t i = 0;
-  while (i < str.size()) {
-    std::size_t j = str.find_first_of("<\"", i);
-    escaped += str.slice(i, j);
-    if (j < str.size()) {
-      escaped += str[j] == '<' ? "&lt;" : "&quot;";
-      j += 1;
-    }
-    i = j;
-  }
-  return escaped;
-}
 
 // Parse the Accept header and find the q= value (if any) for the specified
 // content_type. Return the q= value scaled from 0 to 1000.
@@ -295,129 +281,57 @@ void HTTPRequest::startResponse(std::uint16_t status,
   }
 }
 
-void HTTPRequest::sendContent(CacheControl cache_control, llvm::StringRef etag,
-                              llvm::StringRef content_type,
-                              const llvm::Twine &content) {
-  startResponse(200, cache_control);
-  sendHeader("Content-Type", content_type);
-  sendHeader("ETag", "\"" + etag + "\"");
-  sendBody(content);
-}
-
-void HTTPRequest::sendContentNode(const Node &node,
-                                  const std::optional<CID> &cid_if_known,
-                                  CacheControl cache_control) {
+Request::ContentType HTTPRequest::chooseNodeContentType(const Node &node) {
   unsigned octet_stream_quality = getAcceptQuality(ContentType::OctetStream);
   unsigned json_quality = getAcceptQuality(ContentType::JSON);
   unsigned cbor_quality = getAcceptQuality(ContentType::CBOR);
   unsigned html_quality = getAcceptQuality(ContentType::HTML);
 
-  CID cid = cid_if_known ? *cid_if_known : node.saveAsIPLD().first;
-  std::string etag = cid.asString(Multibase::base64url);
-
   // When the client doesn't specify a preference, we prefer
   // json > octet-stream > cbor > html. Note that many clients, like curl and
   // Python's requests module, send "Accept: */*" by default.
-  ContentType type = ContentType::JSON;
   if (node.kind() == Kind::Bytes && octet_stream_quality > json_quality &&
       octet_stream_quality >= cbor_quality &&
       octet_stream_quality >= html_quality) {
-    etag = "raw+" + etag;
-    type = ContentType::OctetStream;
+    return ContentType::OctetStream;
   } else if (html_quality > cbor_quality && html_quality > json_quality) {
-    etag = "html+" + etag;
-    type = ContentType::HTML;
+    return ContentType::HTML;
   } else if (cbor_quality > json_quality) {
-    etag = "cbor+" + etag;
-    type = ContentType::CBOR;
+    return ContentType::CBOR;
   } else {
-    etag = "json+" + etag;
-    type = ContentType::JSON;
-  }
-
-  if (hasIfNoneMatch(etag)) {
-    startResponse(304, cache_control);
-    sendHeader("ETag", "\"" + etag + "\"");
-    sendEmptyBody();
-    return;
-  }
-
-  if (type == ContentType::OctetStream) {
-    sendContent(cache_control, etag, "application/octet-stream",
-                node.as<llvm::StringRef>(byte_string_arg));
-  } else if (type == ContentType::HTML) {
-    std::string cid_string = "MemoDB Node";
-    if (cid_if_known)
-      cid_string = cid_if_known->asString(Multibase::base64url);
-    llvm::SmallVector<char, 256> buffer;
-    llvm::raw_svector_ostream stream(buffer);
-    stream << node;
-
-    // Display JSON using jQuery json-viewer:
-    // https://github.com/abodelot/jquery.json-viewer
-    // Copy-and-paste should still work on the formatted JSON.
-    //
-    // react-json-view is another interesting option, but it can't easily be
-    // used without recompiling it.
-    //
-    // Limitations:
-    // - Integers larger than 53 bits will be converted to floats by
-    //   JSON.parse().
-    // - No special handling for MemoDB JSON types, like CIDs.
-    sendContent(cache_control, etag, "text/html",
-                R"(<!DOCTYPE html>
-<script src="https://unpkg.com/jquery@3.6/dist/jquery.min.js"></script>
-<script src="https://unpkg.com/jquery.json-viewer@1.4/json-viewer/jquery.json-viewer.js"></script>
-<link href="https://unpkg.com/jquery.json-viewer@1.4/json-viewer/jquery.json-viewer.css" type="text/css" rel="stylesheet">
-<script>
-  $(function() {
-    $('pre').jsonViewer(JSON.parse($('pre').text()), {withQuotes:true});
-  });
-</script>
-<title>)" + llvm::StringRef(cid_string) +
-                    "</title>\n<h1>" + llvm::StringRef(cid_string) +
-                    "</h1>\n<pre>" + escapeForHTML(stream.str()) + "</pre>\n");
-  } else if (type == ContentType::CBOR) {
-    auto buffer = node.saveAsCBOR();
-    sendContent(cache_control, etag, "application/cbor",
-                llvm::StringRef(reinterpret_cast<const char *>(buffer.data()),
-                                buffer.size()));
-  } else {
-    llvm::SmallVector<char, 256> buffer;
-    llvm::raw_svector_ostream stream(buffer);
-    stream << node;
-    sendContent(cache_control, etag, "application/json", stream.str());
+    return ContentType::JSON;
   }
 }
 
-void HTTPRequest::sendContentURIs(const llvm::ArrayRef<URI> uris,
-                                  CacheControl cache_control) {
-  unsigned json_quality = getAcceptQuality(ContentType::JSON);
-  unsigned cbor_quality = getAcceptQuality(ContentType::CBOR);
-  unsigned html_quality = getAcceptQuality(ContentType::HTML);
-  if (html_quality <= json_quality || html_quality <= cbor_quality)
-    return Request::sendContentURIs(uris, cache_control);
+bool HTTPRequest::sendETag(std::uint64_t etag, CacheControl cache_control) {
+  auto etag_str = llvm::to_hexString(etag, false);
+  bool matched = hasIfNoneMatch(etag_str);
+  startResponse(matched ? 304 : 200, cache_control);
+  sendHeader("ETag", "\"" + etag_str + "\"");
+  if (matched)
+    sendEmptyBody();
+  return matched;
+}
 
-  Node node(node_list_arg);
-  for (const URI &uri : uris)
-    node.emplace_back(utf8_string_arg, uri.encode());
-  std::sort(node.list_range().begin(), node.list_range().end());
-
-  CID cid = node.saveAsIPLD().first;
-  std::string etag = cid.asString(Multibase::base64url);
-
-  auto uri_str = getURI()->encode();
-
-  std::string html = "<!DOCTYPE html>\n<title>" + escapeForHTML(uri_str) +
-                     "</title>\n<h1>" + escapeForHTML(uri_str) +
-                     "</h1>\n<ul>\n";
-  for (const auto &item : node.list_range()) {
-    auto str = escapeForHTML(item.as<StringRef>());
-    html += "<li><a href=\"" + str + "\">" + str + "</a></li>\n";
+void HTTPRequest::sendContent(ContentType type, const llvm::StringRef &body) {
+  switch (type) {
+  case ContentType::OctetStream:
+    sendHeader("Content-Type", "application/octet-stream");
+    break;
+  case ContentType::HTML:
+    sendHeader("Content-Type", "text/html");
+    break;
+  case ContentType::CBOR:
+    sendHeader("Content-Type", "application/cbor");
+    break;
+  case ContentType::JSON:
+    sendHeader("Content-Type", "application/json");
+    break;
+  case ContentType::ProblemJSON:
+  case ContentType::Plain:
+    llvm_unreachable("impossible content type");
   }
-  html += "</ul>\n";
-
-  sendContent(cache_control, "html+" + etag, "text/html", html);
+  sendBody(body);
 }
 
 void HTTPRequest::sendAccepted() {

@@ -173,39 +173,6 @@ static std::unique_ptr<ToolOutputFile> GetOutputFile(bool binary = true) {
   return nullptr;
 }
 
-static void WriteValue(const Node &Value) {
-  bool binary = format_option != Format_JSON && format_option != Format_Auto;
-  auto OutputFile = GetOutputFile(binary);
-  if (OutputFile) {
-    switch (format_option) {
-    case Format_CBOR: {
-      auto Buffer = Value.saveAsCBOR();
-      OutputFile->os().write(reinterpret_cast<const char *>(Buffer.data()),
-                             Buffer.size());
-      break;
-    }
-    case Format_Raw: {
-      if (!Value.is<BytesRef>())
-        report_fatal_error("This value cannot be printed in \"raw\" format.");
-      auto bytes = Value.as<BytesRef>();
-      OutputFile->os().write(reinterpret_cast<const char *>(bytes.data()),
-                             bytes.size());
-      break;
-    }
-    case Format_JSON:
-      OutputFile->os() << Value << "\n";
-      break;
-    case Format_Auto:
-      if (Value.is_link())
-        OutputFile->os() << Name(Value.as<CID>()) << "\n";
-      else
-        OutputFile->os() << Value << "\n";
-      break;
-    }
-    OutputFile->keep();
-  }
-}
-
 // Request subclass
 
 namespace {
@@ -221,16 +188,31 @@ public:
     return std::nullopt;
   }
 
-  void sendContentNode(const Node &node, const std::optional<CID> &cid_if_known,
-                       CacheControl cache_control) override {
-    WriteValue(node);
-    responded = true;
+  ContentType chooseNodeContentType(const Node &node) override {
+    switch (format_option) {
+    case Format_CBOR:
+      return ContentType::CBOR;
+    case Format_Raw:
+      if (!node.is<BytesRef>())
+        report_fatal_error("This value cannot be printed in \"raw\" format.");
+      return ContentType::OctetStream;
+    case Format_JSON:
+      return ContentType::JSON;
+    case Format_Auto:
+    default:
+      return ContentType::Plain;
+    }
   }
 
-  void sendContentURIs(const llvm::ArrayRef<URI> uris,
-                       CacheControl cache_control) override {
-    for (const URI &uri : uris)
-      outs() << uri.encode() << "\n";
+  bool sendETag(std::uint64_t etag, CacheControl cache_control) override {
+    return false;
+  }
+
+  void sendContent(ContentType type, const llvm::StringRef &body) override {
+    bool binary = type != ContentType::JSON && type != ContentType::Plain;
+    auto output_file = GetOutputFile(binary);
+    if (output_file)
+      output_file->os().write(body.data(), body.size());
     responded = true;
   }
 
