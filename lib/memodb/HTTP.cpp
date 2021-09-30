@@ -358,15 +358,17 @@ void HTTPRequest::sendDeleted() {
   sendEmptyBody();
 }
 
-std::optional<Request::Method> HTTPRequest::getMethod() const {
-  auto str = getMethodString();
+static std::optional<Request::Method> parseMethod(llvm::StringRef str) {
   if (str.equals_lower("GET") || str.equals_lower("HEAD"))
-    return Method::GET;
+    return Request::Method::GET;
   if (str.equals_lower("POST"))
-    return Method::POST;
+    return Request::Method::POST;
   if (str.equals_lower("PUT"))
-    return Method::PUT;
+    return Request::Method::PUT;
   if (str.equals_lower("DELETE"))
-    return Method::DELETE;
+    return Request::Method::DELETE;
   return std::nullopt;
 }
+
+HTTPRequest::HTTPRequest(llvm::StringRef method_string, std::optional<URI> uri)
+    : Request(parseMethod(method_string), uri) {}

@@ -26,8 +26,10 @@ namespace {
 
 class MockHTTPRequest : public HTTPRequest {
 public:
-  MOCK_METHOD(StringRef, getMethodString, (), (const, override));
-  MOCK_METHOD(std::optional<URI>, getURI, (), (const, override));
+  MockHTTPRequest() : HTTPRequest("", std::nullopt) {}
+  MockHTTPRequest(llvm::StringRef method_string, std::optional<URI> uri)
+      : HTTPRequest(method_string, uri) {}
+
   MOCK_METHOD(std::optional<llvm::StringRef>, getHeader,
               (const llvm::Twine &key), (const, override));
   MOCK_METHOD(StringRef, getBody, (), (const, override));
@@ -38,22 +40,19 @@ public:
   MOCK_METHOD(void, sendEmptyBody, (), (override));
 };
 
-TEST(HTTPTest, GetMethodLowercase) {
-  MockHTTPRequest request;
-  EXPECT_CALL(request, getMethodString).WillOnce(Return("get"));
-  EXPECT_EQ(request.getMethod(), Request::Method::GET);
+TEST(HTTPTest, ParseMethodLowercase) {
+  MockHTTPRequest request("get", std::nullopt);
+  EXPECT_EQ(request.method, Request::Method::GET);
 }
 
-TEST(HTTPTest, GetMethodUppercase) {
-  MockHTTPRequest request;
-  EXPECT_CALL(request, getMethodString).WillOnce(Return("POST"));
-  EXPECT_EQ(request.getMethod(), Request::Method::POST);
+TEST(HTTPTest, ParseMethodUppercase) {
+  MockHTTPRequest request("POST", std::nullopt);
+  EXPECT_EQ(request.method, Request::Method::POST);
 }
 
-TEST(HTTPTest, GetMethodUnknown) {
-  MockHTTPRequest request;
-  EXPECT_CALL(request, getMethodString).WillOnce(Return("DANCE"));
-  EXPECT_EQ(request.getMethod(), std::nullopt);
+TEST(HTTPTest, ParseMethodUnknown) {
+  MockHTTPRequest request("DANCE", std::nullopt);
+  EXPECT_EQ(request.method, std::nullopt);
 }
 
 TEST(HTTPTest, GetContentNodeCBOR) {

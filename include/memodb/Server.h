@@ -74,9 +74,8 @@ public:
     Immutable,
   };
 
+  Request(std::optional<Method> method, std::optional<URI> uri);
   virtual ~Request() {}
-  virtual std::optional<Method> getMethod() const = 0;
-  virtual std::optional<URI> getURI() const = 0;
 
   // Decode the Node that was submitted as the body of the request. If there's
   // no body, default_node should be returned if it is given; otherwise, or if
@@ -115,6 +114,9 @@ public:
   // The Request subclass should set this to true when any of the sendXXX
   // functions is called.
   bool responded = false;
+
+  const std::optional<Method> method;
+  const std::optional<URI> uri;
 };
 
 // Keeps track of all calls of a single function we need to evaluate. A

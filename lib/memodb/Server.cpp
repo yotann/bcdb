@@ -66,6 +66,9 @@ void PendingCall::deleteIfPossible() {
   }
 }
 
+Request::Request(std::optional<Method> method, std::optional<URI> uri)
+    : method(method), uri(uri) {}
+
 void Request::sendContentNode(const Node &node,
                               const std::optional<CID> &cid_if_known,
                               CacheControl cache_control) {
@@ -168,7 +171,7 @@ void Request::sendContentURIs(const llvm::ArrayRef<URI> uris,
   } else if (type == ContentType::HTML) {
     llvm::SmallVector<char, 256> buffer;
     llvm::raw_svector_ostream stream(buffer);
-    auto uri_str = escapeForHTML(getURI()->encode());
+    auto uri_str = escapeForHTML(uri->encode());
     stream << "<!DOCTYPE html>\n<title>" << uri_str << "</title>\n<h1>"
            << uri_str << "</h1>\n<ul>\n";
     for (const auto &item : node.list_range()) {
@@ -197,11 +200,11 @@ void Server::handleRequest(Request &request) {
 }
 
 void Server::handleNewRequest(Request &request) {
-  if (request.getMethod() == std::nullopt)
+  if (!request.method)
     return request.sendError(Request::Status::NotImplemented, std::nullopt,
                              "Not Implemented", std::nullopt);
 
-  auto uri_or_null = request.getURI();
+  auto uri_or_null = request.uri;
   if (!uri_or_null ||
       (uri_or_null->rootless && !uri_or_null->path_segments.empty()))
     return request.sendError(Request::Status::BadRequest, std::nullopt,
@@ -244,7 +247,7 @@ void Server::handleNewRequest(Request &request) {
 void Server::handleRequestCID(Request &request,
                               std::optional<llvm::StringRef> cid_str) {
   if (cid_str) {
-    if (request.getMethod() != Request::Method::GET)
+    if (request.method != Request::Method::GET)
       return request.sendMethodNotAllowed("GET, HEAD");
     // GET /cid/...
     auto cid = CID::parse(*cid_str);
@@ -261,7 +264,7 @@ void Server::handleRequestCID(Request &request,
     return request.sendContentNode(*node, cid,
                                    Request::CacheControl::Immutable);
   } else {
-    if (request.getMethod() != Request::Method::POST)
+    if (request.method != Request::Method::POST)
       return request.sendMethodNotAllowed("POST");
     // POST /cid
     auto node_or_null = request.getContentNode(store);
@@ -278,7 +281,7 @@ void Server::handleRequestCID(Request &request,
 void Server::handleRequestHead(Request &request,
                                std::optional<llvm::StringRef> head_str) {
   if (head_str) {
-    if (request.getMethod() == Request::Method::GET) {
+    if (request.method == Request::Method::GET) {
       // GET /head/...
       auto cid = store.resolveOptional(Head(*head_str));
       if (!cid)
@@ -287,7 +290,7 @@ void Server::handleRequestHead(Request &request,
             "Head \"" + *head_str + "\" not found in store.");
       return request.sendContentNode(Node(store, *cid), std::nullopt,
                                      Request::CacheControl::Mutable);
-    } else if (request.getMethod() == Request::Method::PUT) {
+    } else if (request.method == Request::Method::PUT) {
       // PUT /head/...
       if (head_str->empty() || !isLegalUTF8(*head_str))
         return request.sendError(
@@ -306,7 +309,7 @@ void Server::handleRequestHead(Request &request,
       return request.sendMethodNotAllowed("GET, HEAD, PUT");
     }
   } else {
-    if (request.getMethod() != Request::Method::GET)
+    if (request.method != Request::Method::GET)
       return request.sendMethodNotAllowed("GET, HEAD");
     // GET /head
     std::vector<URI> uris;
@@ -350,7 +353,7 @@ void Server::handleRequestCall(Request &request,
     if (sub_str != "evaluate")
       return request.sendError(Request::Status::NotFound, std::nullopt,
                                "Not Found", std::nullopt);
-    if (request.getMethod() != Request::Method::POST)
+    if (request.method != Request::Method::POST)
       return request.sendMethodNotAllowed("POST");
     // POST /call/.../.../evaluate
     unsigned timeout = DEFAULT_CALL_TIMEOUT;
@@ -369,11 +372,11 @@ void Server::handleRequestCall(Request &request,
     return handleEvaluateCall(request, std::move(*call), timeout);
 
   } else if (args_str) {
-    if (request.getMethod() != Request::Method::GET &&
-        request.getMethod() != Request::Method::PUT)
+    if (request.method != Request::Method::GET &&
+        request.method != Request::Method::PUT)
       return request.sendMethodNotAllowed("GET, HEAD, PUT");
 
-    if (request.getMethod() == Request::Method::GET) {
+    if (request.method == Request::Method::GET) {
       // GET /call/.../...
       auto cid = store.resolveOptional(*call);
       if (!cid)
@@ -395,7 +398,7 @@ void Server::handleRequestCall(Request &request,
       return request.sendCreated(std::nullopt);
     }
   } else if (func_str) {
-    if (request.getMethod() == Request::Method::GET) {
+    if (request.method == Request::Method::GET) {
       // GET /call/...
       std::vector<URI> uris;
       store.eachCall(*func_str, [&](const Call &call) {
@@ -408,7 +411,7 @@ void Server::handleRequestCall(Request &request,
         return false;
       });
       return request.sendContentURIs(uris, Request::CacheControl::Mutable);
-    } else if (request.getMethod() == Request::Method::DELETE) {
+    } else if (request.method == Request::Method::DELETE) {
       // DELETE /call/...
       store.call_invalidate(*func_str);
       return request.sendDeleted();
@@ -416,7 +419,7 @@ void Server::handleRequestCall(Request &request,
       return request.sendMethodNotAllowed("DELETE, GET, HEAD");
     }
   } else {
-    if (request.getMethod() != Request::Method::GET)
+    if (request.method != Request::Method::GET)
       return request.sendMethodNotAllowed("GET, HEAD");
 
     // GET /call
@@ -430,7 +433,7 @@ void Server::handleRequestCall(Request &request,
 }
 
 void Server::handleRequestWorker(Request &request) {
-  if (request.getMethod() != Request::Method::POST)
+  if (request.method != Request::Method::POST)
     return request.sendMethodNotAllowed("POST");
   // POST /worker
   auto node_or_null = request.getContentNode(store);

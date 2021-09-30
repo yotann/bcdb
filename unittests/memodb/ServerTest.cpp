@@ -35,8 +35,11 @@ enum class ResponseType {
 
 class MockRequest : public Request {
 public:
-  MOCK_METHOD(std::optional<Method>, getMethod, (), (const, override));
-  MOCK_METHOD(std::optional<URI>, getURI, (), (const, override));
+  MockRequest(std::optional<Method> method, std::optional<llvm::StringRef> uri)
+      : Request(method, uri ? URI::parse(*uri) : std::nullopt) {
+    setWillByDefault();
+  }
+
   MOCK_METHOD(std::optional<Node>, getContentNode,
               (Store & store, const std::optional<Node> &default_node),
               (override));
@@ -102,20 +105,10 @@ public:
           ASSERT_FALSE(responded);
           responded = true;
         });
-  }
-
-  void expectGets(Method method, StringRef uri_str) {
-    setWillByDefault();
-    EXPECT_CALL(*this, getMethod).WillRepeatedly(Return(method));
-    EXPECT_CALL(*this, getURI).WillOnce(Return(URI::parse(uri_str)));
     EXPECT_CALL(*this, getContentNode).Times(0);
   }
 
-  void expectGets(Method method, StringRef uri_str,
-                  std::optional<Node> content_node) {
-    setWillByDefault();
-    EXPECT_CALL(*this, getMethod).WillRepeatedly(Return(method));
-    EXPECT_CALL(*this, getURI).WillOnce(Return(URI::parse(uri_str)));
+  void expectGetContent(std::optional<Node> content_node) {
     EXPECT_CALL(*this, getContentNode)
         .WillOnce([=](Store &store, const std::optional<Node> &default_node) {
           return content_node ? content_node : default_node;
@@ -126,9 +119,7 @@ public:
 TEST(ServerTest, UnknownMethod) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.setWillByDefault();
-  EXPECT_CALL(request, getMethod).WillOnce(Return(std::nullopt));
+  MockRequest request(std::nullopt, std::nullopt);
   EXPECT_CALL(request, sendError(Request::Status::NotImplemented, _,
                                  Eq("Not Implemented"), _))
       .Times(1);
@@ -138,8 +129,7 @@ TEST(ServerTest, UnknownMethod) {
 TEST(ServerTest, MethodNotAllowed) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::DELETE, "/cid");
+  MockRequest request(Request::Method::DELETE, "/cid");
   EXPECT_CALL(request, sendMethodNotAllowed(Eq("POST"))).Times(1);
   server.handleRequest(request);
 }
@@ -147,8 +137,7 @@ TEST(ServerTest, MethodNotAllowed) {
 TEST(ServerTest, DotSegmentsInURI) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/cid/./uAXEAB2Zjb29raWU");
+  MockRequest request(Request::Method::GET, "/cid/./uAXEAB2Zjb29raWU");
   EXPECT_CALL(request,
               sendError(Request::Status::BadRequest, _, Eq("Bad Request"), _));
   server.handleRequest(request);
@@ -158,8 +147,7 @@ TEST(ServerTest, GetCID) {
   FakeStore store;
   store.put(Node("cookie"));
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/cid/uAXEAB2Zjb29raWU");
+  MockRequest request(Request::Method::GET, "/cid/uAXEAB2Zjb29raWU");
   EXPECT_CALL(request, sendContentNode(Node("cookie"),
                                        Eq(*CID::parse("uAXEAB2Zjb29raWU")),
                                        Request::CacheControl::Immutable));
@@ -169,8 +157,8 @@ TEST(ServerTest, GetCID) {
 TEST(ServerTest, PostCID) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::POST, "/cid", Node("cookie"));
+  MockRequest request(Request::Method::POST, "/cid");
+  request.expectGetContent(Node("cookie"));
   EXPECT_CALL(request, sendCreated(Eq(URI::parse("/cid/uAXEAB2Zjb29raWU"))));
   server.handleRequest(request);
 }
@@ -181,8 +169,8 @@ TEST(ServerTest, PostCIDLarge) {
     node.push_back(i);
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::POST, "/cid", node);
+  MockRequest request(Request::Method::POST, "/cid");
+  request.expectGetContent(node);
   EXPECT_CALL(
       request,
       sendCreated(Eq(URI::parse(
@@ -196,8 +184,7 @@ TEST(ServerTest, PostCIDLarge) {
 TEST(ServerTest, ListHeadsEmpty) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/head");
+  MockRequest request(Request::Method::GET, "/head");
   EXPECT_CALL(request,
               sendContentURIs(IsEmpty(), Request::CacheControl::Mutable));
   server.handleRequest(request);
@@ -208,8 +195,7 @@ TEST(ServerTest, ListHeads) {
   Server server(store);
   store.set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
   store.set(Head("empty"), *CID::parse("uAXEAAaA"));
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/head");
+  MockRequest request(Request::Method::GET, "/head");
   EXPECT_CALL(request,
               sendContentURIs(
                   Property(&ArrayRef<URI>::vec,
@@ -223,8 +209,7 @@ TEST(ServerTest, GetHead) {
   FakeStore store;
   Server server(store);
   store.set(Head("cookie"), *CID::parse("uAXEAB2Zjb29raWU"));
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/head/cookie");
+  MockRequest request(Request::Method::GET, "/head/cookie");
   EXPECT_CALL(request, sendContentNode(
                            Node(store, *CID::parse("uAXEAB2Zjb29raWU")),
                            Eq(std::nullopt), Request::CacheControl::Mutable));
@@ -234,9 +219,8 @@ TEST(ServerTest, GetHead) {
 TEST(ServerTest, PutHead) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::PUT, "/head/cookie",
-                     Node(store, *CID::parse("uAXEAB2Zjb29raWU")));
+  MockRequest request(Request::Method::PUT, "/head/cookie");
+  request.expectGetContent(Node(store, *CID::parse("uAXEAB2Zjb29raWU")));
   EXPECT_CALL(request, sendCreated(Eq(std::nullopt)));
   server.handleRequest(request);
   EXPECT_EQ(store.resolve(Head("cookie")), CID::parse("uAXEAB2Zjb29raWU"));
@@ -250,8 +234,7 @@ TEST(ServerTest, ListFuncs) {
   store.set(Call("identity", {cookie_cid}), cookie_cid);
   store.set(Call("identity", {empty_cid}), empty_cid);
   store.set(Call("const_empty", {cookie_cid}), empty_cid);
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/call");
+  MockRequest request(Request::Method::GET, "/call");
   EXPECT_CALL(request,
               sendContentURIs(Property(&ArrayRef<URI>::vec,
                                        UnorderedElementsAre(
@@ -269,8 +252,7 @@ TEST(ServerTest, InvalidateFunc) {
   store.set(Call("identity", {cookie_cid}), cookie_cid);
   store.set(Call("identity", {empty_cid}), empty_cid);
   store.set(Call("const_empty", {cookie_cid}), empty_cid);
-  MockRequest request;
-  request.expectGets(Request::Method::DELETE, "/call/identity");
+  MockRequest request(Request::Method::DELETE, "/call/identity");
   EXPECT_CALL(request, sendDeleted());
   server.handleRequest(request);
   EXPECT_TRUE(!store.resolveOptional(Call("identity", {cookie_cid})));
@@ -287,8 +269,7 @@ TEST(ServerTest, ListCalls) {
   store.set(Call("transmute", {empty_cid, empty_cid}), cookie_cid);
   store.set(Call("transmute", {cookie_cid}), empty_cid);
   store.set(Call("const_empty", {cookie_cid}), empty_cid);
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/call/transmute");
+  MockRequest request(Request::Method::GET, "/call/transmute");
   EXPECT_CALL(
       request,
       sendContentURIs(
@@ -306,8 +287,8 @@ TEST(ServerTest, GetCall) {
   FakeStore store;
   Server server(store);
   store.set(Call("transmute", {empty_cid, empty_cid}), cookie_cid);
-  MockRequest request;
-  request.expectGets(Request::Method::GET, "/call/transmute/uAXEAAaA,uAXEAAaA");
+  MockRequest request(Request::Method::GET,
+                      "/call/transmute/uAXEAAaA,uAXEAAaA");
   EXPECT_CALL(request,
               sendContentNode(Node(store, cookie_cid), Eq(std::nullopt),
                               Request::CacheControl::Mutable));
@@ -319,9 +300,9 @@ TEST(ServerTest, PutCall) {
   const CID empty_cid = *CID::parse("uAXEAAaA");
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::PUT, "/call/transmute/uAXEAAaA,uAXEAAaA",
-                     Node(store, cookie_cid));
+  MockRequest request(Request::Method::PUT,
+                      "/call/transmute/uAXEAAaA,uAXEAAaA");
+  request.expectGetContent(Node(store, cookie_cid));
   EXPECT_CALL(request, sendCreated(Eq(std::nullopt)));
   server.handleRequest(request);
   EXPECT_EQ(store.resolve(Call("transmute", {empty_cid, empty_cid})),
@@ -331,9 +312,8 @@ TEST(ServerTest, PutCall) {
 TEST(ServerTest, EvaluateAccepted) {
   FakeStore store;
   Server server(store);
-  MockRequest request;
-  request.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                     std::nullopt);
+  MockRequest request(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate");
+  request.expectGetContent(std::nullopt);
   EXPECT_CALL(request, sendAccepted());
   server.handleRequest(request);
 }
@@ -342,9 +322,9 @@ TEST(ServerTest, EvaluateCached) {
   FakeStore store;
   store.set(Call("inc", {*CID::parse("uAXEAAQA")}), *CID::parse("uAXEAAQE"));
   Server server(store);
-  MockRequest evaluate_req;
-  evaluate_req.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                          std::nullopt);
+  MockRequest evaluate_req(Request::Method::POST,
+                           "/call/inc/uAXEAAQA/evaluate");
+  evaluate_req.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate_req,
               sendContentNode(Node(store, *CID::parse("uAXEAAQE")), _, _));
   server.handleRequest(evaluate_req);
@@ -353,21 +333,20 @@ TEST(ServerTest, EvaluateCached) {
 TEST(ServerTest, EvaluateSuccessWithoutWorker) {
   FakeStore store;
   Server server(store);
-  MockRequest evaluate_req;
-  evaluate_req.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                          std::nullopt);
+  MockRequest evaluate_req(Request::Method::POST,
+                           "/call/inc/uAXEAAQA/evaluate");
+  evaluate_req.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate_req, sendAccepted());
   server.handleRequest(evaluate_req);
 
-  MockRequest put_req;
-  put_req.expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
-                     Node(store, *CID::parse("uAXEAAQE")));
+  MockRequest put_req(Request::Method::PUT, "/call/inc/uAXEAAQA");
+  put_req.expectGetContent(Node(store, *CID::parse("uAXEAAQE")));
   EXPECT_CALL(put_req, sendCreated(Eq(std::nullopt)));
   server.handleRequest(put_req);
 
-  MockRequest evaluate_req2;
-  evaluate_req2.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                           std::nullopt);
+  MockRequest evaluate_req2(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate");
+  evaluate_req2.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate_req2,
               sendContentNode(Node(store, *CID::parse("uAXEAAQE")), _, _));
   server.handleRequest(evaluate_req2);
@@ -377,22 +356,21 @@ TEST(ServerTest, EvaluateMultiSuccessWithoutWorker) {
   FakeStore store;
   Server server(store);
 
-  MockRequest evaluate0_req;
-  evaluate0_req.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                           std::nullopt);
+  MockRequest evaluate0_req(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate");
+  evaluate0_req.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate0_req, sendAccepted());
 
-  MockRequest evaluate1_req;
-  evaluate1_req.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                           std::nullopt);
+  MockRequest evaluate1_req(Request::Method::POST,
+                            "/call/inc/uAXEAAQA/evaluate");
+  evaluate1_req.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate1_req, sendAccepted());
 
   server.handleRequest(evaluate0_req);
   server.handleRequest(evaluate1_req);
 
-  MockRequest put_req;
-  put_req.expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
-                     Node(store, *CID::parse("uAXEAAQE")));
+  MockRequest put_req(Request::Method::PUT, "/call/inc/uAXEAAQA");
+  put_req.expectGetContent(Node(store, *CID::parse("uAXEAAQE")));
   EXPECT_CALL(put_req, sendCreated(Eq(std::nullopt)));
   server.handleRequest(put_req);
 }
@@ -403,9 +381,8 @@ TEST(ServerTest, WorkerNoJobs) {
       Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
   Server server(store);
 
-  MockRequest worker_req;
-  worker_req.expectGets(Request::Method::POST, "/worker",
-                        Node(store, worker_cid));
+  MockRequest worker_req(Request::Method::POST, "/worker");
+  worker_req.expectGetContent(Node(store, worker_cid));
   EXPECT_CALL(worker_req, sendContentNode(Node(nullptr), _,
                                           Request::CacheControl::Ephemeral));
 
@@ -418,15 +395,14 @@ TEST(ServerTest, WorkerBeforeEvaluate) {
       Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
   Server server(store);
 
-  MockRequest worker_req;
-  worker_req.expectGets(Request::Method::POST, "/worker",
-                        Node(store, worker_cid));
+  MockRequest worker_req(Request::Method::POST, "/worker");
+  worker_req.expectGetContent(Node(store, worker_cid));
   EXPECT_CALL(worker_req, sendContentNode(Node(nullptr), _,
                                           Request::CacheControl::Ephemeral));
 
-  MockRequest evaluate_req;
-  evaluate_req.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                          std::nullopt);
+  MockRequest evaluate_req(Request::Method::POST,
+                           "/call/inc/uAXEAAQA/evaluate");
+  evaluate_req.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate_req, sendAccepted());
 
   server.handleRequest(worker_req);
@@ -439,14 +415,13 @@ TEST(ServerTest, EvaluateBeforeWorker) {
       Node(node_map_arg, {{"funcs", Node(node_list_arg, {"id", "inc"})}}));
   Server server(store);
 
-  MockRequest evaluate_req;
-  evaluate_req.expectGets(Request::Method::POST, "/call/inc/uAXEAAQA/evaluate",
-                          std::nullopt);
+  MockRequest evaluate_req(Request::Method::POST,
+                           "/call/inc/uAXEAAQA/evaluate");
+  evaluate_req.expectGetContent(std::nullopt);
   EXPECT_CALL(evaluate_req, sendAccepted());
 
-  MockRequest worker_req;
-  worker_req.expectGets(Request::Method::POST, "/worker",
-                        Node(store, worker_cid));
+  MockRequest worker_req(Request::Method::POST, "/worker");
+  worker_req.expectGetContent(Node(store, worker_cid));
   EXPECT_CALL(worker_req,
               sendContentNode(
                   Node(node_map_arg,
@@ -455,9 +430,8 @@ TEST(ServerTest, EvaluateBeforeWorker) {
                         {"func", "inc"}}),
                   _, Request::CacheControl::Ephemeral));
 
-  MockRequest result_req;
-  result_req.expectGets(Request::Method::PUT, "/call/inc/uAXEAAQA",
-                        Node(store, *CID::parse("uAXEAAQE")));
+  MockRequest result_req(Request::Method::PUT, "/call/inc/uAXEAAQA");
+  result_req.expectGetContent(Node(store, *CID::parse("uAXEAAQE")));
   EXPECT_CALL(result_req, sendCreated(Eq(std::nullopt)));
 
   server.handleRequest(evaluate_req);

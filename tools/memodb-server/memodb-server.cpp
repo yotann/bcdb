@@ -109,21 +109,15 @@ struct NNGRequest : public HTTPRequest,
   nng_aio *http_aio;
 
   NNGRequest(nng_http_req *req, nng_aio *http_aio)
-      : req(req), http_aio(http_aio) {
+      : HTTPRequest(nng_http_req_get_method(req),
+                    URI::parse(nng_http_req_get_uri(req))),
+        req(req), http_aio(http_aio) {
     nng_http_res *res_tmp;
     checkErr(nng_http_res_alloc(&res_tmp));
     res.reset(res_tmp);
   }
 
   ~NNGRequest() override {}
-
-  llvm::StringRef getMethodString() const override {
-    return nng_http_req_get_method(req);
-  }
-
-  std::optional<URI> getURI() const override {
-    return URI::parse(nng_http_req_get_uri(req));
-  }
 
   std::optional<llvm::StringRef>
   getHeader(const llvm::Twine &key) const override {
@@ -195,9 +189,10 @@ struct NNGRequest : public HTTPRequest,
 
     SmallVector<char, 256> buffer;
     auto line =
-        (ip_address + " - - [" + time_buffer + "] \"" + getMethodString() +
-         " " + nng_http_req_get_uri(req) + " " + nng_http_req_get_version(req) +
-         "\" " + Twine(nng_http_res_get_status(res.get())) + " " +
+        (ip_address + " - - [" + time_buffer + "] \"" +
+         nng_http_req_get_method(req) + " " + nng_http_req_get_uri(req) + " " +
+         nng_http_req_get_version(req) + "\" " +
+         Twine(nng_http_res_get_status(res.get())) + " " +
          (body_size ? Twine(body_size) : Twine("-")))
             .toStringRef(buffer);
 

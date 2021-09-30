@@ -178,9 +178,7 @@ static std::unique_ptr<ToolOutputFile> GetOutputFile(bool binary = true) {
 namespace {
 class CLIRequest : public Request {
 public:
-  CLIRequest(Method method, const URI &uri) : method(method), uri(uri) {}
-  std::optional<Method> getMethod() const override { return method; }
-  std::optional<URI> getURI() const override { return uri; }
+  CLIRequest(Method method, const URI &uri) : Request(method, uri) {}
 
   std::optional<Node>
   getContentNode(Store &store,
@@ -249,9 +247,6 @@ public:
     errs() << "invalid operation for this URI\n";
     exit(1);
   }
-
-  Method method;
-  URI uri;
 };
 } // end anonymous namespace
 

@@ -16,7 +16,6 @@ class Store;
 
 class HTTPRequest : public Request {
 public:
-  std::optional<Method> getMethod() const override;
   std::optional<Node> getContentNode(
       Store &store,
       const std::optional<Node> &default_node = std::nullopt) override;
@@ -40,7 +39,7 @@ public:
   void sendMethodNotAllowed(llvm::StringRef allow) override;
 
 protected:
-  virtual llvm::StringRef getMethodString() const = 0;
+  HTTPRequest(llvm::StringRef method_string, std::optional<URI> uri);
 
   // Should use case-insensitive comparison for key.
   // If more than one header matches, should return their values joined with
