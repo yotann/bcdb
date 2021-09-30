@@ -64,6 +64,16 @@ Accept: application/octet-stream, application/cbor;q=0.9, application/problem+js
 If the `Accept` header does not specify a preference, the server will send
 responses in JSON format for maximum compatibility.
 
+### Query parameters
+
+The query parameter `depth=<N>` can be used to include linked Nodes directly in
+response bodies, instead of including the CID of the Node. For example,
+`/cid/uAXEACdgqRgABcQABAg?depth=0` returns `{"cid":"uAXEAAQI"}`, but
+`/cid/uAXEACdgqRgABcQABAg?depth=1` returns `{"node":2}`. Links nested inside
+links are included up to the specified depth; deeper links are returned as
+CIDs. The default value is `depth=0`. This parameter currently only affects
+JSON responses.
+
 ### Caching
 
 Clients and proxies can use the standard `If-None-Match`, `ETag`, and

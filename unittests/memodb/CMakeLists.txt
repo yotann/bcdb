@@ -7,6 +7,7 @@ add_llvm_unittest(MemoDBTests
   JSONLoadTest.cpp
   JSONWriteTest.cpp
   MultibaseTest.cpp
+  RequestTest.cpp
   ServerTest.cpp
   URITest.cpp
 )

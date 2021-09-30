@@ -9,6 +9,7 @@
 #include <string>
 
 #include "memodb/CID.h"
+#include "memodb/JSONEncoder.h"
 #include "memodb/Multibase.h"
 #include "memodb/Node.h"
 #include "memodb/URI.h"
@@ -16,6 +17,31 @@
 using namespace memodb;
 using llvm::SmallVector;
 using llvm::StringRef;
+
+namespace {
+class CustomJSONEncoder : public JSONEncoder {
+public:
+  CustomJSONEncoder(llvm::raw_ostream &os, unsigned depth)
+      : JSONEncoder(os), depth(depth) {}
+  void visitLink(const Link &value) override;
+
+private:
+  unsigned depth;
+};
+}; // end anonymous namespace
+
+void CustomJSONEncoder::visitLink(const Link &value) {
+  if (depth > 0) {
+    os << "{\"node\":";
+    --depth;
+    first = true;
+    visitNode(*value);
+    ++depth;
+    os << "}";
+  } else {
+    JSONEncoder::visitLink(value);
+  }
+}
 
 std::string memodb::escapeForHTML(llvm::StringRef str) {
   std::string escaped;
@@ -45,6 +71,16 @@ void Request::sendContentNode(const Node &node,
     if (sendETag(etag, cache_control))
       return;
   }
+
+  unsigned depth = 0;
+  if (uri) {
+    for (StringRef query_param : uri->query_params) {
+      if (query_param.consume_front("depth="))
+        query_param.getAsInteger(10, depth); // ignore errors
+    }
+  }
+  // Query parameters don't need to affect the etag because caches must use the
+  // full URI as a cache key.
 
   llvm::StringRef body;
   std::vector<std::uint8_t> byte_buffer;
@@ -96,7 +132,7 @@ void Request::sendContentNode(const Node &node,
     body = stream.str();
   } else {
     type = ContentType::JSON; // in case a weird type was selected
-    stream << node;
+    CustomJSONEncoder(stream, depth).visitNode(node);
     body = stream.str();
   }
 

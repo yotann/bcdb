@@ -30,7 +30,7 @@ public:
   virtual void visitKey(llvm::StringRef value) override;
   virtual void endMap() override;
 
-private:
+protected:
   llvm::raw_ostream &os;
   bool first = true;
 };
