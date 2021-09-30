@@ -8,6 +8,7 @@
 #include "FakeStore.h"
 #include "memodb/CID.h"
 #include "memodb/Node.h"
+#include "memodb/Request.h"
 #include "memodb/Store.h"
 #include "memodb/URI.h"
 #include "gmock/gmock.h"

@@ -20,6 +20,7 @@
 
 #include "memodb/CAR.h"
 #include "memodb/Evaluator.h"
+#include "memodb/Request.h"
 #include "memodb/Server.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"

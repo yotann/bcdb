@@ -16,6 +16,7 @@ add_llvm_library(libmemodb
   Multibase.cpp
   Node.cpp
   NodeVisitor.cpp
+  Request.cpp
   RocksDB.cpp
   Server.cpp
   SQLite.cpp

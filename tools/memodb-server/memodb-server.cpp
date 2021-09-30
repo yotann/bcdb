@@ -14,6 +14,7 @@
 #include <nng/supplemental/util/platform.h>
 
 #include "memodb/HTTP.h"
+#include "memodb/Request.h"
 #include "memodb/Server.h"
 #include "memodb/Store.h"
 #include "memodb/ToolSupport.h"

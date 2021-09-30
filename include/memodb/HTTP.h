@@ -8,7 +8,7 @@
 
 #include "CID.h"
 #include "Node.h"
-#include "Server.h"
+#include "Request.h"
 
 namespace memodb {
 
