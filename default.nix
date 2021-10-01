@@ -2,11 +2,20 @@
 }:
 
 let
-  debugLLVM = llvm: (llvm.override {
-    debugVersion = true;
-  }).overrideAttrs (o: {
+  debugLLVM = llvm: llvm.overrideAttrs (o: {
+    cmakeFlags = o.cmakeFlags ++ [
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+      "-DLLVM_ENABLE_ASSERTIONS=ON"
+      "-DLLVM_BUILD_TESTS=OFF"
+      "-DLLVM_BUILD_LLVM_DYLIB=ON"
+      "-DLLVM_LINK_LLVM_DYLIB=ON"
+    ];
+    postInstall = builtins.replaceStrings
+      ["LLVMExports-release"]
+      ["LLVMExports-relwithdebinfo"]
+      o.postInstall;
     doCheck = false;
-    # TODO: also prevent building test files
+    dontStrip = true;
   });
 
   nng = pkgs.callPackage ./nix/nng {};
