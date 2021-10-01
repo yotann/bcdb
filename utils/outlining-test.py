@@ -22,7 +22,7 @@ def trace_args(args):
 opts, args = getopt.gnu_getopt(
     sys.argv[1:],
     "",
-    ["allow-nonzero-return", "no-run"],
+    ["allow-nonzero-return", "no-run", "reduce-failures"],
 )
 filename = None
 lli_pre_args = []
@@ -37,11 +37,14 @@ for arg in args:
 
 allow_nonzero_return = False
 enable_lli = True
+reduce_failures = False
 for opt, value in opts:
     if opt == "--no-run":
         enable_lli = False
     elif opt == "--allow-nonzero-return":
         allow_nonzero_return = True
+    elif opt == "--reduce-failures":
+        reduce_failures = True
 
 if enable_lli:
     # Run original code to determine expected output.
@@ -76,10 +79,12 @@ class Candidate:
         )
 
 
+opt_args = ["opt", "--load=BCDBOutliningPlugin.so"]
+if b"LLVM version 10." not in subprocess.check_output(opt_args + ["--version"]):
+    opt_args.append("-enable-new-pm=0")
+
 # List all candidates.
-args = [
-    "opt",
-    "--load=BCDBOutliningPlugin.so",
+args = opt_args + [
     "--outlining-candidates",
     "--outline-unprofitable",
     "--analyze",
@@ -101,15 +106,9 @@ for function, nodes in re.findall(
 
 candidates.sort(key=lambda candidate: (candidate.function, candidate.nodes))
 
-# Test outlining with all candidates. Outline multiple candidates at once when
-# possible.
-while candidates:
-    chosen = [candidates.pop()]
-    for i in range(len(candidates) - 1, -1, -1):
-        if not any(x.overlaps(candidates[i]) for x in chosen):
-            chosen.append(candidates.pop(i))
 
-    args = ["opt", "--load=BCDBOutliningPlugin.so", "--outlining-extractor", filename]
+def check_if_incorrect(chosen):
+    args = opt_args + ["--outlining-extractor", filename]
     for x in chosen:
         args.append(f"--outline-only={x}")
     trace_args(args)
@@ -121,10 +120,36 @@ while candidates:
         p = subprocess.run(args, input=bitcode, capture_output=True)
         if p.returncode != expected_returncode:
             print("Return code mismatch!")
-            sys.exit(1)
+            return True
         if p.stdout != expected_stdout:
             print("stdout mismatch!")
-            sys.exit(1)
+            return True
         if p.stderr != expected_stderr:
-            print("stdout mismatch!")
-            sys.exit(1)
+            print("stderr mismatch!")
+            return True
+
+    return False
+
+
+# Test outlining with all candidates. Outline multiple candidates at once when
+# possible.
+while candidates:
+    chosen = [candidates.pop()]
+    for i in range(len(candidates) - 1, -1, -1):
+        if not any(x.overlaps(candidates[i]) for x in chosen):
+            chosen.append(candidates.pop(i))
+
+    if check_if_incorrect(chosen):
+        if reduce_failures:
+            while len(chosen) >= 2:
+                first = chosen[: len(chosen) // 2]
+                if check_if_incorrect(first):
+                    chosen = first
+                    continue
+                second = chosen[len(chosen) // 2 :]
+                if check_if_incorrect(second):
+                    chosen = second
+                    continue
+                break
+            print("reduced to:", " ".join(f"--outline-only={x}" for x in chosen))
+        sys.exit(1)
