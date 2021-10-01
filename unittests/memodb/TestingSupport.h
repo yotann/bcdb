@@ -16,7 +16,11 @@ MATCHER_P(TwineEq, string, "") {
 }
 
 MATCHER_P(TwineCaseEq, string, "") {
+#if LLVM_VERSION_MAJOR >= 13
+  return llvm::StringRef(string).equals_insensitive(arg.str());
+#else
   return llvm::StringRef(string).equals_lower(arg.str());
+#endif
 }
 
 } // end anonymous namespace

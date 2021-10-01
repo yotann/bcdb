@@ -27,6 +27,10 @@ static void do_fini(void) {
     (*ptr)();
 }
 
+static void do_fini_on_exit(int rc, void *opaque) {
+  do_fini();
+}
+
 static void try_main(int argc, char *argv[], char *envp[]) {
   const char *name = basename(argv[0]);
   struct Main *ptr;
@@ -35,7 +39,12 @@ static void try_main(int argc, char *argv[], char *envp[]) {
       fini = ptr->init;
       do_fini();
       fini = ptr->fini;
+#ifdef __linux__
+      // Some versions of libc.so only export on_exit, not atexit.
+      on_exit(do_fini_on_exit, NULL);
+#else
       atexit(do_fini);
+#endif
       exit(ptr->main(argc, argv, envp));
     }
   }

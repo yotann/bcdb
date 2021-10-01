@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
   Err(errorCodeToError(EC));
   Joiner.Finish();
 
-  ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
+  ToolOutputFile Out(OutputFilename, EC, sys::fs::OF_None);
   Err(errorCodeToError(EC));
 
   if (verifyModule(*M, &errs())) {

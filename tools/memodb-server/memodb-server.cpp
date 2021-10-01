@@ -33,11 +33,10 @@ static cl::opt<std::string> listen_url(cl::Positional, cl::Required,
                                        cl::value_desc("url"),
                                        cl::cat(server_category));
 
-static cl::opt<std::string>
-    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
-                    cl::init(std::string(llvm::StringRef::withNullAsEmpty(
-                        std::getenv("MEMODB_STORE")))),
-                    cl::cat(server_category));
+static cl::opt<std::string> StoreUriOrEmpty(
+    "store", cl::Optional, cl::desc("URI of the MemoDB store"),
+    cl::init(std::string(llvm::StringRef(std::getenv("MEMODB_STORE")))),
+    cl::cat(server_category));
 
 static llvm::StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {

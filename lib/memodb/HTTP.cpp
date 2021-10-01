@@ -19,6 +19,14 @@
 using namespace memodb;
 using llvm::StringRef;
 
+static bool equals_insensitive(llvm::StringRef lhs, llvm::StringRef rhs) {
+#if LLVM_VERSION_MAJOR >= 13
+  return lhs.equals_insensitive(rhs);
+#else
+  return lhs.equals_lower(rhs);
+#endif
+}
+
 // Parse the Accept header and find the q= value (if any) for the specified
 // content_type. Return the q= value scaled from 0 to 1000.
 // https://datatracker.ietf.org/doc/html/rfc7231#section-5.3.2
@@ -100,7 +108,7 @@ unsigned HTTPRequest::getAcceptQuality(ContentType content_type) const {
         remainder = remainder.substr(i).ltrim(" \t");
       }
 
-      if (param.equals_lower("q") && value.size() >= 1) {
+      if (equals_insensitive(param, "q") && value.size() >= 1) {
         char buffer[4] = {
             value[0],
             value.size() >= 3 && value[1] == '.' ? value[2] : '0',
@@ -112,8 +120,8 @@ unsigned HTTPRequest::getAcceptQuality(ContentType content_type) const {
       }
     }
 
-    if (type.equals_lower(wanted_type)) {
-      if (subtype.equals_lower(wanted_subtype))
+    if (equals_insensitive(type, wanted_type)) {
+      if (equals_insensitive(subtype, wanted_subtype))
         return q;
       if (subtype == "*")
         any_subtype_q = q;
@@ -149,7 +157,7 @@ HTTPRequest::getContentNode(Store &store,
   llvm::StringRef type_str =
       type_str_or_null ? type_str_or_null->split(';').first.trim(" \t") : "";
 
-  if (type_str.equals_lower("application/cbor")) {
+  if (equals_insensitive(type_str, "application/cbor")) {
     BytesRef body_bytes(reinterpret_cast<const std::uint8_t *>(body_str.data()),
                         body_str.size());
     auto node_or_err = Node::loadFromCBOR(store, body_bytes);
@@ -161,10 +169,10 @@ HTTPRequest::getContentNode(Store &store,
     }
     return *node_or_err;
 
-  } else if (type_str.equals_lower("application/octet-stream")) {
+  } else if (equals_insensitive(type_str, "application/octet-stream")) {
     return Node(byte_string_arg, body_str);
 
-  } else if (type_str.equals_lower("application/json")) {
+  } else if (equals_insensitive(type_str, "application/json")) {
     auto node_or_err = Node::loadFromJSON(store, body_str);
     if (!node_or_err) {
       sendError(Status::BadRequest, "/problems/invalid-or-unsupported-json",
@@ -359,13 +367,13 @@ void HTTPRequest::sendDeleted() {
 }
 
 static std::optional<Request::Method> parseMethod(llvm::StringRef str) {
-  if (str.equals_lower("GET") || str.equals_lower("HEAD"))
+  if (equals_insensitive(str, "GET") || equals_insensitive(str, "HEAD"))
     return Request::Method::GET;
-  if (str.equals_lower("POST"))
+  if (equals_insensitive(str, "POST"))
     return Request::Method::POST;
-  if (str.equals_lower("PUT"))
+  if (equals_insensitive(str, "PUT"))
     return Request::Method::PUT;
-  if (str.equals_lower("DELETE"))
+  if (equals_insensitive(str, "DELETE"))
     return Request::Method::DELETE;
   return std::nullopt;
 }

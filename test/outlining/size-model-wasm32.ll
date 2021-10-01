@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -size-model -analyze %s | FileCheck %s
+; RUN: %outopt -size-model -analyze %s | FileCheck %s
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128-ni:1"
 target triple = "wasm32"

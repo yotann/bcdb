@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-dependence -force-transitive-closures -analyze %s \
+; RUN: %outopt -outlining-dependence -force-transitive-closures -analyze %s \
 ; RUN: | FileCheck %s --match-full-lines
 
 ; RUN: %outliningtest --no-run %s

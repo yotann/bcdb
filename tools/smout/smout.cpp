@@ -62,11 +62,10 @@ static cl::opt<std::string>
                cl::sub(ExtractCalleesCommand), cl::sub(OptimizeCommand),
                cl::sub(SolveGreedyCommand));
 
-static cl::opt<std::string>
-    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
-                    cl::init(std::string(StringRef::withNullAsEmpty(
-                        std::getenv("MEMODB_STORE")))),
-                    cl::cat(SmoutCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string> StoreUriOrEmpty(
+    "store", cl::Optional, cl::desc("URI of the MemoDB store"),
+    cl::init(std::string(StringRef(std::getenv("MEMODB_STORE")))),
+    cl::cat(SmoutCategory), cl::sub(*cl::AllSubCommands));
 
 static cl::opt<int> MinBenefit("min-benefit",
                                cl::desc("Outlined candidates must have this "

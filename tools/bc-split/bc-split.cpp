@@ -42,7 +42,7 @@ static Error saveModule(StringRef Dir, StringRef File, Module &MPart) {
 
   std::string Filename =
       (OutputDirectory + "/" + Dir + "/" + File + ".bc").str();
-  ToolOutputFile Out(Filename, EC, sys::fs::F_None);
+  ToolOutputFile Out(Filename, EC, sys::fs::OF_None);
   if (EC)
     return errorCodeToError(EC);
 

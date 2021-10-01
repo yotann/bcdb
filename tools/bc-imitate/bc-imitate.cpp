@@ -84,7 +84,7 @@ static int Annotate() {
   }
 
   std::error_code EC;
-  ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
+  ToolOutputFile Out(OutputFilename, EC, sys::fs::OF_None);
   Err(errorCodeToError(EC));
   if (verifyModule(*M, &errs())) {
     return 1;
@@ -151,7 +151,7 @@ static int Extract() {
   }
 
   std::error_code EC;
-  ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
+  ToolOutputFile Out(OutputFilename, EC, sys::fs::OF_None);
   Err(errorCodeToError(EC));
   if (verifyModule(*M, &errs())) {
     return 1;

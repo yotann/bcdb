@@ -49,11 +49,10 @@ static cl::SubCommand SetCommand("set", "Set a head or a call result");
 static cl::SubCommand TransferCommand("transfer",
                                       "Transfer data to a target database");
 
-static cl::opt<std::string>
-    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
-                    cl::init(std::string(StringRef::withNullAsEmpty(
-                        std::getenv("MEMODB_STORE")))),
-                    cl::cat(MemoDBCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string> StoreUriOrEmpty(
+    "store", cl::Optional, cl::desc("URI of the MemoDB store"),
+    cl::init(std::string(StringRef(std::getenv("MEMODB_STORE")))),
+    cl::cat(MemoDBCategory), cl::sub(*cl::AllSubCommands));
 
 static StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {
@@ -166,7 +165,7 @@ static std::unique_ptr<ToolOutputFile> GetOutputFile(bool binary = true) {
   ExitOnError Err("value write: ");
   std::error_code EC;
   auto OutputFile =
-      std::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::F_None);
+      std::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::OF_None);
   if (EC)
     Err(errorCodeToError(EC));
   if (!binary || Force || !CheckBitcodeOutputToConsole(OutputFile->os()))

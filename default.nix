@@ -39,16 +39,21 @@ in rec {
     llvm = debugLLVM pkgs.llvmPackages_12.libllvm;
     clang = pkgs.clang_12;
   };
+  bcdb-llvm13 = pkgs.callPackage ./nix/bcdb {
+    inherit nng;
+    llvm = debugLLVM pkgs.llvmPackages_13.libllvm;
+    clang = pkgs.llvmPackages_13.clang;
+  };
 
   # Build with Clang instead of GCC (may produce different warnings/errors).
   # Also use ASAN and UBSAN to catch leaks and undefined behavior.
   bcdb-clang-sanitize = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    inherit (pkgs.llvmPackages_12) stdenv llvm clang;
+    inherit (pkgs.llvmPackages_13) stdenv llvm clang;
     sanitize = true;
   };
 
-  bcdb = bcdb-llvm12;
+  bcdb = bcdb-llvm13;
 
   bcdb-without-optional-deps = bcdb.override { nng = null; rocksdb = null; };
 

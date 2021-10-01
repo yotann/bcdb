@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -size-model -analyze %s | FileCheck %s
+; RUN: %outopt -size-model -analyze %s | FileCheck %s
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32-S128"
 target triple = "riscv32-unknown-unknown-elf"
@@ -19,7 +18,7 @@ define i32 @collatz_len(i32 %0) {
 3:
 ; CHECK-NEXT: %4 = {{.*}} ; 0 bytes
   %4 = icmp eq i32 %0, 1
-; CHECK-NEXT: br i1 %4, {{.*}} ; 4 bytes
+; CHECK-NEXT: br i1 %4, {{.*}} ; {{[0-9]+}} bytes
   br i1 %4, label %17, label %6
 
 ; CHECK: 5:

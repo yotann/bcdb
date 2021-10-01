@@ -47,7 +47,7 @@ static void WriteOutputFile(const SmallVectorImpl<char> &Buffer) {
 
   std::error_code EC;
   std::unique_ptr<ToolOutputFile> Out(
-      new ToolOutputFile(OutputFilename, EC, sys::fs::F_None));
+      new ToolOutputFile(OutputFilename, EC, sys::fs::OF_None));
   if (EC) {
     errs() << EC.message() << '\n';
     exit(1);

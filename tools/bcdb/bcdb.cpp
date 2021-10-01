@@ -29,11 +29,10 @@ using namespace bcdb;
 using namespace llvm;
 using namespace memodb;
 
-static cl::opt<std::string>
-    StoreUriOrEmpty("store", cl::Optional, cl::desc("URI of the MemoDB store"),
-                    cl::init(std::string(StringRef::withNullAsEmpty(
-                        std::getenv("MEMODB_STORE")))),
-                    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
+static cl::opt<std::string> StoreUriOrEmpty(
+    "store", cl::Optional, cl::desc("URI of the MemoDB store"),
+    cl::init(std::string(StringRef(std::getenv("MEMODB_STORE")))),
+    cl::cat(BCDBCategory), cl::sub(*cl::AllSubCommands));
 
 static StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {
@@ -129,7 +128,7 @@ static Expected<bool> ShouldWriteModule() {
     return true;
   std::error_code EC;
   OutputFile =
-      std::make_unique<ToolOutputFile>(GetOutputFilename, EC, sys::fs::F_None);
+      std::make_unique<ToolOutputFile>(GetOutputFilename, EC, sys::fs::OF_None);
   if (EC)
     return errorCodeToError(EC);
   if (GetForce || !CheckBitcodeOutputToConsole(OutputFile->os()))
@@ -302,7 +301,7 @@ static int GL() {
     std::error_code EC;
     EC = sys::fs::create_directories(sys::path::parent_path(OutPath));
     Err(errorCodeToError(EC));
-    ToolOutputFile OutputFile(OutPath, EC, sys::fs::F_None);
+    ToolOutputFile OutputFile(OutPath, EC, sys::fs::OF_None);
     Err(errorCodeToError(EC));
     WriteBitcodeToFile(M, OutputFile.os());
     OutputFile.keep();

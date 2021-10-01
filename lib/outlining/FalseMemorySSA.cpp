@@ -57,6 +57,12 @@ static cl::opt<unsigned> MaxCheckLimit(
 
 namespace llvm {
 
+#if LLVM_VERSION_MAJOR >= 13
+static const AliasResult MayAlias(AliasResult::MayAlias);
+static const AliasResult MustAlias(AliasResult::MustAlias);
+static const AliasResult NoAlias(AliasResult::NoAlias);
+#endif
+
 /// An assembly annotator class to print Memory SSA information in
 /// comments.
 class FalseMemorySSAAnnotatedWriter : public AssemblyAnnotationWriter {

@@ -133,8 +133,13 @@ Error BCDB::Delete(llvm::StringRef Name) {
 }
 
 static hash_code HashConstant(Constant *C) {
-  if (auto *CAZ = dyn_cast<ConstantAggregateZero>(C))
+  if (auto *CAZ = dyn_cast<ConstantAggregateZero>(C)) {
+#if LLVM_VERSION_MAJOR >= 13
+    return hash_value(CAZ->getElementCount().getKnownMinValue());
+#else
     return hash_value(CAZ->getNumElements());
+#endif
+  }
   if (auto *CDS = dyn_cast<ConstantDataSequential>(C))
     return hash_value(CDS->getRawDataValues());
   return 0;

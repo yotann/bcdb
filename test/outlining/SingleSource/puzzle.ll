@@ -1,4 +1,5 @@
-; RUN: %outliningtest %s
+; RUN: %outliningtest -- -jit-kind=mcjit %s
+; -jit-kind=orc is buggy for this program: https://bugs.llvm.org/show_bug.cgi?id=52031
 
 ; REQUIRES: llvm12
 ; REQUIRES: x86_64

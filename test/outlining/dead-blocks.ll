@@ -1,9 +1,7 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outlining-dependence -force-transitive-closures -analyze %s \
+; RUN: %outopt -outlining-dependence -force-transitive-closures -analyze %s \
 ; RUN: | FileCheck %s --match-full-lines
 
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outline-only=1 -outlining-extractor -verify -S %s \
+; RUN: %outopt -outline-only=1 -outlining-extractor -verify -S %s \
 ; RUN: | FileCheck --check-prefix=EXTRACT %s
 
 ; CHECK-LABEL: define void @f() {

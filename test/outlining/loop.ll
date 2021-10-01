@@ -1,5 +1,4 @@
-; RUN: opt -load %shlibdir/BCDBOutliningPlugin%shlibext \
-; RUN:     -outline-only=3 -outlining-extractor -verify -S %s | FileCheck %s
+; RUN: %outopt -outline-only=3 -outlining-extractor -verify -S %s | FileCheck %s
 
 ; RUN: %outliningtest --no-run %s
 
