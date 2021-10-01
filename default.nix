@@ -2,6 +2,14 @@
 }:
 
 let
+  assertLLVM = llvm: llvm.overrideAttrs (o: {
+    cmakeFlags = o.cmakeFlags ++ [
+      "-DLLVM_ENABLE_ASSERTIONS=ON"
+      "-DLLVM_BUILD_TESTS=OFF"
+    ];
+    doCheck = false;
+  });
+
   debugLLVM = llvm: llvm.overrideAttrs (o: {
     cmakeFlags = o.cmakeFlags ++ [
       "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
@@ -26,20 +34,25 @@ let
 in rec {
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = debugLLVM pkgs.llvmPackages_10.libllvm;
+    llvm = assertLLVM pkgs.llvmPackages_10.libllvm;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = debugLLVM pkgs.llvmPackages_11.libllvm;
+    llvm = assertLLVM pkgs.llvmPackages_11.libllvm;
     clang = pkgs.clang_11;
   };
   bcdb-llvm12 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = debugLLVM pkgs.llvmPackages_12.libllvm;
+    llvm = assertLLVM pkgs.llvmPackages_12.libllvm;
     clang = pkgs.clang_12;
   };
   bcdb-llvm13 = pkgs.callPackage ./nix/bcdb {
+    inherit nng;
+    llvm = assertLLVM pkgs.llvmPackages_13.libllvm;
+    clang = pkgs.llvmPackages_13.clang;
+  };
+  bcdb-llvm13debug = pkgs.callPackage ./nix/bcdb {
     inherit nng;
     llvm = debugLLVM pkgs.llvmPackages_13.libllvm;
     clang = pkgs.llvmPackages_13.clang;
@@ -54,6 +67,7 @@ in rec {
   };
 
   bcdb = bcdb-llvm13;
+  bcdb-debug = bcdb-llvm13debug;
 
   bcdb-without-optional-deps = bcdb.override { nng = null; rocksdb = null; };
 
