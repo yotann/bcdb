@@ -16,17 +16,17 @@ let
 
 in rec {
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
-    inherit nng rocksdb;
+    inherit nng;
     llvm = debugLLVM pkgs.llvmPackages_10.libllvm;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
-    inherit nng rocksdb;
+    inherit nng;
     llvm = debugLLVM pkgs.llvmPackages_11.libllvm;
     clang = pkgs.clang_11;
   };
   bcdb-llvm12 = pkgs.callPackage ./nix/bcdb {
-    inherit nng rocksdb;
+    inherit nng;
     llvm = debugLLVM pkgs.llvmPackages_12.libllvm;
     clang = pkgs.clang_12;
   };
@@ -34,7 +34,7 @@ in rec {
   # Build with Clang instead of GCC (may produce different warnings/errors).
   # Also use ASAN and UBSAN to catch leaks and undefined behavior.
   bcdb-clang-sanitize = pkgs.callPackage ./nix/bcdb {
-    inherit nng rocksdb;
+    inherit nng;
     inherit (pkgs.llvmPackages_12) stdenv llvm clang;
     sanitize = true;
   };
@@ -42,21 +42,6 @@ in rec {
   bcdb = bcdb-llvm12;
 
   bcdb-without-optional-deps = bcdb.override { nng = null; rocksdb = null; };
-
-  rocksdb = pkgs.rocksdb.overrideAttrs (o: {
-    version = "6.20.3";
-    src = pkgs.fetchFromGitHub {
-      owner = "facebook";
-      repo = "rocksdb";
-      rev = "v6.20.3";
-      sha256 = "106psd0ap38d0b5ghm6gy66ig02xn8yjmzpb8l6x23kvw7vzrfrc";
-    };
-    # Install the tools.
-    postInstall = ''
-      mkdir -p $out/bin
-      cp tools/ldb tools/sst_dump $out/bin/
-    '';
-  });
 
   symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
 }
