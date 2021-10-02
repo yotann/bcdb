@@ -26,35 +26,37 @@ let
     dontStrip = true;
   });
 
-  nng = pkgs.callPackage ./nix/nng {};
-
-  coinutils = pkgs.callPackage ./nix/coinutils {};
-  cgl = pkgs.callPackage ./nix/cgl { inherit coinutils; };
-
 in rec {
+  # default BCDB versions
+  bcdb = bcdb-llvm13;
+  bcdb-debug = bcdb-llvm13debug;
+
+  # BCDB with various versions of LLVM (assertions enabled)
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = assertLLVM pkgs.llvmPackages_10.libllvm;
+    llvm = llvm10-assert;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = assertLLVM pkgs.llvmPackages_11.libllvm;
+    llvm = llvm11-assert;
     clang = pkgs.clang_11;
   };
   bcdb-llvm12 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = assertLLVM pkgs.llvmPackages_12.libllvm;
+    llvm = llvm12-assert;
     clang = pkgs.clang_12;
   };
   bcdb-llvm13 = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = assertLLVM pkgs.llvmPackages_13.libllvm;
+    llvm = llvm13-assert;
     clang = pkgs.llvmPackages_13.clang;
   };
+
+  # BCDB and LLVM with debugging info, intended for local development
   bcdb-llvm13debug = pkgs.callPackage ./nix/bcdb {
     inherit nng;
-    llvm = debugLLVM pkgs.llvmPackages_13.libllvm;
+    llvm = llvm13-debug;
     clang = pkgs.llvmPackages_13.clang;
   };
 
@@ -66,10 +68,17 @@ in rec {
     sanitize = true;
   };
 
-  bcdb = bcdb-llvm13;
-  bcdb-debug = bcdb-llvm13debug;
-
+  # Test whether BCDB works without these optional libraries
   bcdb-without-optional-deps = bcdb.override { nng = null; rocksdb = null; };
 
+  # Dependencies of BCDB
+  llvm10-assert = assertLLVM pkgs.llvmPackages_10.libllvm;
+  llvm11-assert = assertLLVM pkgs.llvmPackages_11.libllvm;
+  llvm12-assert = assertLLVM pkgs.llvmPackages_12.libllvm;
+  llvm13-assert = assertLLVM pkgs.llvmPackages_13.libllvm;
+  llvm13-debug = debugLLVM pkgs.llvmPackages_13.libllvm;
+  cgl = pkgs.callPackage ./nix/cgl { inherit coinutils; };
+  coinutils = pkgs.callPackage ./nix/coinutils {};
+  nng = pkgs.callPackage ./nix/nng {};
   symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
 }
