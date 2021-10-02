@@ -19,7 +19,9 @@ let
   revision = if lib.hasInfix "/" symref
              then resolveRef symref
              else symref;
-  revision-short = builtins.substring 0 7 revision;
+  revision-short = if builtins.pathExists ../../.git
+                   then builtins.substring 0 7 revision
+                   else "unknown";
 
 in stdenv.mkDerivation {
   name = "bcdb";
