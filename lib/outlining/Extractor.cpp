@@ -241,6 +241,10 @@ Function *OutliningCalleeExtractor::createDeclaration() {
   // Note that we don't add the uwtable attribute. If the function never throws
   // exceptions, that means the unwinding table will be omitted, making the
   // function smaller but also preventing backtraces from working correctly.
+  //
+  // FIXME: certain other attributes should be copied from the original
+  // function, like "target-features". Otherwise OrcJIT may get confused:
+  // https://bugs.llvm.org/show_bug.cgi?id=52031
   new_callee->addFnAttr(Attribute::MinSize);
   new_callee->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   if (function.hasPersonalityFn()) {
