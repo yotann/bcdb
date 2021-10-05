@@ -100,6 +100,13 @@ static cl::opt<bool>
                         cl::init(false), cl::cat(SmoutCategory),
                         cl::sub(OptimizeCommand), cl::sub(SolveGreedyCommand));
 
+static cl::opt<bool> UseAlive2(
+    "use-alive2",
+    cl::desc(
+        "Use alive2 to find and combine semantically equivalent functions"),
+    cl::init(false), cl::cat(SmoutCategory), cl::sub(OptimizeCommand),
+    cl::sub(SolveGreedyCommand));
+
 static cl::opt<size_t> MaxArgs(
     "max-args",
     cl::desc(
@@ -170,6 +177,8 @@ static Node getCandidatesOptions() {
   if (VerifyCallerSavings != false)
     result["verify_caller_savings"] =
         Node(static_cast<bool>(VerifyCallerSavings));
+  if (UseAlive2 != false)
+    result["use_alive2"] = Node(static_cast<bool>(UseAlive2));
   return result;
 }
 

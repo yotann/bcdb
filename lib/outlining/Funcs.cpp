@@ -62,8 +62,8 @@ const char *smout::outlined_module_version = "smout.outlined_module_v0";
 const char *smout::optimized_version = "smout.optimized_v6";
 const char *smout::refinements_for_set_version = "smout.refinements_for_set_v0";
 const char *smout::refinements_for_group_version =
-    "smout.refinements_for_group_v1";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v5";
+    "smout.refinements_for_group_v2";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v6";
 
 static FunctionAnalysisManager makeFAM(const Node &options) {
   OutliningCandidatesOptions cand_opts;
@@ -993,20 +993,25 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, Link options, Link mod) {
       stripped_options.get_value_or<bool>("compile_all_callers", false);
   bool verify_caller_savings =
       stripped_options.get_value_or<bool>("verify_caller_savings", false);
+  bool use_alive2 = stripped_options.get_value_or<bool>("use_alive2", false);
+
   // Remove smout.greedy_solution options so we don't pass them to
   // smout.grouped_callees (which doesn't understand them anyway).
   stripped_options.erase("min_benefit");
   stripped_options.erase("min_caller_savings");
   stripped_options.erase("compile_all_callers");
   stripped_options.erase("verify_caller_savings");
+  stripped_options.erase("use_alive2");
 
   StringMap<unsigned> original_function_copies;
   for (auto &item : (*mod)["functions"].map_range()) {
     auto func_cid = item.value().as<CID>();
     original_function_copies[cid_key(func_cid)]++;
   }
-  auto grouped_callees =
-      evaluator.evaluate(grouped_callees_version, stripped_options, mod);
+
+  Link grouped_callees = evaluator.evaluate(
+      use_alive2 ? grouped_refinements_version : grouped_callees_version,
+      stripped_options, mod);
 
   OutliningProblem problem(evaluator, original_function_copies,
                            *grouped_callees, min_caller_savings);
@@ -1371,19 +1376,58 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
 
 NodeOrCID smout::refinements_for_group(Evaluator &evaluator, Link options,
                                        Link members) {
+  Node result = *members;
+  members.freeNode();
+
+  // Find all unique callees and their sizes.
+  StringMap<unsigned> callee_sizes;
   StringSet unique_set;
   std::vector<CID> unique;
-  for (const auto &item : members->list_range())
-    if (unique_set.insert(cid_key(item["callee"].as<CID>())).second)
-      unique.push_back(item["callee"].as<CID>());
-  members.freeNode();
+  for (const auto &item : result.list_range()) {
+    const CID &cid = item["callee"].as<CID>();
+    if (unique_set.insert(cid_key(cid)).second) {
+      unique.push_back(cid);
+      callee_sizes[cid_key(cid)] = item["callee_size"].as<unsigned>();
+    }
+  }
   std::sort(unique.begin(), unique.end());
 
+  // Search for valid refinements between callees.
   Node set_node(node_list_arg);
   for (const CID &cid : unique)
     set_node.emplace_back(evaluator.getStore(), cid);
-  return evaluator.evaluate(refinements_for_set_version, options, set_node)
-      .getCID();
+  auto sets =
+      evaluator.evaluate(refinements_for_set_version, options, set_node);
+
+  // Determine the best callee in each group.
+  StringMap<CID> refined_callee;
+  for (const auto &set : sets->list_range()) {
+    unsigned best_size = 0xffffffff;
+    CID best_cid = set[0].as<CID>();
+    for (const auto &item : set.list_range()) {
+      CID cid = item.as<CID>();
+      if (callee_sizes[cid_key(cid)] < best_size) {
+        best_size = callee_sizes[cid_key(cid)];
+        best_cid = cid;
+      }
+    }
+    for (const auto &item : set.list_range())
+      if (item.as<CID>() != best_cid)
+        refined_callee.try_emplace(cid_key(item.as<CID>()), best_cid);
+  }
+
+  // Replace each callee with the best refined callee.
+  for (auto &item : result.list_range()) {
+    CID orig = item["callee"].as<CID>();
+    if (!refined_callee.count(cid_key(orig)))
+      continue;
+    const CID &refined = refined_callee.find(cid_key(orig))->getValue();
+    item.erase("estimated_callee_size");
+    item["callee"] = Node(evaluator.getStore(), refined);
+    item["callee_size"] = callee_sizes[cid_key(refined)];
+  }
+
+  return result;
 }
 
 NodeOrCID smout::grouped_refinements(Evaluator &evaluator, Link options,
@@ -1397,9 +1441,7 @@ NodeOrCID smout::grouped_refinements(Evaluator &evaluator, Link options,
                                 item.value()["members"].as<CID>()));
   size_t i = 0;
   for (auto &item : grouped_callees.map_range()) {
-    item.value()["refinements"] =
-        Node(evaluator.getStore(), futures[i].getCID());
-    item.value()["num_valid_refinements"] = futures[i]->size();
+    item.value()["members"] = Node(evaluator.getStore(), futures[i].getCID());
     futures[i].freeNode();
     i++;
   }
