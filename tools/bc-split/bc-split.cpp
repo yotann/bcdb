@@ -15,6 +15,7 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "bcdb/Context.h"
 #include "bcdb/Split.h"
 #include "memodb/ToolSupport.h"
 
@@ -60,9 +61,9 @@ int main(int argc, char **argv) {
   cl::HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "Module splitting");
 
-  LLVMContext Context;
+  Context context;
   SMDiagnostic Diag;
-  std::unique_ptr<Module> M = parseIRFile(InputFilename, Diag, Context);
+  std::unique_ptr<Module> M = parseIRFile(InputFilename, Diag, context);
   if (!M) {
     Diag.print(argv[0], errs());
     return 1;

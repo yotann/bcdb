@@ -17,6 +17,7 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "bcdb/Context.h"
 #include "bcdb/ImitateBinary.h"
 #include "memodb/ToolSupport.h"
 
@@ -70,9 +71,9 @@ static int Annotate() {
   OwningBinary<Binary> OBinary = Err(createBinary(BinaryFilename));
   Binary &Binary = *OBinary.getBinary();
 
-  LLVMContext Context;
+  Context context;
   SMDiagnostic Diag;
-  auto M = parseIRFile(InputFilenameBitcode, Diag, Context);
+  auto M = parseIRFile(InputFilenameBitcode, Diag, context);
   if (!M) {
     Diag.print("bc-imitate", errs());
     return 1;
@@ -98,9 +99,9 @@ static int Annotate() {
 }
 
 static int Clang() {
-  LLVMContext Context;
+  Context context;
   SMDiagnostic Diag;
-  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, Context);
+  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, context);
   if (!M) {
     Diag.print("bc-imitate", errs());
     return 1;
@@ -120,9 +121,9 @@ static int Clang() {
 }
 
 static int ClangArgs() {
-  LLVMContext Context;
+  Context context;
   SMDiagnostic Diag;
-  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, Context);
+  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, context);
   if (!M) {
     Diag.print("bc-imitate", errs());
     return 1;
@@ -138,8 +139,8 @@ static int Extract() {
   OwningBinary<Binary> OBinary = Err(createBinary(InputFilenameBinary));
   Binary &Binary = *OBinary.getBinary();
 
-  LLVMContext Context;
-  auto M = ExtractModuleFromBinary(Context, Binary);
+  Context context;
+  auto M = ExtractModuleFromBinary(context, Binary);
   if (!M) {
     errs() << "can't extract bitcode from " << InputFilenameBinary << "\n";
     return 1;

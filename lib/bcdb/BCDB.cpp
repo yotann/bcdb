@@ -87,10 +87,9 @@ Expected<std::unique_ptr<BCDB>> BCDB::Open(StringRef store_uri) {
 }
 
 BCDB::BCDB(std::unique_ptr<Store> db)
-    : Context(new LLVMContext()), unique_db(std::move(db)),
-      db(unique_db.get()) {}
+    : context(new Context()), unique_db(std::move(db)), db(unique_db.get()) {}
 
-BCDB::BCDB(Store &db) : Context(new LLVMContext()), db(&db) {}
+BCDB::BCDB(Store &db) : context(new Context()), db(&db) {}
 
 BCDB::~BCDB() {}
 
@@ -170,12 +169,6 @@ static void PreprocessModule(Module &M) {
     CMP->runOnModule(M);
     RenameAnonymousConstants(M);
   }
-
-  // LLVM may output MD kinds inconsistently depending on whether getMDKindID()
-  // has been called or not. We call it here to try to make sure output bitcode
-  // always includes the same set of MD kinds, improving deduplication.
-  M.getMDKindID("heapallocsite");
-  M.getMDKindID("srcloc");
 }
 
 Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
@@ -231,11 +224,11 @@ Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
 
 static std::unique_ptr<Module> LoadModuleFromValue(Store *db, const CID &ref,
                                                    StringRef Name,
-                                                   LLVMContext &Context) {
+                                                   LLVMContext &context) {
   Node value = db->get(ref);
   ExitOnError Err("LoadModuleFromValue: ");
   return Err(parseBitcodeFile(
-      MemoryBufferRef(value.as<StringRef>(byte_string_arg), Name), Context));
+      MemoryBufferRef(value.as<StringRef>(byte_string_arg), Name), context));
 }
 
 Expected<std::unique_ptr<Module>>
@@ -243,7 +236,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
   CID head_ref = db->resolve(Head(Name));
   Node head = db->get(head_ref);
   auto Remainder =
-      LoadModuleFromValue(db, head["remainder"].as<CID>(), Name, *Context);
+      LoadModuleFromValue(db, head["remainder"].as<CID>(), Name, *context);
 
   for (auto &Item : head["functions"].map_range()) {
     auto Name = utf8ToByteString(Item.key());
@@ -255,7 +248,7 @@ BCDB::LoadParts(StringRef Name, std::map<std::string, std::string> &PartIDs) {
 }
 
 Expected<std::unique_ptr<Module>> BCDB::GetFunctionById(StringRef Id) {
-  return LoadModuleFromValue(db, *CID::parse(Id), Id, *Context);
+  return LoadModuleFromValue(db, *CID::parse(Id), Id, *context);
 }
 
 Expected<std::unique_ptr<Module>>

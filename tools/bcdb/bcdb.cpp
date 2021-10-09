@@ -1,7 +1,6 @@
 #include <cstdlib>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
@@ -20,6 +19,7 @@
 #include <string>
 
 #include "bcdb/BCDB.h"
+#include "bcdb/Context.h"
 #include "bcdb/LLVMCompat.h"
 #include "bcdb/Split.h"
 #include "memodb/Store.h"
@@ -60,9 +60,9 @@ static int Add() {
   ExitOnError Err("bcdb add: ");
   std::unique_ptr<BCDB> db = Err(BCDB::Open(GetStoreUri()));
 
-  LLVMContext Context;
+  Context context;
   SMDiagnostic Diag;
-  std::unique_ptr<Module> M = parseIRFile(AddFilename, Diag, Context);
+  std::unique_ptr<Module> M = parseIRFile(AddFilename, Diag, context);
   if (!M) {
     Diag.print("bcdb add", errs());
     return 1;
@@ -170,7 +170,7 @@ static int Get() {
     return 1;
   }
   std::unique_ptr<Store> store = Store::open(GetStoreUri());
-  LLVMContext context;
+  Context context;
   std::unique_ptr<Module> M = Err(getSplitModule(context, *store, *name));
   return WriteModule(*M);
 }

@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "bcdb/Context.h"
+
 namespace memodb {
 class CID;
 struct Name;
@@ -43,7 +45,7 @@ getSplitModule(llvm::LLVMContext &context, memodb::Store &store,
                const memodb::Name &name);
 
 class BCDB {
-  std::unique_ptr<llvm::LLVMContext> Context;
+  std::unique_ptr<Context> context;
   std::unique_ptr<memodb::Store> unique_db;
   memodb::Store *db;
 
@@ -64,11 +66,11 @@ public:
   llvm::Expected<std::vector<std::string>>
   ListFunctionsInModule(llvm::StringRef Name);
   llvm::Expected<std::vector<std::string>> ListAllFunctions();
-  llvm::LLVMContext &GetContext() { return *Context; }
+  llvm::LLVMContext &GetContext() { return *context; }
 
   /// Reset the LLVMContext. This can help reduce memory usage. The caller must
   // guarantee that nothing is using the old context.
-  void ResetContext() { Context = std::make_unique<llvm::LLVMContext>(); }
+  void ResetContext() { context = std::make_unique<Context>(); }
 
   llvm::Error Delete(llvm::StringRef Name);
   llvm::Expected<std::unique_ptr<llvm::Module>>

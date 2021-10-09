@@ -10,7 +10,6 @@
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Function.h>
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Linker/IRMover.h>
@@ -23,6 +22,7 @@
 #include <vector>
 
 #include "bcdb/AlignBitcode.h"
+#include "bcdb/Context.h"
 #include "bcdb/Split.h"
 #include "memodb/Evaluator.h"
 #include "memodb/Multibase.h"
@@ -37,6 +37,7 @@
 
 using namespace llvm;
 using namespace memodb;
+using bcdb::Context;
 using bcdb::getSoleDefinition;
 using bcdb::LinearProgram;
 using bcdb::OutliningCalleeExtractor;
@@ -280,7 +281,7 @@ static bool isGroupWorthExtracting(Link &options, const Node &group) {
 }
 
 NodeOrCID smout::actual_size(Evaluator &evaluator, Link func) {
-  LLVMContext context;
+  Context context;
   auto m = cantFail(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
@@ -289,7 +290,7 @@ NodeOrCID smout::actual_size(Evaluator &evaluator, Link func) {
 
 NodeOrCID smout::candidates(Evaluator &evaluator, Link options, Link func) {
   ExitOnError Err("smout.candidates: ");
-  LLVMContext context;
+  Context context;
   auto m = Err(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
@@ -361,7 +362,7 @@ NodeOrCID smout::grouped_candidates(Evaluator &evaluator, Link options,
 NodeOrCID smout::extracted_callees(Evaluator &evaluator, Link func,
                                    Link node_sets) {
   ExitOnError Err("smout.extracted_callees: ");
-  LLVMContext context;
+  Context context;
   auto m = Err(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
@@ -1079,7 +1080,7 @@ NodeOrCID smout::greedy_solution(Evaluator &evaluator, Link options, Link mod) {
 NodeOrCID smout::extracted_caller(Evaluator &evaluator, Link func,
                                   Link callees) {
   ExitOnError Err("smout.extracted_caller: ");
-  LLVMContext context;
+  Context context;
   auto m = Err(parseBitcodeFile(
       MemoryBufferRef(func->as<StringRef>(byte_string_arg), ""), context));
   Function &f = getSoleDefinition(*m);
@@ -1118,7 +1119,7 @@ NodeOrCID smout::outlined_module(Evaluator &evaluator, Link mod,
                                  Link solution) {
   Node mod_node = *mod;
   ExitOnError err("smout.optimized: ");
-  LLVMContext context;
+  Context context;
   Node old_remainder = evaluator.getStore().get((*mod)["remainder"].as<CID>());
   auto remainder = err(parseBitcodeFile(
       MemoryBufferRef(old_remainder.as<StringRef>(byte_string_arg), ""),

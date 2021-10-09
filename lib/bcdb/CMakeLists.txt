@@ -10,6 +10,7 @@ add_llvm_library(libbcdb
   AlignBitcode.cpp
   BCDB.cpp
   BitstreamReader.cpp
+  Context.cpp
   GlobalReferenceGraph.cpp
   ImitateBinary.cpp
   Join.cpp

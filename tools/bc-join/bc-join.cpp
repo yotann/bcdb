@@ -4,7 +4,6 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Config/llvm-config.h>
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
@@ -19,6 +18,7 @@
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "bcdb/Context.h"
 #include "bcdb/Split.h"
 #include "memodb/ToolSupport.h"
 
@@ -57,16 +57,16 @@ int main(int argc, char **argv) {
   HideUnrelatedOptions(Category, *cl::TopLevelSubCommand);
   cl::ParseCommandLineOptions(argc, argv, "Module joining");
 
-  LLVMContext Context;
+  Context context;
   ExitOnError Err("bc-join: ");
   std::error_code EC;
 
-  auto M = loadModule(Context, InputDirectory + "/remainder/module.bc");
+  auto M = loadModule(context, InputDirectory + "/remainder/module.bc");
   Joiner Joiner(*M);
   for (sys::fs::directory_iterator I(InputDirectory + "/functions", EC), IE;
        I != IE && !EC; I.increment(EC)) {
     if (StringRef(I->path()).endswith(".bc")) {
-      auto MPart = loadModule(Context, I->path());
+      auto MPart = loadModule(context, I->path());
       Joiner.JoinGlobal(sys::path::stem(I->path()), std::move(MPart));
     }
   }

@@ -15,6 +15,7 @@
 
 #include "AlignedBitstreamWriter.h"
 #include "BitstreamReader.h"
+#include "bcdb/Context.h"
 
 // WARNING: this code could break (generate invalid modules) if LLVM ever adds
 // more file offsets to the bitstream!
@@ -295,6 +296,7 @@ Error bcdb::AlignBitcode(MemoryBufferRef InBuffer,
 
 void bcdb::WriteUnalignedModule(const Module &M,
                                 SmallVectorImpl<char> &Buffer) {
+  Context::checkWarnings(M.getContext());
   BitcodeWriter Writer(Buffer);
   Writer.writeModule(M);
   Writer.writeSymtab();
@@ -302,8 +304,8 @@ void bcdb::WriteUnalignedModule(const Module &M,
 }
 
 void bcdb::WriteAlignedModule(const Module &M, SmallVectorImpl<char> &Buffer) {
+  Context::checkWarnings(M.getContext());
   ExitOnError Err("WriteAlignedModule: ");
-
   SmallVector<char, 0> TmpBuffer;
   WriteUnalignedModule(M, TmpBuffer);
   Err(AlignBitcode(
