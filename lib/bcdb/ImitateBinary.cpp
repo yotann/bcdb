@@ -130,6 +130,20 @@ std::unique_ptr<Module> bcdb::ExtractModuleFromBinary(LLVMContext &Context,
         Err(Sec.getName()) != "__LLVM,__bitcode")
       continue;
 
+    // TODO: It would be nice to also support the bitcode bundles produced by
+    // Xcode with BITCODE_GENERATION_MODE=bitcode and ENABLE_BITCODE=YES.
+    // However, that would be fairly complicated:
+    //
+    // 1. Use LLVM's classes to extract "__LLVM,__bundle" section.
+    // 2. Parse XAR header.
+    // 3. Decompress XAR table of contents with zlib.
+    // 4. Parse table of contents as XML, and load useful information.
+    // 5. Link all bitcode files together.
+    // 6. Restore symbol names using the separate *.bcsymbolmap file (this is
+    //    necessary even in debug builds). (May be unnecessary with
+    //    HIDE_BITCODE_SYMBOLS=NO and/or
+    //    SWIFT_EMBED_BITCODE_SECTION_HIDE_SYMBOLS=NO?)
+
     StringRef Contents = Err(Sec.getContents());
     // When object files containing bitcode sections are linked, the bitcode
     // sections are concatenated, possibly with padding bytes between them.
