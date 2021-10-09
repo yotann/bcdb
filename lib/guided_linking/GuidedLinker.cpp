@@ -563,7 +563,7 @@ void GLMerger::FixupPartDefinition(GlobalItem &GI, Function &Body) {
           *Body.getParent(), GO.getType(), false, GlobalValue::ExternalLinkage,
           nullptr, ImportVars[GO.getName()]->getName());
       IRBuilder<> Builder(&Body.getEntryBlock().front());
-      Value *Load = Builder.CreateLoad(Var);
+      Value *Load = Builder.CreateLoad(GO.getType(), Var);
       GO.replaceAllUsesWith(Load);
     }
   }
@@ -879,7 +879,7 @@ std::unique_ptr<Module> GLMerger::Finish() {
       for (size_t i = 0; i < Vars.size(); i++) {
         GlobalVariable *Var = Vars[i];
         Value *Ptr = Builder.CreateStructGEP(SType, Callee->arg_begin(), i);
-        Value *Val = Builder.CreateLoad(Ptr);
+        Value *Val = Builder.CreateLoad(Var->getValueType(), Ptr);
         Builder.CreateStore(Val, Var);
         Var->setLinkage(GlobalValue::InternalLinkage);
       }
