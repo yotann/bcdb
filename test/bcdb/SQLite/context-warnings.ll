@@ -2,6 +2,8 @@
 ; RUN: memodb init -store sqlite:%t
 ; RUN: llvm-as < %s | bcdb add -store sqlite:%t - 2>&1 | FileCheck %s
 
+; REQUIRES: llvm12
+
 define void @func() {
   %two = add i32 1, 1, !mytag !0
   call void @func() [ "mybundle"(i64 0) ]
