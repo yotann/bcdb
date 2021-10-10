@@ -109,11 +109,10 @@ Context::Context() {
   // that were ever used in the LLVMContext, even if they aren't used by the
   // module in question. That can cause different bitcode to be created for
   // identical modules. To improve deduplication, we initialize the LLVMContext
-  // with a consistent set of MD kinds.
+  // with a consistent set of MD kinds. We have the same problem for operand
+  // bundle tags and sync scope names.
   for (const auto &kind : KNOWN_MD_KINDS)
     context.getMDKindID(kind);
-
-  // Same for operand bundle tags and sync scope names.
 #if LLVM_VERSION_MAJOR >= 11
   for (const auto &tag : KNOWN_BUNDLE_TAGS)
     context.getOrInsertBundleTag(tag);
