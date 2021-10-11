@@ -6,6 +6,7 @@
 #include <memory>
 #include <utility>
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/PrettyStackTrace.h>
@@ -143,9 +144,11 @@ private:
 
 class PrettyStackTraceCall : public llvm::PrettyStackTraceEntry {
   const Call &call;
+  llvm::SmallVector<char, 16> old_thread_name;
 
 public:
-  PrettyStackTraceCall(const Call &call) : call(call) {}
+  PrettyStackTraceCall(const Call &call);
+  ~PrettyStackTraceCall();
   void print(llvm::raw_ostream &os) const override;
 };
 

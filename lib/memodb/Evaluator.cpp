@@ -19,6 +19,7 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/PrettyStackTrace.h>
+#include <llvm/Support/Threading.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include "memodb/ToolSupport.h"
@@ -227,6 +228,17 @@ std::unique_ptr<Evaluator> Evaluator::create(llvm::StringRef uri,
   }
   registerDefaultFuncs(*result);
   return result;
+}
+
+PrettyStackTraceCall::PrettyStackTraceCall(const Call &call) : call(call) {
+  llvm::get_thread_name(old_thread_name);
+  // Linux only allows 16 characters in thread names (pthread_setname_np), so
+  // there's no room for the arguments.
+  llvm::set_thread_name(call.Name);
+}
+
+PrettyStackTraceCall::~PrettyStackTraceCall() {
+  llvm::set_thread_name(old_thread_name);
 }
 
 void PrettyStackTraceCall::print(llvm::raw_ostream &os) const {
