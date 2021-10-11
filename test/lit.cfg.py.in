@@ -15,8 +15,8 @@ config.available_features.add(config.host_arch)
 
 config.substitutions.append(("%shlibdir", "@LLVM_SHLIB_OUTPUT_INTDIR@"))
 config.substitutions.append(("%shlibext", "@SHLIBEXT@"))
-config.substitutions.append(("%gltest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/utils/gl-test.py"))
-config.substitutions.append(("%outliningtest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/utils/outlining-test.py"))
+config.substitutions.append(("%gltest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/test/gl-test.py"))
+config.substitutions.append(("%outliningtest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/test/outlining-test.py"))
 if @LLVM_VERSION_MAJOR@ >= 11:
     config.substitutions.append(("%outopt", "opt -enable-new-pm=0 -load @LLVM_SHLIB_OUTPUT_INTDIR@/BCDBOutliningPlugin@SHLIBEXT@"))
 else:

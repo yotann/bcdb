@@ -1,6 +1,6 @@
 add_custom_command(OUTPUT friendly_MemorySSA.h
-  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/make_friendly_memoryssa.py ${LLVM_INCLUDE_DIR}/llvm/Analysis/MemorySSA.h friendly_MemorySSA.h
-  DEPENDS ${LLVM_INCLUDE_DIR}/llvm/Analysis/MemorySSA.h ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/make_friendly_memoryssa.py
+  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/make_friendly_memoryssa.py ${LLVM_INCLUDE_DIR}/llvm/Analysis/MemorySSA.h friendly_MemorySSA.h
+  DEPENDS ${LLVM_INCLUDE_DIR}/llvm/Analysis/MemorySSA.h ${CMAKE_CURRENT_SOURCE_DIR}/make_friendly_memoryssa.py
 )
 add_custom_target(friendly_memoryssa DEPENDS friendly_MemorySSA.h)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})

@@ -35,6 +35,7 @@ in stdenv.mkDerivation {
       *.md
       *.nix
       /docs/
+      /experiments/
       /flake.lock
       /nix/
     ''] ../..;
@@ -56,5 +57,5 @@ in stdenv.mkDerivation {
     "-DREVISION_DESCRIPTION=g${revision-short}-NIX"
   ] ++ lib.optional sanitize "-DCMAKE_BUILD_TYPE=SANITIZE";
   preCheck = lib.optionalString sanitize
-    "export LSAN_OPTIONS=suppressions=$src/utils/lsan.supp";
+    "export LSAN_OPTIONS=suppressions=$src/lsan.supp";
 }
