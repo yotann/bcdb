@@ -81,4 +81,24 @@ in rec {
   coinutils = pkgs.callPackage ./nix/coinutils {};
   nng = pkgs.callPackage ./nix/nng {};
   symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
+
+  # Singularity container (to be run on HTCondor cluster)
+  smout-worker-singularity = pkgs.singularity-tools.buildImage {
+    name = "smout-worker";
+    contents = [ pkgs.busybox ];
+    diskSize = 4096;
+    runScript = ''
+      #!/bin/sh
+      set +e
+      for i in $(seq 4); do
+        while true; do
+          echo starting worker...
+          ${bcdb}/bin/smout worker "$@"
+          echo exit code: $?
+        done &
+      done
+      sleep 7d
+      kill $(jobs -p)
+    '';
+  };
 }

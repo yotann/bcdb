@@ -1,0 +1,23 @@
+# Run: condor_submit smout-worker.job -queue 1
+
+JobBatchName = smout-worker
+universe = vanilla
+executable = smout-worker.sif
+arguments = $ENV(MEMODB_STORE)
+should_transfer_files = yes
+transfer_input_files = smout-worker.sif
+
++SingularityImage = smout-worker.sif
+
+# Save output from the job.
+output = logs/smout-worker.out.$(Cluster).$(Process)
+error = logs/smout-worker.err.$(Cluster).$(Process)
+log = logs/smout-worker.log.$(Cluster).$(Process)
+
+requirements = HasSingularity
+request_cpus = 4
+request_memory = 15000
+# request_disk = 50 GB
+request_disk = 500000
+
+#queue 1
