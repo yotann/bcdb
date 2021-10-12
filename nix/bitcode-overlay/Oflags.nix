@@ -3,19 +3,20 @@
 self: super: let
   original = self;
 
+  # The correct way to do this is to use extendMkDerivationArgs from
+  # nixpkgs/pkgs/stdenv/adapters.nix. Unfortunately, we can't access the
+  # variables we need to use that from outside of Nixpkgs.
+  addCflagsStdenv = flags: stdenv: stdenv // {
+    mkDerivation = args: stdenv.mkDerivation (args // {
+      NIX_CFLAGS_COMPILE = toString (args.NIX_CFLAGS_COMPILE or "") + " " + flags;
+      hardeningDisable = (args.hardeningDisable or []) ++ ["format" "fortify"];
+    });
+  };
+
   addCflags = flags: self: super: {
-    stdenv = super.addAttrsToDerivation {
-      NIX_CFLAGS_COMPILE = flags;
-      hardeningDisable = ["format" "fortify"];
-    } original.stdenv;
-    clangStdenv = super.addAttrsToDerivation {
-      NIX_CFLAGS_COMPILE = "-O0";
-      hardeningDisable = ["format" "fortify"];
-    } original.clangStdenv;
-    libcxxStdenv = super.addAttrsToDerivation {
-      NIX_CFLAGS_COMPILE = "-O0";
-      hardeningDisable = ["format" "fortify"];
-    } original.libcxxStdenv;
+    stdenv = addCflagsStdenv flags original.stdenv;
+    clangStdenv = addCflagsStdenv flags original.clangStdenv;
+    libcxxStdenv = addCflagsStdenv flags original.libcxxStdenv;
 
     # glibc requires optimizations
     # http://devpit.org/wiki/Gnu_Toolchain/Compatibility_Matrix#endnote_ODonell_and_Drepper_on_Inline

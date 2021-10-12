@@ -52,6 +52,6 @@ in stdenv.mkDerivation {
   passthru = {
     isClang = true;
     isGNU = false;
-    inherit (clang) nativeTools nativeLibc libc libc_dev cc shell bintools;
+    inherit (clang) nativeTools nativeLibc nativePrefix noLibc libc libc_dev cc shell bintools;
   };
 }
