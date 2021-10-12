@@ -174,7 +174,8 @@ in {
   # fatal error: 'strstream' file not found
   inherit (original) asio asio_1_10 asio_1_12;
 
-  audit = super.audit.overrideAttrs (o: {
+  # Fixes multiple definitions of "event_node_list".
+  audit = (addCflags "-fcommon" super.audit).overrideAttrs (o: {
     # Prevent using GCC to build.
     depsBuildBuild = [];
   });
