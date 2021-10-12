@@ -21,6 +21,12 @@ self: super: let
     # glibc requires optimizations
     # http://devpit.org/wiki/Gnu_Toolchain/Compatibility_Matrix#endnote_ODonell_and_Drepper_on_Inline
     inherit (original) glibc;
+
+    # Requires optimizations to delete code that refers to frenchlib...
+    # or we can just enable frenchlib.
+    libuninameslist = super.libuninameslist.overrideAttrs (o: {
+      configureFlags = (o.configureFlags or []) ++ ["--enable-frenchlib"];
+    });
   };
 in {
   pkgsO0 = self.extend (addCflags "-O0");

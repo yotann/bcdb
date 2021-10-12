@@ -37,7 +37,7 @@ process_cc_flags() {
         ;;
 
       # Clang doesn't support these options with -fembed-bitcode.
-      -Wa,--noexecstack|-fdata-sections|-ffunction-sections|-mno-red-zone|-mstackrealign)
+      -Wa,--noexecstack|-fdata-sections|-ffunction-sections|-mno-red-zone|-mstackrealign|-mcmodel=*)
         shift
         ;;
 
@@ -57,6 +57,12 @@ process_cc_flags() {
         shift
         ;;
 
+      # Functions that trigger this warning can crash LLVM on AArch64 with
+      # -fembed-bitcode.
+      -Wframe-larger-than=*)
+        shift
+        ;;
+
       # All other options are passed through unmodified.
       *)
         processed_args+=("$1")
@@ -64,6 +70,9 @@ process_cc_flags() {
         ;;
     esac
   done
+
+  # Older GCC and Clang default to -fcommon, and some packages still require it.
+  processed_args+=("-fcommon")
 
   # Embed the bitcode!
   processed_args+=("-fembed-bitcode=all")

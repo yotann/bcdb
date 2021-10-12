@@ -175,7 +175,7 @@ in {
   inherit (original) asio asio_1_10 asio_1_12;
 
   # Fixes multiple definitions of "event_node_list".
-  audit = (addCflags "-fcommon" super.audit).overrideAttrs (o: {
+  audit = super.audit.overrideAttrs (o: {
     # Prevent using GCC to build.
     depsBuildBuild = [];
   });
@@ -216,8 +216,9 @@ in {
   # Incompatible assembler syntax.
   inherit (original) gmp;
 
-  # Test gnutls-cli-rawpk.sh fails on my build farm.
-  gnutls = noCheck super.gnutls;
+  gnutls = super.gnutls.overrideAttrs (o: {
+    configureFlags = o.configureFlags ++ [ "--disable-hardware-acceleration" ];
+  });
 
   icu58 = fixIcu super.icu58;
   icu59 = fixIcu super.icu59;
@@ -240,9 +241,6 @@ in {
     # src/exception.sh requires gcc to use -aux-info
     buildInputs = o.buildInputs ++ [ original.gcc ];
   });
-
-  # Fixes multiple definitions of "CIL_KEY_USERBOUNDS" etc.
-  libsepol = addCflags "-fcommon" super.libsepol;
 
   libuv = noCheck super.libuv;
 
@@ -332,19 +330,6 @@ in {
     });
     in python // { pythonForBuild = python; }
   ) super.pythonInterpreters;
-
-  # Fixes multiple definitions of "program_name".
-  sharutils = addCflags "-fcommon" super.sharutils;
-
-  systemd = super.systemd.overrideAttrs (o: {
-    # Remove stray references that are left in libsystemd.so because we disable
-    # -Wl,--gc-sections.
-    postFixup = (o.postFixup or "") + ''
-      nukedRef=$(echo $out | sed -e "s,$NIX_STORE/[^-]*-\(.*\),$NIX_STORE/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-\1,")
-      cat $lib/lib/libsystemd.so | perl -pe "s|$out|$nukedRef|" > $lib/lib/libsystemd.so.tmp
-      mv $lib/lib/libsystemd.so.tmp $(readlink -f $lib/lib/libsystemd.so)
-    '';
-  });
 
   # Prevent using GCC to build.
   texinfo413 = super.texinfo413.overrideAttrs (o: { depsBuildBuild = []; });
