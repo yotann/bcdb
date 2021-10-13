@@ -75,19 +75,30 @@ self: super: let
     # Qt tries to use llvmPackages_5.stdenv for some reason, but we want our
     # normal stdenv.
     llvmPackages_5 = { stdenv = self.stdenv; };
-  }).overrideScope' (self: super: {
-    qtbase = super.qtbase.overrideAttrs (o: {
-      patches = o.patches ++ [
-	# Help ./configure find system library paths, so it can detect libdl.so
-	# (it tries running clang -print-search-dirs, but that doesn't print
-	# the path to glibc).
-	./patches/qtbase-mkspecs-clang.patch
-      ];
-      configureFlags = o.configureFlags ++ [
-        "-platform linux-clang"
-      ];
-    });
-  });
+  }).overrideScope' (self: super: let
+    overrides = rec {
+      qtbase = super.qtbase.overrideAttrs (o: {
+        patches = o.patches ++ [
+  	# Help ./configure find system library paths, so it can detect libdl.so
+  	# (it tries running clang -print-search-dirs, but that doesn't print
+  	# the path to glibc).
+  	./patches/qtbase-mkspecs-clang.patch
+        ];
+        configureFlags = o.configureFlags ++ [
+          "-platform linux-clang"
+        ];
+      });
+      # We need some extra tricks to make other qt libraries depend on the
+      # modified qtbase.
+      qmake = super.qmake.overrideAttrs (o: {
+        deps = [ qtbase.dev ];
+      });
+      qtModule = args: (super.qtModule args).overrideAttrs (o: {
+        nativeBuildInputs = (lib.filter (dep: !(dep ? fix_qmake_libtool)) o.nativeBuildInputs) ++ [ qmake ];
+      });
+    };
+    applyOverrides = pkg: if pkg ? override then pkg.override (builtins.intersectAttrs (lib.functionArgs pkg.override) overrides) else pkg;
+  in (builtins.mapAttrs (_: applyOverrides) super) // overrides);
 
   fixLLVM = { shared-libs ? true, dylib ? false }: package: let
 
