@@ -71,6 +71,24 @@ self: super: let
     '';
   });
 
+  fixQt = qt: (qt.override {
+    # Qt tries to use llvmPackages_5.stdenv for some reason, but we want our
+    # normal stdenv.
+    llvmPackages_5 = { stdenv = self.stdenv; };
+  }).overrideScope' (self: super: {
+    qtbase = super.qtbase.overrideAttrs (o: {
+      patches = o.patches ++ [
+	# Help ./configure find system library paths, so it can detect libdl.so
+	# (it tries running clang -print-search-dirs, but that doesn't print
+	# the path to glibc).
+	./patches/qtbase-mkspecs-clang.patch
+      ];
+      configureFlags = o.configureFlags ++ [
+        "-platform linux-clang"
+      ];
+    });
+  });
+
   fixLLVM = { shared-libs ? true, dylib ? false }: package: let
 
     base = package.override {
@@ -331,6 +349,10 @@ in {
     in python // { pythonForBuild = python; }
   ) super.pythonInterpreters;
 
+  qt512 = fixQt super.qt512;
+  qt514 = fixQt super.qt514;
+  qt515 = fixQt super.qt515;
+
   # Prevent using GCC to build.
   texinfo413 = super.texinfo413.overrideAttrs (o: { depsBuildBuild = []; });
   texinfo5 = super.texinfo5.overrideAttrs (o: { depsBuildBuild = []; });
@@ -380,6 +402,10 @@ in {
 
   # Running unit tests: free(): invalid pointer
   inherit (original) unittest-cpp;
+
+  # Tries to use __builtin_setjmp on AArch64, which Clang doesn't support.
+  # Patches are available, see: https://android-review.googlesource.com/#/c/285947
+  inherit (original) valgrind;
 
   # missing <cstdio>
   inherit (original) vte;

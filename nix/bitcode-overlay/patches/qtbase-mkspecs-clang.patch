@@ -1,0 +1,42 @@
+--- a/mkspecs/features/toolchain.prf
++++ b/mkspecs/features/toolchain.prf
+@@ -188,7 +188,7 @@
+                 cxx_flags += -isysroot $$QMAKE_MAC_SDK_PATH
+         }
+ 
+-        rim_qcc: \
++        clang: \
+             # Need the cc1plus and ld command lines to pick up the paths
+             cxx_flags += $$QMAKE_LFLAGS_SHLIB -o $$QMAKE_SYSTEM_NULL_DEVICE -v
+         else: darwin:clang: \
+@@ -201,9 +201,9 @@
+         output = $$system("$$cmd_prefix $$QMAKE_CXX $$qtMakeExpand($$cxx_flags) -xc++ - 2>&1 $$cmd_suffix", lines, ec)
+         !equals(ec, 0): qtCompilerError($$QMAKE_CXX, $$output)
+ 
+-        rim_qcc {
++        clang {
+             for (line, output) {
+-                contains(line, "^[^ ]*cc1plus .*") {
++                contains(line, ".*bin/clang.* -cc1 .*") {
+                     take_next = false
+                     for (parameter, $$list($$line)) {
+                         $$take_next {
+@@ -213,7 +213,7 @@
+                             take_next = true
+                         }
+                     }
+-                } else: contains(line, "^[^ ]*-ld .*") {
++                } else: contains(line, ".*bin/ld. .*") {
+                     for (parameter, $$list($$line)) {
+                         contains(parameter, "^-L.*") {
+                             parameter ~= s/^-L//
+@@ -222,7 +222,8 @@
+                     }
+                 }
+             }
+-        } else {
++        }
++        clang {
+             add_includes = false
+             add_libraries = false
+             for (line, output) {
