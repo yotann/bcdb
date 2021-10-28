@@ -1,3 +1,5 @@
+#include <optional>
+
 #include <llvm/IR/PassManager.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
@@ -11,6 +13,52 @@
 
 using namespace bcdb;
 using namespace llvm;
+
+// Must be a module pass so it can run on optnone functions.
+namespace {
+class AddFunctionAttrPass : public PassInfoMixin<AddFunctionAttrPass> {
+public:
+  AddFunctionAttrPass(Attribute::AttrKind kind) : kind(kind) {}
+  PreservedAnalyses run(Module &m, ModuleAnalysisManager &am);
+  Attribute::AttrKind kind;
+};
+} // namespace
+
+PreservedAnalyses AddFunctionAttrPass::run(Module &m, ModuleAnalysisManager &) {
+  for (Function &f : m)
+    if (!f.hasFnAttribute(kind))
+      f.addFnAttr(kind);
+  return PreservedAnalyses::none();
+}
+
+// Must be a module pass so it can run on optnone functions.
+namespace {
+class RemoveFunctionAttrPass : public PassInfoMixin<RemoveFunctionAttrPass> {
+public:
+  RemoveFunctionAttrPass(Attribute::AttrKind kind) : kind(kind) {}
+  PreservedAnalyses run(Module &m, ModuleAnalysisManager &am);
+  Attribute::AttrKind kind;
+};
+} // namespace
+
+PreservedAnalyses RemoveFunctionAttrPass::run(Module &m,
+                                              ModuleAnalysisManager &) {
+  for (Function &f : m)
+    if (f.hasFnAttribute(kind))
+      f.removeFnAttr(kind);
+  return PreservedAnalyses::none();
+}
+
+static std::optional<Attribute::AttrKind>
+parseAttributeKindPassName(StringRef name, StringRef pass_name) {
+  if (!name.consume_front(pass_name) || !name.consume_front("<") ||
+      !name.consume_back(">"))
+    return {};
+  auto kind = Attribute::getAttrKindFromName(name);
+  if (kind == Attribute::None)
+    return {};
+  return kind;
+}
 
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
 llvmGetPassPluginInfo() {
@@ -48,10 +96,20 @@ llvmGetPassPluginInfo() {
                   return false;
                 });
             builder.registerPipelineParsingCallback(
-                [](StringRef name, ModulePassManager &fpm,
+                [](StringRef name, ModulePassManager &mpm,
                    ArrayRef<PassBuilder::PipelineElement>) {
                   if (name == "outlining-extractor") {
-                    fpm.addPass(OutliningExtractorPass());
+                    mpm.addPass(OutliningExtractorPass());
+                    return true;
+                  }
+                  if (auto kind = parseAttributeKindPassName(
+                          name, "add-function-attr")) {
+                    mpm.addPass(AddFunctionAttrPass(*kind));
+                    return true;
+                  }
+                  if (auto kind = parseAttributeKindPassName(
+                          name, "remove-function-attr")) {
+                    mpm.addPass(RemoveFunctionAttrPass(*kind));
                     return true;
                   }
                   return false;
