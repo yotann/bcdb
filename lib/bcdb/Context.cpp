@@ -69,6 +69,9 @@ static const std::array KNOWN_MD_KINDS = {
     "vec_type_hint",
     "wasm.index",
     "work_group_size_hint",
+
+    // Non-fixed kinds used by Swift.
+    "misexpect",
 };
 
 #if LLVM_VERSION_MAJOR >= 11
