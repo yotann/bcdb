@@ -58,8 +58,7 @@ public:
 
   memodb::Store &get_db() { return *db; }
 
-  llvm::Error Add(llvm::StringRef Name, std::unique_ptr<llvm::Module> M);
-  llvm::Expected<memodb::CID> AddWithoutHead(std::unique_ptr<llvm::Module> M);
+  llvm::Expected<memodb::CID> Add(std::unique_ptr<llvm::Module> M);
   llvm::Expected<std::unique_ptr<llvm::Module>>
   GetFunctionById(llvm::StringRef Id);
   llvm::Expected<std::vector<std::string>> ListModules();

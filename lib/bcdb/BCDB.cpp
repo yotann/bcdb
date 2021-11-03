@@ -171,7 +171,7 @@ static void PreprocessModule(Module &M) {
   }
 }
 
-Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
+Expected<CID> BCDB::Add(std::unique_ptr<Module> M) {
   PreprocessModule(*M);
 
   auto SaveModule = [&](Module &M) {
@@ -212,14 +212,6 @@ Expected<CID> BCDB::AddWithoutHead(std::unique_ptr<Module> M) {
   auto result = Node::Map(
       {{"functions", function_map}, {"remainder", Node(*db, remainder_value)}});
   return db->put(result);
-}
-
-Error BCDB::Add(StringRef Name, std::unique_ptr<Module> M) {
-  Expected<CID> refOrErr = AddWithoutHead(std::move(M));
-  if (!refOrErr)
-    return refOrErr.takeError();
-  db->set(Head(Name), *refOrErr);
-  return Error::success();
 }
 
 static std::unique_ptr<Module> LoadModuleFromValue(Store *db, const CID &ref,
