@@ -1278,6 +1278,7 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
   std::vector<Node> clusters;
   if (tv_result.count("test_input")) {
     // Evaluate all members on the test input.
+    CID test_input = tv_result["test_input"].as<CID>();
     std::vector<Future> futures;
     auto iter = equivalent_to_first.begin();
     for (std::size_t i = 0; i < members->size(); ++i) {
@@ -1286,9 +1287,9 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
         iter++;
         continue;
       }
-      futures.emplace_back(evaluator.evaluateAsync(
-          "alive.interpret", options.getCID(), (*members)[i].as<CID>(),
-          tv_result["test_input"]));
+      futures.emplace_back(
+          evaluator.evaluateAsync("alive.interpret", options.getCID(),
+                                  (*members)[i].as<CID>(), test_input));
     }
 
     StringMap<std::size_t> cluster_indices;
