@@ -1213,7 +1213,7 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
   options_nopoison_noundef["disable_poison_input"] = true;
   options_nopoison_noundef["disable_undef_input"] = true;
   std::size_t num_unhelpful_results = 0;
-  bool successfully_solved = false;
+  std::size_t num_helpful_results = 0;
   Node tv_result(node_map_arg);
 
   // Indices of members that have been proven equivalent to first_cid.
@@ -1248,7 +1248,7 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
         // We successfully used the solver to prove this refinement correct, so
         // we know Alive2 is capable of handling first_cid at least some of the
         // time.
-        successfully_solved = true;
+        num_helpful_results++;
       }
       equivalent_to_first.push_back(i);
     } else if (tv_result.count("test_input")) {
@@ -1260,7 +1260,7 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
       // - loops
       // - precondition is always false
       num_unhelpful_results++;
-      if (!successfully_solved && num_unhelpful_results >= 10) {
+      if (num_unhelpful_results >= 10 + num_helpful_results) {
         // We're repeatedly failing to validate; maybe Alive2 just can't handle
         // first_cid. Let's give up on it.
         break;
