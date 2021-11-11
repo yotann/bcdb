@@ -21,6 +21,7 @@
 
 #include "CID.h"
 #include "Node.h"
+#include "URI.h"
 
 namespace memodb {
 
@@ -35,6 +36,8 @@ struct Head {
   bool operator<(const Head &other) const;
   bool operator==(const Head &other) const;
   bool operator!=(const Head &other) const;
+
+  URI asURI() const;
 };
 
 std::ostream &operator<<(std::ostream &os, const Head &head);
@@ -51,6 +54,8 @@ struct Call {
   bool operator<(const Call &other) const;
   bool operator==(const Call &other) const;
   bool operator!=(const Call &other) const;
+
+  URI asURI() const;
 };
 
 std::ostream &operator<<(std::ostream &os, const Call &call);
@@ -78,6 +83,8 @@ struct Name : public std::variant<CID, Head, Call> {
   }
 
   static std::optional<Name> parse(llvm::StringRef uri_str);
+
+  URI asURI() const;
 };
 
 std::ostream &operator<<(std::ostream &os, const Name &name);

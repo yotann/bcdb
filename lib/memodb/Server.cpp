@@ -69,9 +69,12 @@ void Server::handleNewRequest(Request &request) {
 
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "cid") {
     if (uri.path_segments.size() == 1)
-      return handleRequestCID(request, std::nullopt);
+      return handleRequestCID(request, std::nullopt, std::nullopt);
     if (uri.path_segments.size() == 2)
-      return handleRequestCID(request, uri.path_segments[1]);
+      return handleRequestCID(request, uri.path_segments[1], std::nullopt);
+    if (uri.path_segments.size() == 3)
+      return handleRequestCID(request, uri.path_segments[1],
+                              uri.path_segments[2]);
   }
   if (uri.path_segments.size() >= 1 && uri.path_segments[0] == "head") {
     if (uri.path_segments.size() == 1)
@@ -101,7 +104,8 @@ void Server::handleNewRequest(Request &request) {
 }
 
 void Server::handleRequestCID(Request &request,
-                              std::optional<llvm::StringRef> cid_str) {
+                              std::optional<llvm::StringRef> cid_str,
+                              std::optional<llvm::StringRef> sub_str) {
   if (cid_str) {
     if (request.method != Request::Method::GET)
       return request.sendMethodNotAllowed("GET, HEAD");
@@ -112,6 +116,16 @@ void Server::handleRequestCID(Request &request,
                                "/problems/invalid-or-unsupported-cid",
                                "Invalid or unsupported CID",
                                "CID \"" + *cid_str + "\" could not be parsed.");
+    if (sub_str && *sub_str == "users") {
+      auto names = store.list_names_using(*cid);
+      std::vector<URI> uris;
+      for (const auto &name : names)
+        uris.emplace_back(name.asURI());
+      return request.sendContentURIs(uris, Request::CacheControl::Mutable);
+    } else if (sub_str) {
+      return request.sendError(Request::Status::NotFound, std::nullopt,
+                               "Not Found", std::nullopt);
+    }
     auto node = store.getOptional(*cid);
     if (!node)
       return request.sendError(Request::Status::NotFound, std::nullopt,
@@ -120,6 +134,9 @@ void Server::handleRequestCID(Request &request,
     return request.sendContentNode(*node, cid,
                                    Request::CacheControl::Immutable);
   } else {
+    if (sub_str)
+      return request.sendError(Request::Status::NotFound, std::nullopt,
+                               "Not Found", std::nullopt);
     if (request.method != Request::Method::POST)
       return request.sendMethodNotAllowed("POST");
     // POST /cid

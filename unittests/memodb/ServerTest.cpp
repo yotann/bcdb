@@ -7,6 +7,7 @@
 
 #include "FakeStore.h"
 #include "MockRequest.h"
+#include "MockStore.h"
 #include "memodb/CID.h"
 #include "memodb/Node.h"
 #include "memodb/Request.h"
@@ -69,6 +70,17 @@ TEST(ServerTest, GetCID) {
   EXPECT_CALL(request, sendContentNode(Node("cookie"),
                                        Eq(*CID::parse("uAXEAB2Zjb29raWU")),
                                        Request::CacheControl::Immutable));
+  server.handleRequest(request);
+}
+
+TEST(ServerTest, GetCIDRefs) {
+  MockStore store;
+  EXPECT_CALL(store, list_names_using(*CID::parse("uAXEAB2Zjb29raWU")))
+      .WillOnce(Return(std::vector<Name>{Name(Head("hi"))}));
+  Server server(store);
+  MockRequest request(Request::Method::GET, "/cid/uAXEAB2Zjb29raWU/users");
+  EXPECT_CALL(request, sendContentURIs({*URI::parse("/head/hi")},
+                                       Request::CacheControl::Mutable));
   server.handleRequest(request);
 }
 

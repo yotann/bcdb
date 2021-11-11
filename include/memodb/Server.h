@@ -85,7 +85,8 @@ public:
 private:
   void handleNewRequest(Request &request);
   void handleRequestCID(Request &request,
-                        std::optional<llvm::StringRef> cid_str);
+                        std::optional<llvm::StringRef> cid_str,
+                        std::optional<llvm::StringRef> sub_str);
   void handleRequestHead(Request &request,
                          std::optional<llvm::StringRef> head_str);
   void handleRequestCall(Request &request,

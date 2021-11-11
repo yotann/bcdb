@@ -114,6 +114,18 @@ Content-Type: application/json
 
 Example command: `curl http://127.0.0.1:7683/cid/uAXEABYIYfBiF`.
 
+### Find users of a Node
+
+```http
+GET /cid/:cid/users HTTP/1.1
+
+200 OK
+Content-Type: application/json
+...
+```
+
+Example command: `curl http://127.0.0.1:7683/cid/uAXEABYIYfBiF/users`.
+
 ### Insert a Node
 
 ```http

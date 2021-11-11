@@ -18,6 +18,13 @@ bool Head::operator==(const Head &other) const { return Name == other.Name; }
 
 bool Head::operator!=(const Head &other) const { return Name != other.Name; }
 
+URI Head::asURI() const {
+  URI uri;
+  uri.path_segments = {"head", Name};
+  uri.escape_slashes_in_segments = false;
+  return uri;
+}
+
 bool Call::operator<(const Call &other) const {
   return Name != other.Name ? Name < other.Name : Args < other.Args;
 }
@@ -44,32 +51,29 @@ std::unique_ptr<Store> Store::open(llvm::StringRef uri,
 }
 
 std::ostream &memodb::operator<<(std::ostream &os, const Head &head) {
-  llvm::raw_os_ostream raw_os(os);
-  raw_os << head;
-  return os;
+  return os << head.asURI().encode();
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Head &head) {
-  URI uri;
-  uri.path_segments = {"head", head.Name};
-  uri.escape_slashes_in_segments = false;
-  return os << uri.encode();
+  return os << head.asURI().encode();
 }
 
-std::ostream &memodb::operator<<(std::ostream &os, const Call &call) {
-  llvm::raw_os_ostream raw_os(os);
-  raw_os << call;
-  return os;
-}
-
-llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Call &call) {
+URI Call::asURI() const {
   std::string args;
-  for (const CID &arg : call.Args)
+  for (const CID &arg : Args)
     args += arg.asString(Multibase::base64url) + ",";
   args.pop_back();
   URI uri;
-  uri.path_segments = {"call", call.Name, std::move(args)};
-  return os << uri.encode();
+  uri.path_segments = {"call", Name, std::move(args)};
+  return uri;
+}
+
+std::ostream &memodb::operator<<(std::ostream &os, const Call &call) {
+  return os << call.asURI().encode();
+}
+
+llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Call &call) {
+  return os << call.asURI().encode();
 }
 
 std::optional<Name> Name::parse(llvm::StringRef uri_str) {
@@ -105,21 +109,26 @@ std::optional<Name> Name::parse(llvm::StringRef uri_str) {
   }
 }
 
+URI Name::asURI() const {
+  const BaseType &base = *this;
+  return std::visit(
+      Overloaded{
+          [](const CID &cid) {
+            URI uri;
+            uri.path_segments = {"cid", cid.asString(Multibase::base64url)};
+            return uri;
+          },
+          [](const auto &x) { return x.asURI(); },
+      },
+      base);
+}
+
 std::ostream &memodb::operator<<(std::ostream &os, const Name &name) {
-  llvm::raw_os_ostream raw_os(os);
-  raw_os << name;
-  return os;
+  return os << name.asURI().encode();
 }
 
 llvm::raw_ostream &memodb::operator<<(llvm::raw_ostream &os, const Name &name) {
-  if (const CID *cid = std::get_if<CID>(&name)) {
-    URI uri;
-    uri.path_segments = {"cid", cid->asString(Multibase::base64url)};
-    os << uri.encode();
-  } else {
-    name.visit([&](auto X) { os << X; });
-  }
-  return os;
+  return os << name.asURI().encode();
 }
 
 bool Store::has(const CID &CID) { return getOptional(CID).hasValue(); }
