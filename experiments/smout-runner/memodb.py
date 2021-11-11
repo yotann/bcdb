@@ -1,6 +1,8 @@
-import base64
+import asyncio
 import collections.abc as abc
+import datetime
 import io
+import logging
 import urllib.parse
 
 import aiohttp
@@ -10,10 +12,14 @@ import cbor2
 __all__ = ["Multibase", "Name", "CID", "Head", "Call", "Link", "Store"]
 
 
+log = logging.getLogger(__name__)
+
+
 class Multibase:
     prefixes = {}
 
     def __init__(self, prefix, base64_name, pad, lower):
+        import base64
         Multibase.prefixes[prefix] = self
         self.prefix = prefix
         self._base_decode = getattr(base64, base64_name + "decode")
@@ -105,7 +111,7 @@ class Head(Name):
         self.name = name
 
     def __str__(self):
-        return f"/head/{urllib.parse.quote(self.name)}"
+        return f"/head/{urllib.parse.quote(self.name,'/,')}"
 
     def __repr__(self):
         return f"Head({self.name!r})"
@@ -119,7 +125,7 @@ class Call(Name):
     def __str__(self):
         func = urllib.parse.quote(self.func, "")
         args = ",".join(arg.as_base64url() for arg in self.args)
-        return f"/call/{func}/{urllib.parse.quote(args,'')}"
+        return f"/call/{func}/{urllib.parse.quote(args,',')}"
 
     def __repr__(self):
         return f"Call({self.func!r},{self.args!r})"
@@ -158,6 +164,7 @@ class Link:
 
 class Store:
     def __init__(self, uri):
+        log.info(f"Connecting to {uri}...")
         self.uri = uri.rstrip("/")
         self.session = aiohttp.ClientSession(headers={"accept": "application/cbor"})
 
@@ -181,6 +188,7 @@ class Store:
 
     async def _get_node_optional(self, path):
         async with self._request("get", path) as response:
+            log.debug(f"GET {path} -> {response.status}")
             if response.status == 404:
                 return None
             response.raise_for_status()
@@ -235,13 +243,37 @@ class Store:
         return result
 
     async def add(self, node):
-        async with await self._put_or_post_node("post", "/cid", node) as response:
+        async with await self._put_or_post_node("POST", "/cid", node) as response:
+            log.debug(f"POST /cid -> {response.status}")
             response.raise_for_status()
             return Name.parse_url(response.headers["Location"])
 
-    async def set(self, name, *, node=None, cid=None):
-        link = Link(self, node=node, cid=cid)
-        async with await self._put_or_post_node("put", str(name), link) as response:
+    async def set(self, name, *, link=None, node=None, cid=None):
+        if link is None:
+            link = Link(self, node=node, cid=cid)
+        else:
+            if node is not None or cid is not None:
+                raise ValueError("both link and node/cid specified")
+        async with await self._put_or_post_node("PUT", str(name), link) as response:
+            log.debug(f"PUT {name} -> {response.status}")
             if response.status >= 400:
                 print(await response.text())
             response.raise_for_status()
+
+    async def evaluate(self, call):
+        start = datetime.datetime.now()
+        time_since_message = 0
+        while True:
+            async with await self._request("POST", f"{call}/evaluate") as response:
+                if response.status != 202:
+                    if response.status >= 400:
+                        print(await response.text())
+                    response.raise_for_status()
+                    return cbor2.loads(await response.read(), tag_hook=self._cbor_tag_hook)
+            await asyncio.sleep(1) # TODO: exponential backoff
+
+            time_since_message += 1
+            if time_since_message >= 60:
+                time_since_message = 0
+                delta = datetime.datetime.now() - start
+                log.info(f"Still waiting after {delta} for {call}...")
