@@ -1436,10 +1436,18 @@ NodeOrCID smout::grouped_refinements(Evaluator &evaluator, Link options,
                                      Link mod) {
   Node grouped_callees =
       *evaluator.evaluate(grouped_callees_version, options, mod);
+
+  // Remove candidate generation options.
+  Node stripped_options = *options;
+  stripped_options.erase("max_adjacent");
+  stripped_options.erase("max_args");
+  stripped_options.erase("max_nodes");
+  stripped_options.erase("min_rough_caller_savings");
+
   std::vector<Future> futures;
   for (const auto &item : grouped_callees.map_range())
     futures.emplace_back(
-        evaluator.evaluateAsync(refinements_for_group_version, options,
+        evaluator.evaluateAsync(refinements_for_group_version, stripped_options,
                                 item.value()["members"].as<CID>()));
   size_t i = 0;
   for (auto &item : grouped_callees.map_range()) {
