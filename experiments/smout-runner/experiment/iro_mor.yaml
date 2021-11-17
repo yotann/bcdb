@@ -1,0 +1,6 @@
+# @package _global_
+defaults:
+  - override /pre-opt: Oz-iro
+  - override /smout: none
+  - override /alive2: none
+  - override /machine_outliner: "repeated"

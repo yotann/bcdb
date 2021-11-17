@@ -1,0 +1,25 @@
+# @package _global_
+calls:
+  compiled:
+    func: cmd.llc
+    args:
+      - - "-O=2"
+        - "-filetype=obj"
+        - ${params.machine_outliner.enable_arg}
+        - ${params.machine_outliner.reruns_arg}
+      - ${var:post-opt}
+  compiled_size:
+    func: cmd.llvm-size
+    args:
+      - - "-"
+      - ${var:compiled}
+  compiled_objdump_h:
+    func: cmd.llvm-objdump
+    args:
+      - - "-h"
+        - "-"
+      - ${var:compiled}
+params:
+  machine_outliner:
+    enable_arg: "--enable-machine-outliner=never"
+    reruns_arg: "--machine-outliner-reruns=0"

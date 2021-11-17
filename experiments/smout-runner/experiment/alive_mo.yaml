@@ -1,0 +1,6 @@
+# @package _global_
+defaults:
+  - override /pre-opt: Oz
+  - override /smout: full
+  - override /alive2: full
+  - override /machine_outliner: "yes"

@@ -1,0 +1,19 @@
+defaults:
+  - runner_schema
+  - pre-opt: Oz
+  - smout: full
+  - alive2: none
+  - post-opt: default
+  - compile: default
+  - machine_outliner: "yes"
+  - _self_
+  #- override hydra/launcher: joblib
+
+files:
+  input_bc: ${oc.env:PWD}/libcurl_x86.bc
+
+calls:
+  input:
+    func: bcdb.split
+    args:
+      - ${var:input_bc}

@@ -1,0 +1,6 @@
+# @package _global_
+calls:
+  optimized:
+    func: id
+    args:
+      - ${var:pre-opt}

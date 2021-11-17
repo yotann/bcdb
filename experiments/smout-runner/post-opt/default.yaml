@@ -1,0 +1,7 @@
+# @package calls
+post-opt:
+  func: cmd.opt
+  args:
+    - - "--passes"
+      - "function(simplifycfg),function-attrs"
+    - ${var:optimized}

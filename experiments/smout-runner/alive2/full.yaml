@@ -1,0 +1,10 @@
+# @package _global_
+calls:
+  grouped_refinements:
+    func: smout.grouped_refinements_v6
+    args:
+      - ${params.candidates}
+      - ${var:pre-opt}
+params:
+  solution:
+    use_alive2: yes

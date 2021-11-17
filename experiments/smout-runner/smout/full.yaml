@@ -1,0 +1,38 @@
+# @package _global_
+calls:
+  grouped_candidates:
+    func: smout.grouped_candidates_v2
+    args:
+      - ${params.candidates}
+      - ${var:pre-opt}
+  grouped_callees:
+    func: smout.grouped_callees_v4
+    args:
+      - ${params.candidates}
+      - ${var:pre-opt}
+  greedy_solution:
+    func: smout.greedy_solution_v5
+    args:
+      - ${params.solution}
+      - ${var:pre-opt}
+  optimized:
+    func: smout.optimized_v6
+    args:
+      - ${params.solution}
+      - ${var:pre-opt}
+params:
+  candidates:
+    max_adjacent: 10
+    max_args: 10
+    max_nodes: 200
+    min_rough_caller_savings: 1
+  solution:
+    max_adjacent: ${params.candidates.max_adjacent}
+    max_args: ${params.candidates.max_args}
+    max_nodes: ${params.candidates.max_nodes}
+    min_rough_caller_savings: ${params.candidates.min_rough_caller_savings}
+    min_benefit: 1
+    min_caller_savings: 1
+    compile_all_callers: yes
+    verify_caller_savings: yes
+    use_alive2: no

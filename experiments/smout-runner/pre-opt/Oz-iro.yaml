@@ -1,0 +1,17 @@
+# @package calls
+pre-opt0:
+  func: cmd.opt
+  args:
+    - - "--passes"
+      - "remove-function-attr<optnone>,remove-function-attr<noinline>,add-function-attr<minsize>,add-function-attr<optsize>"
+      - "--strip-debug"
+      - "--discard-value-names"
+    - ${var:input}
+pre-opt:
+  func: cmd.opt
+  args:
+    - - "-Oz"
+      - "--ir-outliner"
+      - "--strip-debug"
+      - "--discard-value-names"
+    - ${var:pre-opt0}

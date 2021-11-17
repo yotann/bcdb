@@ -1,0 +1,6 @@
+# @package _global_
+params:
+  machine_outliner:
+    enable_arg: "--enable-machine-outliner=always"
+    # 5 rounds total, same as Chabbi paper
+    reruns_arg: "--machine-outliner-reruns=4"
