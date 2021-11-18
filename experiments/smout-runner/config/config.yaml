@@ -7,7 +7,6 @@ defaults:
   - compile: default
   - machine_outliner: "yes"
   - _self_
-  #- override hydra/launcher: joblib
 
 files:
   input_bc: ${oc.env:PWD}/ppmtomitsu.bc
