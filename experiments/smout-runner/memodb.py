@@ -20,6 +20,7 @@ class Multibase:
 
     def __init__(self, prefix, base64_name, pad, lower):
         import base64
+
         Multibase.prefixes[prefix] = self
         self.prefix = prefix
         self._base_decode = getattr(base64, base64_name + "decode")
@@ -269,8 +270,10 @@ class Store:
                     if response.status >= 400:
                         print(await response.text())
                     response.raise_for_status()
-                    return cbor2.loads(await response.read(), tag_hook=self._cbor_tag_hook)
-            await asyncio.sleep(1) # TODO: exponential backoff
+                    return cbor2.loads(
+                        await response.read(), tag_hook=self._cbor_tag_hook
+                    )
+            await asyncio.sleep(1)  # TODO: exponential backoff
 
             time_since_message += 1
             if time_since_message >= 60:

@@ -10,7 +10,7 @@ defaults:
   #- override hydra/launcher: joblib
 
 files:
-  input_bc: ${oc.env:PWD}/libcurl_x86.bc
+  input_bc: ${oc.env:PWD}/ppmtomitsu.bc
 
 calls:
   input:
