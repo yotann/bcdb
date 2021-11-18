@@ -4,6 +4,9 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/Support/raw_ostream.h>
+#if LLVM_VERSION_MAJOR <= 10
+#include <llvm-c/Core.h>
+#endif
 
 #include "outlining/Candidates.h"
 #include "outlining/Dependence.h"
@@ -54,7 +57,12 @@ parseAttributeKindPassName(StringRef name, StringRef pass_name) {
   if (!name.consume_front(pass_name) || !name.consume_front("<") ||
       !name.consume_back(">"))
     return {};
+#if LLVM_VERSION_MAJOR >= 11
   auto kind = Attribute::getAttrKindFromName(name);
+#else
+  auto kind = static_cast<Attribute::AttrKind>(
+      LLVMGetEnumAttributeKindForName(name.data(), name.size()));
+#endif
   if (kind == Attribute::None)
     return {};
   return kind;
