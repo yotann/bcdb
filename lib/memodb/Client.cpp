@@ -372,8 +372,9 @@ public:
   ClientEvaluator(std::unique_ptr<HTTPStore> store, unsigned num_threads);
   ~ClientEvaluator() override;
   Store &getStore() override;
-  Link evaluate(const Call &call) override;
-  Future evaluateAsync(const Call &call) override;
+  Link evaluate(const Call &call, bool work_while_waiting = true) override;
+  Future evaluateAsync(const Call &call,
+                       bool work_while_waiting = true) override;
   void registerFunc(
       llvm::StringRef name,
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
@@ -381,7 +382,7 @@ public:
 private:
   std::optional<Link> tryEvaluate(const Call &call,
                                   bool inc_started_if_success);
-  Link evaluateDeferred(const Call &call);
+  Link evaluateDeferred(const Call &call, bool work_while_waiting);
   bool workOnce(nng_aio *aio);
 
   std::unique_ptr<HTTPStore> store;
@@ -454,16 +455,17 @@ std::optional<Link> ClientEvaluator::tryEvaluate(const Call &call,
   return Link(*store, response.body.as<CID>());
 }
 
-Link ClientEvaluator::evaluate(const Call &call) {
+Link ClientEvaluator::evaluate(const Call &call, bool work_while_waiting) {
   ++num_requested;
   if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
     printProgress();
     llvm::errs() << " starting " << call << "\n";
   }
-  return evaluateDeferred(call);
+  return evaluateDeferred(call, work_while_waiting);
 }
 
-Link ClientEvaluator::evaluateDeferred(const Call &call) {
+Link ClientEvaluator::evaluateDeferred(const Call &call,
+                                       bool work_while_waiting) {
   ++num_started;
   auto aio = aio_alloc();
   while (true) {
@@ -477,12 +479,13 @@ Link ClientEvaluator::evaluateDeferred(const Call &call) {
     //
     // XXX: This can cause stack depth to grow arbitrarily large. If that turns
     // out to be a problem, we may need to change the design.
-    if (!workOnce(aio.get()))
+    if (!(work_while_waiting && workOnce(aio.get())))
       nng_msleep(1000); // TODO: exponential backoff
   }
 }
 
-Future ClientEvaluator::evaluateAsync(const Call &call) {
+Future ClientEvaluator::evaluateAsync(const Call &call,
+                                      bool work_while_waiting) {
   ++num_requested;
   if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
     printProgress();
@@ -494,8 +497,9 @@ Future ClientEvaluator::evaluateAsync(const Call &call) {
     promise.set_value(*early_result);
     return makeFuture(promise.get_future().share());
   }
-  auto future = std::async(std::launch::deferred,
-                           &ClientEvaluator::evaluateDeferred, this, call);
+  auto future =
+      std::async(std::launch::deferred, &ClientEvaluator::evaluateDeferred,
+                 this, call, work_while_waiting);
   return makeFuture(future.share());
 }
 

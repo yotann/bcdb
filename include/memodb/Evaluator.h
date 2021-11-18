@@ -86,7 +86,7 @@ public:
   virtual Store &getStore() = 0;
 
   /// Evaluate a call and wait until evaluation is done.
-  virtual Link evaluate(const Call &call) = 0;
+  virtual Link evaluate(const Call &call, bool work_while_waiting = true) = 0;
 
   /// Evaluate a call and wait until evaluation is done. \p args can be Node or
   /// CID values.
@@ -96,7 +96,8 @@ public:
   }
 
   /// Start evaluation of a call, returning a Future.
-  virtual Future evaluateAsync(const Call &call) = 0;
+  virtual Future evaluateAsync(const Call &call,
+                               bool work_while_waiting = true) = 0;
 
   /// Start evaluation of a call, returning a Future. \p args can be Node or
   /// CID values.

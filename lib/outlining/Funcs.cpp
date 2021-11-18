@@ -1232,8 +1232,17 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
       CID tgt = (*members)[i].as<CID>();
       if (j & 1) // forward or backward?
         std::swap(src, tgt);
-      tv_result = *evaluator.evaluate(
-          "alive.tv_v2", j & 2 ? *options : options_nopoison_noundef, src, tgt);
+      Call call(
+          "alive.tv_v2",
+          {j & 2
+               ? options.getCID()
+               : Link(evaluator.getStore(), options_nopoison_noundef).getCID(),
+           src, tgt});
+      // We set work_while_waiting to false because otherwise ClientEvaluator
+      // will start working on other refinements_for_set jobs while waiting for
+      // the alive result, which could prevent this job from making progress
+      // for an arbitrarily long time.
+      tv_result = *evaluator.evaluate(call, /*work_while_waiting*/ false);
       if (tv_result.at("status") == "syntactic_eq") {
         // No need to run the other tests.
         break;
@@ -1287,9 +1296,10 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
         iter++;
         continue;
       }
+      Call call("alive.interpret",
+                {options.getCID(), (*members)[i].as<CID>(), test_input});
       futures.emplace_back(
-          evaluator.evaluateAsync("alive.interpret", options.getCID(),
-                                  (*members)[i].as<CID>(), test_input));
+          evaluator.evaluateAsync(call, /*work_while_waiting*/ false));
     }
 
     StringMap<std::size_t> cluster_indices;
