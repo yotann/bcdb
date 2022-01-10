@@ -52,6 +52,32 @@ PreservedAnalyses RemoveFunctionAttrPass::run(Module &m,
   return PreservedAnalyses::none();
 }
 
+namespace {
+class RelaxForAlivePass : public PassInfoMixin<RelaxForAlivePass> {
+public:
+  PreservedAnalyses run(Function &f, FunctionAnalysisManager &am);
+};
+} // namespace
+
+PreservedAnalyses RelaxForAlivePass::run(Function &f,
+                                         FunctionAnalysisManager &) {
+  for (BasicBlock &bb : f) {
+    for (Instruction &i : bb) {
+      // Remove metadata that Alive2 doesn't support. These metadata types
+      // provide constraints on the behavior of the program, so it's safe to
+      // remove them, but potentially unsafe to introduce them.
+      i.setMetadata(LLVMContext::MD_align, nullptr);
+      i.setMetadata(LLVMContext::MD_dereferenceable, nullptr);
+      i.setMetadata(LLVMContext::MD_dereferenceable_or_null, nullptr);
+      i.setMetadata(LLVMContext::MD_invariant_group, nullptr);
+      i.setMetadata(LLVMContext::MD_invariant_load, nullptr);
+      i.setMetadata(LLVMContext::MD_nonnull, nullptr);
+      i.setMetadata(LLVMContext::MD_nontemporal, nullptr);
+    }
+  }
+  return PreservedAnalyses::none();
+}
+
 static std::optional<Attribute::AttrKind>
 parseAttributeKindPassName(StringRef name, StringRef pass_name) {
   if (!name.consume_front(pass_name) || !name.consume_front("<") ||
@@ -99,6 +125,10 @@ llvmGetPassPluginInfo() {
                   }
                   if (name == "print<size-model>") {
                     fpm.addPass(SizeModelPrinterPass(dbgs()));
+                    return true;
+                  }
+                  if (name == "relax-for-alive") {
+                    fpm.addPass(RelaxForAlivePass());
                     return true;
                   }
                   return false;
