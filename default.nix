@@ -77,10 +77,7 @@ in rec {
   llvm12-assert = assertLLVM pkgs.llvmPackages_12.libllvm;
   llvm13-assert = assertLLVM pkgs.llvmPackages_13.libllvm;
   llvm13-debug = debugLLVM pkgs.llvmPackages_13.libllvm;
-  cgl = pkgs.callPackage ./nix/cgl { inherit coinutils; };
-  coinutils = pkgs.callPackage ./nix/coinutils {};
   nng = pkgs.callPackage ./nix/nng {};
-  symphony = pkgs.callPackage ./nix/symphony { inherit coinutils cgl; };
 
   # Singularity container (to be run on HTCondor cluster)
   smout-worker-singularity = pkgs.singularity-tools.buildImage {

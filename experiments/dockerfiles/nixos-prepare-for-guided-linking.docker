@@ -15,11 +15,8 @@ WORKDIR /bcdb
 # Unfortunately, Docker can't copy multiple directories at once without getting
 # their contents mixed up.
 COPY nix/bcdb nix/bcdb
-COPY nix/cgl nix/cgl
-COPY nix/coinutils nix/coinutils
 COPY nix/import-flake-lock.nix nix/
 COPY nix/nng nix/nng
-COPY nix/symphony nix/symphony
 COPY .gitignore flake.lock *.nix ./
 # hadolint ignore=DL4006,SC2046
 RUN nix-store --realise $(nix-store -q --references $(nix-instantiate default.nix -A bcdb) | grep -v 'bcdb$') && \
