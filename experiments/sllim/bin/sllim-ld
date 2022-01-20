@@ -110,4 +110,5 @@ cp "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/optimized.bc"
   -flto \
   -o "$ORIG_OUTPUT" \
   $("${SLLIM_BC_IMITATE-bc-imitate}" clang-args "$SLLIM_TMP/optimized.bc") \
+  "${SLLIM_LD+--ld-path=$SLLIM_LD}" \
   "$SLLIM_TMP/optimized.bc"
