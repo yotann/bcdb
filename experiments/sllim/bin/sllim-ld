@@ -16,7 +16,7 @@ log() {
 
 # Recursive executions should never happen, but we check just in case.
 if [ -n "${SLLIM_IN_LD+set}" ]; then
-  log sllim-ld called recursively: "$0" "$@"
+  log error: sllim-ld called recursively: "$0" "$@"
   exit 1
 fi
 export SLLIM_IN_LD=1
@@ -42,7 +42,7 @@ while true; do
   # option that has an argument (see llvm/lld/ELF/Options.td).
   case "$1" in
     -v|--version)
-      NO_OUTPUT=1
+      NO_LINK=1
       ;;
 
     -o|--output)
@@ -68,7 +68,7 @@ while true; do
   shift
 done
 
-if [ -z "${NO_OUTPUT+set}" ]; then
+if [ -z "${NO_LINK+set}" ]; then
   # --gc-sections would delete the .llvmbc section.
   set -- "$@" --no-gc-sections
   # Output to a temporary file, to make sure we process it properly.
@@ -88,22 +88,26 @@ if [ "$RC" -ne 0 ]; then
   exit "$RC"
 fi
 
-if [ -n "${NO_OUTPUT+set}" ]; then
+if [ -n "${NO_LINK+set}" ]; then
   exit 0
 fi
 
+log
+log sllim-ld: optimizing "$ORIG_OUTPUT"
+log
+
 if [ ! -f "$SLLIM_TMP/linker-output" ]; then
-  log sllim-ld: missing output file
+  log error: sllim-ld: missing output file
   log Original command line: "$0" "$ORIG_ARGS"
   log Modified command line: "$LD" "$@"
   log Missing file: "$SLLIM_TMP/linker-output"
   exit 1
 fi
 
-bc-imitate extract -o "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/linker-output"
+"${SLLIM_BC_IMITATE-bc-imitate}" extract -o "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/linker-output"
 cp "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/optimized.bc"
 "${SLLIM_CLANG-clang}" \
   -flto \
   -o "$ORIG_OUTPUT" \
-  $(bc-imitate clang-args "$SLLIM_TMP/optimized.bc") \
+  $("${SLLIM_BC_IMITATE-bc-imitate}" clang-args "$SLLIM_TMP/optimized.bc") \
   "$SLLIM_TMP/optimized.bc"

@@ -48,16 +48,19 @@ if ! [ -d "$SLLIM_ENV_PATH" ]; then
   exit 1
 fi
 
+# Find paths to the original tools before we override them.
 path SLLIM sllim
+path SLLIM_BC_IMITATE bc-imitate
 path SLLIM_CLANG clang
 path SLLIM_CLANGXX clang++
-path SLLIM_LD ld
+export SLLIM_LD="$("$SLLIM_CLANG" -print-prog-name=ld)"
 
+# Use our own wrapper scripts.
 path CC sllim-cc
 path CXX sllim-c++
 path LD sllim-ld
 
-# Use the LLVM versions, just like emscripten does.
+# Use the LLVM versions of these, just like emscripten does.
 path AR llvm-ar
 path NM llvm-nm
 path RANLIB llvm-ranlib

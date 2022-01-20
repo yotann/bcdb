@@ -23,17 +23,12 @@ log() {
 # lead to infinite recursion if it actually invokes this script. We detect
 # recursion and return an error.
 if [ -n "${SLLIM_IN_CC+set}" ]; then
-  log sllim-cc called recursively: "$0" "$@"
+  log error: sllim-cc called recursively: "$0" "$@"
   exit 1
 fi
 export SLLIM_IN_CC=1
 
 SLLIM_PATH="$(realdir "$(dirname "$0")")"
-
-if [ "$*" = -v ] || [ "$*" = --version ]; then
-  # Prevent changing any options.
-  NO_CHANGE=1
-fi
 
 ORIG_ARGS=""
 set -- "$@" --sllim-divider
@@ -46,6 +41,12 @@ while true; do
 
   ORIG_ARGS="${ORIG_ARGS:+$ORIG_ARGS }'$1'"
   case "$1" in
+    -v|--version)
+      NO_COMPILE=1
+      set -- "$@" "$1"
+      shift
+      ;;
+
     # Clang doesn't support these options with -fembed-bitcode.
     -Wa,--noexecstack|-fdata-sections|-ffunction-sections|-mno-red-zone|-mstackrealign|-mcmodel=*)
       shift
@@ -84,7 +85,7 @@ while true; do
   esac
 done
 
-if [ -z "${NO_CHANGE+set}" ]; then
+if [ -z "${NO_COMPILE+set}" ]; then
   # Older GCC and Clang default to -fcommon, and some packages still require it.
   if [ -z "${COMMON_EXPLICIT+set}" ]; then
     set -- "$@" "-fcommon"
@@ -103,7 +104,13 @@ if [ -z "${NO_CHANGE+set}" ]; then
 fi
 
 CC="${SLLIM_CLANG-clang}"
-export SLLIM_LD="$("$CC" -print-prog-name=ld)"
+
+# If we're using sllim-env, SLLIM_LD will already be set, and it's important
+# not to change it because we might accidentally set SLLIM_LD=sllim-ld, causing
+# an infinite loop.
+if [ -z "${SLLIM_LD+set}" ]; then
+  export SLLIM_LD="$("$CC" -print-prog-name=ld)"
+fi
 
 RC=0
 "$CC" "$@" || RC=$?
