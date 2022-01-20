@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# This script should work on systems with shells other than Bash (Dash, Busybox
+# Ash, etc.) and with optional programs missing (such as "which").
+
+set -eu
+
+realdir() {
+  cd "$1"
+  pwd -P
+}
+
+log() {
+  # SLLIM_TTY may be set by sllim-env.
+  if [ -n "${SLLIM_TTY+set}" ]; then
+    echo "$@" >> "$SLLIM_TTY"
+  else
+    echo "$@" >&2
+  fi
+}
+
+# Clang can try to invoke GCC when e.g. compiling an Ada source file, which can
+# lead to infinite recursion if it actually invokes this script. We detect
+# recursion and return an error.
+if [ -n "${SLLIM_IN_CC+set}" ]; then
+  log sllim-cc called recursively: "$0" "$@"
+  exit 1
+fi
+export SLLIM_IN_CC=1
+
+SLLIM_PATH="$(realdir "$(dirname "$0")")"
+
+if [ "$*" = -v ] || [ "$*" = --version ]; then
+  # Prevent changing any options.
+  NO_CHANGE=1
+fi
+
+ORIG_ARGS=""
+set -- "$@" --sllim-divider
+while true; do
+  if [ "$1" = "--sllim-divider" ]; then
+    # Done processing all options.
+    shift
+    break
+  fi
+
+  ORIG_ARGS="${ORIG_ARGS:+$ORIG_ARGS }'$1'"
+  case "$1" in
+    # Clang doesn't support these options with -fembed-bitcode.
+    -Wa,--noexecstack|-fdata-sections|-ffunction-sections|-mno-red-zone|-mstackrealign|-mcmodel=*)
+      shift
+      ;;
+
+    # Clang may find warnings in code that's fine in GCC, so prevent treating
+    # them as errors.
+    -Werror*)
+      shift
+      ;;
+
+    # When this warning is triggered, LLVM can crash on AArch64 with
+    # -fembed-bitcode.
+    -Wframe-larger-than=*)
+      shift
+      ;;
+
+    # Track whether -f(no-)common is given, so we know whether to give it
+    # ourselves.
+    -fcommon|-fno-common)
+      COMMON_EXPLICIT=1
+      set -- "$@" "$1"
+      shift
+      ;;
+
+    # Disable LTO, because it doesn't embed bitcode.
+    -flto)
+      shift
+      ;;
+
+    # All other options are passed through unmodified.
+    *)
+      set -- "$@" "$1"
+      shift
+      ;;
+  esac
+done
+
+if [ -z "${NO_CHANGE+set}" ]; then
+  # Older GCC and Clang default to -fcommon, and some packages still require it.
+  if [ -z "${COMMON_EXPLICIT+set}" ]; then
+    set -- "$@" "-fcommon"
+  fi
+
+  # Embed the bitcode!
+  set -- "$@" "-fembed-bitcode=all"
+
+  # Use our wrapper for the linker.
+  # Option --ld-path= was added in Clang 12 <https://reviews.llvm.org/D83015>.
+  # Older versions allow an absolute path to be given to -fuse-ld=.
+  set -- "$@" "--ld-path=$SLLIM_PATH/sllim-ld"
+
+  # Don't warn if the arguments we add aren't being used.
+  set -- "$@" "-Wno-unused-command-line-argument"
+fi
+
+CC="${SLLIM_CLANG-clang}"
+export SLLIM_LD="$("$CC" -print-prog-name=ld)"
+
+RC=0
+"$CC" "$@" || RC=$?
+if [ "$RC" -ne 0 ]; then
+  log sllim-cc command failed
+  log Original command line: "$0" "$ORIG_ARGS"
+  log Modified command line: "$CC" "$@"
+fi
+exit "$RC"

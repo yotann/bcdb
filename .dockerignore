@@ -7,8 +7,19 @@
 
 tags
 
+# stuff that isn't in Git
 build*
+experiments/smout-runner/*.bc
+experiments/smout-runner/*.log
 install
 nix/gl-experiments/result*
 result
 result-*
+
+# stuff that is in Git, but isn't needed for the Docker containers
+.git
+experiments/distributed-htcondor
+experiments/dockerfiles
+experiments/smout-runner
+experiments/subjects
+nix/gl-experiments

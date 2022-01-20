@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# This script should work on systems with shells other than Bash (Dash, Busybox
+# Ash, etc.) and with optional programs missing (such as "which").
+
+set -eu
+
+realdir() {
+  cd "$1"
+  pwd -P
+}
+
+SLLIM_PATH="$(realdir "$(dirname "$0")")"
+export SLLIM_CLANG="${SLLIM_CLANGXX-$(command -v clang++)}"
+exec "$SLLIM_PATH/sllim-cc" "$@"

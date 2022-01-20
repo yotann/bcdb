@@ -1,0 +1,79 @@
+FROM ubuntu:20.04
+
+
+
+# Install Ubuntu packages.
+
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive \
+     apt-get install -y --no-install-recommends \
+             # Required to install Nix.
+             ca-certificates tar wget xz-utils \
+             # Required to use sllim-cc and sllim-ld.
+             binutils clang-12 llvm-12 \
+             # Not required by SLLIM, but useful for building software.
+             autoconf cmake dpkg-dev git libtool pkg-config \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# Add "clang" etc. to PATH (instead of just "clang-12").
+ENV PATH=/usr/lib/llvm-12/bin:$PATH
+
+
+
+# Install Nix.
+
+# Normally, we could install Nix with a single command using the instructions
+# at <https://nixos.org/download.html>. But that requires a user account with
+# sudo configured, which we don't have in this Docker container. Instead, we do
+# a bunch of setup manually.
+
+# Based on <https://github.com/NixOS/docker/blob/master/Dockerfile>.
+
+# Shells started in Docker don't always load /etc/profile, so there's no
+# reliable way to load /nix/var/nix/profiles/default/etc/profile.d/nix.sh,
+# which sets PATH and NIX_PROFILES based on the current user. Instead we set
+# them to fixed values here, ignoring user-specific Nix profiles.
+ENV PATH=/nix/var/nix/profiles/default/bin:$PATH
+# Nix commands also require USER to be set, but Docker doesn't set it by
+# default. USER should be changed later on if another user is created.
+ENV USER=root
+
+ARG NIX_VERSION=2.5.1
+RUN mkdir -m 0755 /etc/nix /nix \
+  && echo "sandbox = false" > /etc/nix/nix.conf \
+  && echo "max-jobs = 2" >> /etc/nix/nix.conf \
+  && echo "cores = 0" >> /etc/nix/nix.conf \
+  && groupadd -g 30000 -r nixbld \
+  # Note that the useradd command needs both "-g nixbld" (to set the primary
+  # group) and "-G nixbld" (to add the user to /etc/group, necessary for Nix to
+  # find it).
+  && for i in $(seq 1 30); do useradd -r -d /var/empty -c "Nix build user $i" -u $((30000 + i)) -g nixbld -G nixbld nixbld$i; done \
+  && wget -O- https://nixos.org/releases/nix/nix-${NIX_VERSION}/nix-${NIX_VERSION}-$(uname -m)-linux.tar.xz \
+  | tar xJf - \
+  && sh nix-${NIX_VERSION}-$(uname -m)-linux/install --no-modify-profile \
+  && rm -r nix-${NIX_VERSION}-$(uname -m)-linux \
+  && nix-env --upgrade --leq \
+  && nix-collect-garbage --delete-old \
+  && nix-store --optimise
+
+
+
+# Install BCDB.
+
+# Set up cachix, so dependencies can be downloaded from our cache. (Optional,
+# but saves a lot of time rebuilding LLVM with assertions enabled.)
+RUN nix-env -iA cachix -f https://cachix.org/api/v1/install \
+  && cachix use bcdb \
+  && nix-collect-garbage --delete-old \
+  && nix-store --optimize
+
+WORKDIR /bcdb
+
+# Copy the BCDB source code.
+# Note that .dockerignore excludes some files.
+COPY . ./
+
+# Build, test, and install BCDB and SLLIM.
+RUN nix-env -f . -iA bcdb sllim
+
+WORKDIR /

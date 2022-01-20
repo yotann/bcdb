@@ -51,9 +51,11 @@ fi
 path SLLIM sllim
 path SLLIM_CLANG clang
 path SLLIM_CLANGXX clang++
+path SLLIM_LD ld
 
 path CC sllim-cc
 path CXX sllim-c++
+path LD sllim-ld
 
 # Use the LLVM versions, just like emscripten does.
 path AR llvm-ar
