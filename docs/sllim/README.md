@@ -43,14 +43,13 @@ Cloning into 'lz4'...
 root# cd lz4
 root# sllim-env
 SLLIM overrides added.
-Starting shell...
-Exit the new shell to leave the SLLIM environment.
-root# make -j4 lz4
+sllim-env: root# make -j4 lz4
 compiling static library
-root# size lz4
+sllim-env: root# size lz4
   text    data     bss     dec     hex filename
 172907     940     104  173951   2a77f lz4
-root# exit
+sllim-env: root# exit
+root#
 ```
 
 SLLIM is designed to work with any C/C++ code that can be built with Clang. In
@@ -111,6 +110,13 @@ will use `sllim-cc` even if it hardcodes the name of the compiler.
 
 This script requires `clang`, `clang++`, `ld`, `bc-imitate`, and the LLVM tools
 (such as `llvm-ar`) to be in your `PATH` before you start it.
+
+**IMPORTANT:** Configuration tools, like `./configure` and `cmake`, often try
+to compile lots of small test files to check which compiler features are
+available. It's normal for some of these checks to fail, and any error messages
+are usually hidden, but `sllim-env` forces its error messages to be shown in
+order to help with debugging. You should generally ignore these `sllim-env`
+errors as long as the configuration tool ignores them.
 
 ### Configuring SLLIM
 

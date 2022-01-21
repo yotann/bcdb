@@ -74,6 +74,8 @@ WORKDIR /bcdb
 COPY . ./
 
 # Build, test, and install BCDB and SLLIM.
-RUN nix-env -f . -iA bcdb sllim
+# FIXME: replace "bcdb-llvm12" with "bcdb" after we start using the actual
+# sllim command (and therefore BCDB's version of llc).
+RUN nix-env -f . -iA bcdb-llvm12 sllim
 
 WORKDIR /

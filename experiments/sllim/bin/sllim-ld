@@ -23,7 +23,9 @@ export SLLIM_IN_LD=1
 
 # Create temporary directory.
 SLLIM_TMP="$(mktemp -t -d sllim-ld.XXXXXXXXXX)"
-trap 'rm -rf "$SLLIM_TMP"' EXIT
+
+# Commented because we want to leave temporary files around in case of error.
+#trap 'rm -rf "$SLLIM_TMP"' EXIT
 
 ORIG_ARGS=""
 set -- "$@" --sllim-divider
@@ -79,36 +81,62 @@ LD="${SLLIM_LD-ld}"
 
 rm -f "$SLLIM_TMP/linker-output"
 
+try_command() {
+  MESSAGE="$1"
+  shift
+  RC=0
+  "$@" || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    log error: sllim-ld: "$MESSAGE" failed
+  fi
+  return "$RC"
+}
+
+perform_link() {
+  try_command "initial link" "$LD" "$@"
+
+  if [ -n "${NO_LINK+set}" ]; then
+    return 0
+  fi
+
+  log
+  log sllim-ld: optimizing "$ORIG_OUTPUT"
+  log
+
+  if [ ! -f "$SLLIM_TMP/linker-output" ]; then
+    log error: sllim-ld: missing output file "$SLLIM_TMP/linker-output"
+    return 1
+  fi
+
+  try_command "bitcode extraction" \
+    "${SLLIM_BC_IMITATE-bc-imitate}" extract \
+    -o "$SLLIM_TMP/linked.bc" \
+    -- "$SLLIM_TMP/linker-output"
+
+  # TODO: invoke sllim
+  cp -- "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/optimized.bc"
+
+  try_command "code generation" \
+    "${SLLIM_LLC-llc}" \
+    --filetype=obj \
+    -o "$SLLIM_TMP/optimized.o" \
+    -- "$SLLIM_TMP/optimized.bc"
+
+  try_command "final link" \
+    "${SLLIM_CLANG-clang}" \
+    -o "$ORIG_OUTPUT" \
+    $("${SLLIM_BC_IMITATE-bc-imitate}" clang-args "$SLLIM_TMP/optimized.bc") \
+    "${SLLIM_LD+--ld-path=$SLLIM_LD}" \
+    "$SLLIM_TMP/optimized.o"
+}
+
 RC=0
-"$LD" "$@" || RC=$?
+perform_link "$@" || RC=$?
 if [ "$RC" -ne 0 ]; then
-  log sllim-ld: linker failed
+  log error: sllim-ld error
   log Original command line: "$0" "$ORIG_ARGS"
   log Modified command line: "$LD" "$@"
   exit "$RC"
 fi
 
-if [ -n "${NO_LINK+set}" ]; then
-  exit 0
-fi
-
-log
-log sllim-ld: optimizing "$ORIG_OUTPUT"
-log
-
-if [ ! -f "$SLLIM_TMP/linker-output" ]; then
-  log error: sllim-ld: missing output file
-  log Original command line: "$0" "$ORIG_ARGS"
-  log Modified command line: "$LD" "$@"
-  log Missing file: "$SLLIM_TMP/linker-output"
-  exit 1
-fi
-
-"${SLLIM_BC_IMITATE-bc-imitate}" extract -o "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/linker-output"
-cp "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/optimized.bc"
-"${SLLIM_CLANG-clang}" \
-  -flto \
-  -o "$ORIG_OUTPUT" \
-  $("${SLLIM_BC_IMITATE-bc-imitate}" clang-args "$SLLIM_TMP/optimized.bc") \
-  "${SLLIM_LD+--ld-path=$SLLIM_LD}" \
-  "$SLLIM_TMP/optimized.bc"
+rm -rf "$SLLIM_TMP"

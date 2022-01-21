@@ -10,65 +10,19 @@ realdir() {
   pwd -P
 }
 
-path() {
-  if ! SLLIM_TMP="$(command -v "$2")"; then
-    echo "error: command '$2' not found" >&2
-    exit 1
-  fi
-  export "$1=$SLLIM_TMP"
-}
-
-# Prevent nested usage of sllim-env.
-if [ -n "${SLLIM_IN_ENV+set}" ]; then
-  echo "error: nesting sllim-env is not supported" >&2
-  exit 1
-fi
-export SLLIM_IN_ENV=1
-
-# Set SLLIM_TTY to the current stderr.
-# That way, even if autoconf runs $CC with a redirected stderr, we can still
-# print messages to the original stderr.
-if [ -L "/proc/$$/fd/2" ]; then
-  SLLIM_TTY="$(readlink "/proc/$$/fd/2")"
-  export SLLIM_TTY
-fi
-
 # Add this script's directory to PATH, if it isn't there already.
 SLLIM_PATH="$(realdir "$(dirname "$0")")"
 if ! command -v sllim-env >/dev/null 2>&1; then
   export PATH="$SLLIM_PATH${PATH:+:${PATH}}"
 fi
 
-# Check that the directory containing our versions of "cc", "gcc", etc. is
-# available.
-SLLIM_ENV_PATH="$(dirname "$SLLIM_PATH")/libexec/sllim/env"
-if ! [ -d "$SLLIM_ENV_PATH" ]; then
-  echo "error: sllim-env install directory missing" >&2
-  echo "  (expected at $SLLIM_ENV_PATH)" >&2
-  exit 1
+export ENV="$SLLIM_PATH/sllim-env.sh"
+
+SHELL="${SHELL-bash}"
+if "$SHELL" --rcfile /dev/null -c true >/dev/null 2>&1; then
+  # bash may ignore ENV, so we have to use --rcfile instead.
+  exec "$SHELL" --rcfile "$ENV"
+else
+  # BusyBox ash, dash, and bash (in sh mode) all use ENV.
+  exec "$SHELL"
 fi
-
-# Find paths to the original tools before we override them.
-path SLLIM sllim
-path SLLIM_BC_IMITATE bc-imitate
-path SLLIM_CLANG clang
-path SLLIM_CLANGXX clang++
-export SLLIM_LD="$("$SLLIM_CLANG" -print-prog-name=ld)"
-
-# Use our own wrapper scripts.
-path CC sllim-cc
-path CXX sllim-c++
-path LD sllim-ld
-
-# Use the LLVM versions of these, just like emscripten does.
-path AR llvm-ar
-path NM llvm-nm
-path RANLIB llvm-ranlib
-
-# Add our own "cc", "gcc", etc. to PATH.
-export PATH="$SLLIM_ENV_PATH${PATH:+:${PATH}}"
-
-echo "SLLIM overrides added."
-echo "Starting shell..."
-echo "Exit the new shell to leave the SLLIM environment."
-exec "${SHELL-bash}"
