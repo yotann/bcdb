@@ -48,6 +48,7 @@ while true; do
       ;;
 
     -o|--output)
+      ORIG_ARGS="${ORIG_ARGS:+$ORIG_ARGS }'$2'"
       ORIG_OUTPUT="$2"
       set -- "$@" "$1" "$2"
       shift 2
@@ -70,13 +71,6 @@ while true; do
   shift
 done
 
-if [ -z "${NO_LINK+set}" ]; then
-  # --gc-sections would delete the .llvmbc section.
-  set -- "$@" --no-gc-sections
-  # Output to a temporary file, to make sure we process it properly.
-  set -- "$@" -o "$SLLIM_TMP/linker-output"
-fi
-
 LD="${SLLIM_LD-ld}"
 
 rm -f "$SLLIM_TMP/linker-output"
@@ -93,7 +87,16 @@ try_command() {
 }
 
 perform_link() {
-  try_command "initial link" "$LD" "$@"
+  if [ -z "${NO_LINK+set}" ]; then
+    # --gc-sections would delete the .llvmbc section.
+    # Output to a temporary file, to make sure we process it properly.
+    try_command "initial link" "$LD" \
+      "$@" \
+      --no-gc-sections \
+      -o "$SLLIM_TMP/linker-output"
+  else
+    try_command "initial link" "$LD" "$@"
+  fi
 
   if [ -n "${NO_LINK+set}" ]; then
     return 0
@@ -110,24 +113,27 @@ perform_link() {
 
   try_command "bitcode extraction" \
     "${SLLIM_BC_IMITATE-bc-imitate}" extract \
-    -o "$SLLIM_TMP/linked.bc" \
+    -o "$SLLIM_TMP/input.bc" \
     -- "$SLLIM_TMP/linker-output"
 
-  # TODO: invoke sllim
-  cp -- "$SLLIM_TMP/linked.bc" "$SLLIM_TMP/optimized.bc"
-
-  try_command "code generation" \
-    "${SLLIM_LLC-llc}" \
-    --filetype=obj \
+  try_command "sllim" \
+    "${SLLIM-sllim}" \
     -o "$SLLIM_TMP/optimized.o" \
-    -- "$SLLIM_TMP/optimized.bc"
+    -- "$SLLIM_TMP/input.bc"
 
+  # Prepend our optimized object file to the link command, so it overrides the
+  # original object files.
+  #
+  # TODO: remove the original object files (at least, the ones that contain
+  # bitcode) from the arguments, so we don't link in multiple copies of the
+  # same code, and we don't have to force -z muldefs and --gc-sections to get
+  # rid of the extra copies.
   try_command "final link" \
-    "${SLLIM_CLANG-clang}" \
-    -o "$ORIG_OUTPUT" \
-    $("${SLLIM_BC_IMITATE-bc-imitate}" clang-args "$SLLIM_TMP/optimized.bc") \
-    "${SLLIM_LD+--ld-path=$SLLIM_LD}" \
-    "$SLLIM_TMP/optimized.o"
+    "$LD" \
+    "$SLLIM_TMP/optimized.o" \
+    "$@" \
+    -z muldefs \
+    --gc-sections
 }
 
 RC=0

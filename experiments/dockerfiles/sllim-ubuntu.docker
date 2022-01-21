@@ -12,7 +12,7 @@ RUN apt-get update \
              # Required to use sllim-cc and sllim-ld.
              binutils clang-12 llvm-12 \
              # Not required by SLLIM, but useful for building software.
-             autoconf cmake dpkg-dev git libtool pkg-config \
+             autoconf cmake dpkg-dev git git-svn less libtool nano pkg-config subversion \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Add "clang" etc. to PATH (instead of just "clang-12").
@@ -74,8 +74,6 @@ WORKDIR /bcdb
 COPY . ./
 
 # Build, test, and install BCDB and SLLIM.
-# FIXME: replace "bcdb-llvm12" with "bcdb" after we start using the actual
-# sllim command (and therefore BCDB's version of llc).
-RUN nix-env -f . -iA bcdb-llvm12 sllim
+RUN nix-env -f . -iA bcdb sllim
 
 WORKDIR /

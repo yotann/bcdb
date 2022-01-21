@@ -79,7 +79,10 @@ in rec {
   llvm13-debug = debugLLVM pkgs.llvmPackages_13.libllvm;
   nng = pkgs.callPackage ./nix/nng {};
 
-  sllim = pkgs.callPackage ./experiments/sllim {};
+  sllim = pkgs.callPackage ./experiments/sllim {
+    inherit bcdb;
+    llvm = llvm13-assert;
+  };
 
   # Singularity container (to be run on HTCondor cluster)
   smout-worker-singularity = pkgs.singularity-tools.buildImage {

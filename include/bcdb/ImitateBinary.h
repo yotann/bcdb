@@ -21,6 +21,7 @@ ExtractModuleFromBinary(llvm::LLVMContext &Context, llvm::object::Binary &B);
 bool AnnotateModuleWithBinary(llvm::Module &M, llvm::object::Binary &B);
 
 std::vector<std::string> ImitateClangArgs(llvm::Module &M);
+std::vector<std::string> ImitateLLCArgs(llvm::Module &M);
 
 } // end namespace bcdb
 

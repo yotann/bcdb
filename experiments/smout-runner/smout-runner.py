@@ -23,7 +23,7 @@ def which(cmd):
     path = shutil.which(cmd)
     if path is None:
         raise FileNotFoundError(f"program '{cmd}' not found in PATH")
-    return Path(shutil.which(cmd)).resolve()
+    return Path(path).resolve()
 
 
 @dataclass

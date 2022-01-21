@@ -36,17 +36,18 @@ static cl::SubCommand
 static cl::SubCommand
     ExtractCommand("extract",
                    "Extract and annotate a bitcode module from an object file");
+static cl::SubCommand
+    LLCArgsCommand("llc-args", "Determine LLC options for compiling a module");
 
 static cl::opt<std::string> InputFilenameBinary(cl::Positional, cl::Required,
                                                 cl::desc("<input binary file>"),
                                                 cl::value_desc("filename"),
                                                 cl::sub(ExtractCommand));
 
-static cl::opt<std::string>
-    InputFilenameBitcode(cl::Positional, cl::Required,
-                         cl::desc("<input bitcode file>"),
-                         cl::value_desc("filename"), cl::sub(AnnotateCommand),
-                         cl::sub(ClangCommand), cl::sub(ClangArgsCommand));
+static cl::opt<std::string> InputFilenameBitcode(
+    cl::Positional, cl::Required, cl::desc("<input bitcode file>"),
+    cl::value_desc("filename"), cl::sub(AnnotateCommand), cl::sub(ClangCommand),
+    cl::sub(ClangArgsCommand), cl::sub(LLCArgsCommand));
 
 static cl::opt<std::string> BinaryFilename("binary",
                                            cl::desc("<input binary file>"),
@@ -165,6 +166,20 @@ static int Extract() {
   return 0;
 }
 
+static int LLCArgs() {
+  Context context;
+  SMDiagnostic Diag;
+  std::unique_ptr<Module> M = parseIRFile(InputFilenameBitcode, Diag, context);
+  if (!M) {
+    Diag.print("bc-imitate", errs());
+    return 1;
+  }
+
+  for (auto Arg : ImitateLLCArgs(*M))
+    outs() << Arg << "\n";
+  return 0;
+}
+
 int main(int argc, char **argv) {
   InitTool X(argc, argv);
 
@@ -183,6 +198,8 @@ int main(int argc, char **argv) {
     return ClangArgs();
   } else if (ExtractCommand) {
     return Extract();
+  } else if (LLCArgsCommand) {
+    return LLCArgs();
   } else {
     cl::PrintHelpMessage(false, true);
     return 0;

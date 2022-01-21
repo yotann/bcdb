@@ -55,7 +55,6 @@ path SLLIM sllim
 path SLLIM_BC_IMITATE bc-imitate
 path SLLIM_CLANG clang
 path SLLIM_CLANGXX clang++
-path SLLIM_LLC llc
 export SLLIM_LD="$("$SLLIM_CLANG" -print-prog-name=ld)"
 
 # Use our own wrapper scripts.

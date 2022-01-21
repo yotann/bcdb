@@ -302,3 +302,16 @@ std::vector<std::string> bcdb::ImitateClangArgs(Module &M) {
 
   return Args;
 }
+
+std::vector<std::string> bcdb::ImitateLLCArgs(Module &M) {
+  std::vector<std::string> Args;
+
+  // The difference between -fpic/-fPIC/-fpie/-fPIE doesn't seem to matter for
+  // codegen, only for linking.
+  if (M.getPICLevel() != PICLevel::NotPIC ||
+      M.getPIELevel() != PIELevel::Default) {
+    Args.emplace_back("--relocation-model=pic");
+  }
+
+  return Args;
+}

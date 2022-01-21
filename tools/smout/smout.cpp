@@ -19,7 +19,7 @@
 using namespace llvm;
 using namespace memodb;
 
-llvm::cl::OptionCategory SmoutCategory("semantic outlining options");
+llvm::cl::OptionCategory SmoutCategory("Semantic Outlining Options");
 
 static cl::SubCommand CandidatesCommand("candidates",
                                         "Generate outlineable candidates");
@@ -41,7 +41,7 @@ static cl::SubCommand
                           "Extract all outlinable callee functions");
 
 static cl::SubCommand OptimizeCommand("optimize",
-                                      "Optimize module with oulining");
+                                      "Optimize module with outlining");
 
 static cl::SubCommand SolveGreedyCommand(
     "solve-greedy", "Calculate greedy solution to optimal outlining problem");
