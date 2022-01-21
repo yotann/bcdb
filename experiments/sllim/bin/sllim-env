@@ -3,6 +3,14 @@
 # This script should work on systems with shells other than Bash (Dash, Busybox
 # Ash, etc.) and with optional programs missing (such as "which").
 
+# NOTE: this script is probably a bad idea; run ". sllim-env.sh" instead. When
+# we're starting a new shell process, like this script does, we can change the
+# environment before the shell starts and/or disable the usual shell startup
+# scripts (like /etc/profile). The problem is, what we really want is to load
+# the startup scripts (so the user gets their usual interactive settings) and
+# *then* update the environment so our changes override the user's normal
+# settings, but there's no reasonable way to do that.
+
 set -eu
 
 realdir() {
@@ -16,13 +24,28 @@ if ! command -v sllim-env >/dev/null 2>&1; then
   export PATH="$SLLIM_PATH${PATH:+:${PATH}}"
 fi
 
-export ENV="$SLLIM_PATH/sllim-env.sh"
+ENV="$SLLIM_PATH/sllim-env.sh"
 
 SHELL="${SHELL-bash}"
 if "$SHELL" --rcfile /dev/null -c true >/dev/null 2>&1; then
   # bash may ignore ENV, so we have to use --rcfile instead.
   exec "$SHELL" --rcfile "$ENV"
-else
-  # BusyBox ash, dash, and bash (in sh mode) all use ENV.
+elif "$SHELL" --no-rcs --global-rcs -c true >/dev/null 2>&1; then
+  # zsh doesn't have a convenient way to override rcfile:
+  # https://stackoverflow.com/questions/2727172/how-to-load-different-zshrc-file-via-commandline-option
+  # But we can load stuff in the current environment and then start zsh with
+  # the usual startup files disabled.
+  . "$ENV"
+  exec "$SHELL" --no-rcs --global-rcs
+elif ENV="$ENV" "$SHELL" -i -c '[ -n "$SLLIM_IN_ENV" ]' >/dev/null 2>&1; then
+  # BusyBox ash, dash, and bash/zsh (in sh mode) all use ENV.
+  export ENV
   exec "$SHELL"
+else
+  echo "error: sllim-env: can't figure out how to override your shell's environment" >&2
+  echo "your shell: $SHELL" >&2
+  echo "it may work if you run the following commands manually:" >&2
+  echo "  PATH=\"${SLLIM_PATH}:\$PATH\"" >&2
+  echo "  . sllim-env.sh" >&2
+  exit 1
 fi

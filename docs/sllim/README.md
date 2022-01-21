@@ -41,7 +41,7 @@ root# git clone --depth=1 https://github.com/lz4/lz4.git
 Cloning into 'lz4'...
 ...
 root# cd lz4
-root# sllim-env
+root# sllim-env.sh
 SLLIM overrides added.
 sllim-env: root# make -j4 lz4
 compiling static library
@@ -60,7 +60,7 @@ three ways are provided to invoke SLLIM:
    make your build system work with LLVM bitcode.
 2. Configure your build system to use `sllim-cc` as the compiler, etc. These
    scripts should handle everything else automatically.
-3. Use `sllim-env` **(recommended)** before you configure and build your
+3. Use `sllim-env.sh` **(recommended)** before you configure and build your
    project. Most of the time, this will work automatically without any extra
    effort on your part.
 
@@ -96,26 +96,27 @@ These scripts require the original `clang`, `clang++`, `ld`, `bc-imitate`
 set `SLLIM`, `SLLIM_BC_IMITATE`, `SLLIM_CLANG`, `SLLIM_CLANGXX`, and `SLLIM_LD`
 to the full paths of each program.
 
-### Option 3: Using `sllim-env`
+### Option 3: Using `sllim-env.sh`
 
-This is the easiest option; you just have to run `sllim-env` to start a
-specially configured shell, and configure and build your project in the new
-shell. For most open source projects, this is all you need to do, and you don't
-need to deal with the build system at all.
+This is the easiest option; you just have to source `sllim-env.sh` in your
+shell, and then configure and build your project in the same shell. For most
+open source projects, this is all you need to do, and you don't need to deal
+with the build system at all.
 
-The `sllim-env` script tries to force build systems to use `sllim-cc` and the
-other scripts. Not only does it set variables like `CC`, but it also adds `cc`,
-`gcc`, `clang`, etc. wrapper scripts to your `PATH`, ensuring your build system
-will use `sllim-cc` even if it hardcodes the name of the compiler.
+The `sllim-env.sh` script tries to force build systems to use `sllim-cc` and
+the other scripts. Not only does it set variables like `CC`, but it also adds
+`cc`, `gcc`, `clang`, etc. wrapper scripts to your `PATH`, ensuring your build
+system will use `sllim-cc` even if it hardcodes the name of the compiler.
 
-This script requires `clang`, `clang++`, `ld`, `bc-imitate`, and the LLVM tools
-(such as `llvm-ar`) to be in your `PATH` before you start it.
+This script requires SLLIM, `clang`, `clang++`, `ld`, `bc-imitate`, and the
+LLVM tools (such as `llvm-ar`) to be in your `PATH` before you start it. It
+works with Bash, Zsh, BusyBox Ash, Dash, and probably other shells too.
 
 **IMPORTANT:** Configuration tools, like `./configure` and `cmake`, often try
 to compile lots of small test files to check which compiler features are
 available. It's normal for some of these checks to fail, and any error messages
-are usually hidden, but `sllim-env` forces its error messages to be shown in
-order to help with debugging. You should generally ignore these `sllim-env`
+are usually hidden, but `sllim-env.sh` forces its error messages to be shown in
+order to help with debugging. You should generally ignore these `sllim-env.sh`
 errors as long as the configuration tool ignores them.
 
 ### Configuring SLLIM
