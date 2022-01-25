@@ -1,6 +1,13 @@
 import argparse
+import asyncio
+from asyncio.subprocess import PIPE
+import fcntl
 from pathlib import Path
+import os
 import sys
+
+from . import configuration
+from . import memodb
 
 parser = argparse.ArgumentParser(description="Optimize LLVM bitcode for size.")
 parser.add_argument(
@@ -14,93 +21,62 @@ parser.add_argument(
 )
 
 
-def optimize(data):
-    import os
-    from subprocess import check_call, check_output
-
-    def which(cmd):
-        import shutil
-
-        path = shutil.which(cmd)
-        if path is None:
-            raise FileNotFoundError(f"program '{cmd}' not found in PATH")
-        return Path(path).resolve()
-
-    memodb_path = Path("/tmp/sllim.db")
-    os.environ["MEMODB_STORE"] = f"sqlite:{memodb_path}"
-    if not memodb_path.exists():
-        try:
-            check_call(("memodb", "init"))
-        except Exception:
-            # FIXME: ignoring errors because there's a race condition.
-            pass
-
-    level = int(os.environ.get("SLLIM_LEVEL", "3"))
-
-    opt = [
-        which("opt"),
-        "-load-pass-plugin",
-        which("bcdb").parent.parent / "lib" / "BCDBOutliningPlugin.so",
-    ]
-
-    if level >= 2:
-        data = check_output(
-            (
-                *opt,
-                "--passes",
-                "remove-function-attr<optnone>,remove-function-attr<noinline>,add-function-attr<minsize>,add-function-attr<optsize>",
-            ),
-            input=data,
-        )
-    data = check_output((*opt, "-Oz"), input=data)
-
-    if level >= 3:
-        import hashlib
-
-        head = hashlib.blake2b(data).hexdigest()
-        check_output(("bcdb", "add", "--name", head, "-"), input=data)
-        cid = (
-            check_output(
-                (
-                    "smout",
-                    "optimize",
-                    "--compile-all-callers",
-                    "-j=all",
-                    "--max-nodes=200",
-                    "--name",
-                    head,
-                )
-            )
-            .decode("ascii")
-            .strip()
-        )
-        data = check_output(("bcdb", "get", cid))
-        data = check_output(
-            (*opt, "--passes", "function(simplifycfg),function-attrs"), input=data
-        )
-
-    llc_args = check_output(("bc-imitate", "llc-args", "-"), input=data).decode("ascii")
-    llc_args = [arg for arg in llc_args.split("\n") if arg]
-    llc_args.append("-O=2")
-    llc_args.append("-filetype=obj")
-
-    if level >= 1:
-        llc_args.append("--cost-kind=code-size")
-        # Note that many targets enable the machine outliner by default, so
-        # this option might not matter.
-        llc_args.append("--enable-machine-outliner=always")
-        # 5 rounds total, same as Chabbi paper.
-        llc_args.append("--machine-outliner-reruns=4")
-
-    data = check_output(
-        (
-            "llc",
-            *llc_args,
-        ),
-        input=data,
-    )
-
+async def main_with_server(data):
+    async with memodb.Store(os.environ["MEMODB_STORE"]) as store:
+        config = configuration.Config()
+        data = await config.optimize(store, data)
     return data
+
+
+async def async_main(data):
+    cache_home = None
+    if "XDG_CACHE_HOME" in os.environ:
+        cache_home = Path(os.environ["XDG_CACHE_HOME"])
+        if not cache_home.is_absolute():
+            cache_home = None
+    if cache_home is None:
+        cache_home = Path.home() / ".cache"
+    cache_home /= "sllim"
+    cache_home.mkdir(parents=True, exist_ok=True)
+
+    with (cache_home / "memodb-server.lock").open("w") as lock_fp:
+        # FIXME: Avoid using a TCP port. This is fine in Docker (which uses a
+        # firewall by default), but it's a security problem otherwise.
+        #
+        # TODO: Allow multiple instances of sllim to do processing at once. We
+        # would need some way to start memodb-server with the first sllim
+        # command and wait to kill it until the last sllim command ends.
+        fcntl.flock(lock_fp, fcntl.LOCK_EX)
+        memodb_path = cache_home / "memodb.rocksdb"
+        memodb_store = f"rocksdb:{memodb_path}"
+        memodb_http = "http://127.0.0.1:17633"
+        if not memodb_path.exists():
+            import subprocess
+
+            subprocess.check_call(("memodb", "init", "--store", memodb_store))
+        server_process = None
+        worker_process = None
+        try:
+            server_process = await asyncio.create_subprocess_exec(
+                "memodb-server",
+                "--store",
+                memodb_store,
+                memodb_http,
+                stderr=PIPE,
+            )
+            # Wait for the server to actually start (it can take a long time if
+            # RocksDB needs to replay database logs).
+            await server_process.stderr.readline()
+
+            os.environ["MEMODB_STORE"] = memodb_http
+            worker_process = await asyncio.create_subprocess_exec("smout", "worker")
+            return await main_with_server(data)
+        finally:
+            if worker_process:
+                worker_process.terminate()
+                await worker_process.wait()
+            if server_process:
+                server_process.terminate()
 
 
 def main():
@@ -112,7 +88,9 @@ def main():
         data = sys.stdin.buffer.read()
     else:
         data = Path(args.input).read_bytes()
-    data = optimize(data)
+
+    data = asyncio.run(async_main(data))
+
     if args.output == "-":
         if sys.stdout.buffer.isatty() and not args.force:
             print(

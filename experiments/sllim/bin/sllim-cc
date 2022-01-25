@@ -41,9 +41,16 @@ while true; do
 
   ORIG_ARGS="${ORIG_ARGS:+$ORIG_ARGS }'$1'"
   case "$1" in
-    -v|--version)
+    -v|-V|--version)
       NO_COMPILE=1
       set -- "$@" "$1"
+      shift
+      ;;
+
+    # Smout doesn't update debugging info, causing assertion failures when it's
+    # present. And we can't fully remove debugging info by running opt
+    # -strip-debug later, so let's just disable it now.
+    -g|-g[0-9])
       shift
       ;;
 
@@ -90,6 +97,10 @@ if [ -z "${NO_COMPILE+set}" ]; then
   if [ -z "${COMMON_EXPLICIT+set}" ]; then
     set -- "$@" "-fcommon"
   fi
+
+  # Limit the optimizations performed (in particular, we want to postpone
+  # inlining until later, when we can make sure the right options are used).
+  set -- "$@" "-O1"
 
   # Embed the bitcode!
   set -- "$@" "-fembed-bitcode=all"

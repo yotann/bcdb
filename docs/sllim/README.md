@@ -12,10 +12,13 @@ their build systems.
 
 ## Install
 
-A Dockerfile is provided to install SLLIM in an Ubuntu container:
+SLLIM builds on the BCDB infrastructure project, and is currently located in a
+subdirectory of the BCDB repository. A Dockerfile is provided to install SLLIM
+in an Ubuntu container (**recommended**):
 
 ```shell
-$ cd .../bcdb
+$ git clone https://github.com/yotann/bcdb-private.git
+$ cd bcdb-private
 $ docker build -t sllim-ubuntu -f experiments/dockerfiles/sllim-ubuntu.docker .
 ...
 Successfully tagged sllim-ubuntu:latest
@@ -28,15 +31,22 @@ As an alternative, SLLIM can easily be installed on any Linux system after
 [sllim-ubuntu.docker](experiments/dockerfiles/sllim-ubuntu.docker) as a
 starting point.
 
+**WARNING:** SLLIM will start a database server (`memodb-server`) on 127.0.0.1.
+There's no access control, so you need to trust every process running on
+127.0.0.1. This is only recommended in a container or VM for now.
+
 ```shell
-$ cd .../bcdb
+$ git clone https://github.com/yotann/bcdb-private.git
+$ cd bcdb-private
 $ nix-env -f . -iA sllim
 ```
 
 ## Usage
 
+Here's an example using SLLIM to optimize LZ4. Run these commands in the Docker
+container.
+
 ```shell
-root# # In the Docker container, or somewhere else SLLIM is installed:
 root# git clone --depth=1 https://github.com/lz4/lz4.git
 Cloning into 'lz4'...
 ...
@@ -48,8 +58,6 @@ compiling static library
 sllim-env: root# size lz4
   text    data     bss     dec     hex filename
 172907     940     104  173951   2a77f lz4
-sllim-env: root# exit
-root#
 ```
 
 SLLIM is designed to work with any C/C++ code that can be built with Clang. In
@@ -83,7 +91,9 @@ setting `CC`, `CXX`, and `LD` (as above) is enough.
 The `sllim-cc` and `sllim-c++` wrapper scripts can be used as drop-in
 replacements for `clang` and `clang++`. They work by invoking the original
 `clang`/`clang++`, adding options to generate LLVM bitcode and use `sllim-ld`
-and making some other tweaks.
+and making some other tweaks. See the [sllim-cc
+source](experiments/sllim/bin/sllim-cc) and [sllim-ld
+source](experiments/sllim/bin/sllim-ld) for details.
 
 The `sllim-ld` wrapper script can be used as a drop-in replacement for `ld`. It
 works by running the original `ld` normally to produce a program or shared
@@ -121,36 +131,149 @@ errors as long as the configuration tool ignores them.
 
 ### Configuring SLLIM
 
-Not documented yet.
+Currently, SLLIM is configured by setting the `SLLIM\_LEVEL` environment variable
+before using it. `SLLIM\_LEVEL` affects the `sllim` command, which is invoked
+when linking an executable or shared library; it has no effect when compiling
+an object file. With most build systems, if you want to change the optimization
+level, you just need to remove the executables/libraries, change
+`SLLIM\_LEVEL`, and run `make` again.
+
+Different size optimizations are enabled at different values of `SLLIM\_LEVEL`:
+
+- `SLLIM\_LEVEL=0`: Avoid optimizations but still go through SLLIM; useful for
+  testing or speed.
+- `SLLIM\_LEVEL=1`: Enable `StandardPass` (basically `opt -Oz`).
+- `SLLIM\_LEVEL=2`: Enable `ForceMinSizePass` (which enables optimization for
+  all functions, even if they were compiled with `-O0`).
+- `SLLIM\_LEVEL=3`: Enable iterated machine outlining. LLVM already enables the
+  machine outliner by default for common targets, but [Uber
+  added](https://ieeexplore.ieee.org/document/9370306) support for running this
+  outliner multiple times in a row, getting additional benefits.
+- `SLLIM\_LEVEL=7`: Enable smout, our powerful (but slow) IR-level outliner.
+- `SLLIM\_LEVEL=8`: Make smout search more exhaustively for outlining candidates.
+- `SLLIM\_LEVEL=9`: Make smout compile all possible outlining candidates to
+  determine their actual effects on code size, making it much more accurate.
+- `SLLIM\_LEVEL=10`: Enable [Google's ML-based inlining
+  heuristics](https://github.com/google/ml-compiler-opt). These are supposed to
+  help reduce code size, but in the few tests we've done we've observed them to
+  *increase* code size, so they may be counterproductive.
+
+**NOTE:** when smout is enabled (`SLLIM\_LEVEL` 7 and up), optimization times
+are much longer because smout extracts and evaluates huge numbers of outlining
+candidates. This process is highly parallel, so it's recommended to use SLLIM
+on a machine with many cores (for example, 32 cores).
+
+You can use `SLLIM\_LEVEL=0` for configuration (building test programs) and a
+higher level for the actual code:
+
+```shell
+sllim-env: $ export SLLIM_LEVEL=0
+sllim-env: $ ./configure
+sllim-env: $ export SLLIM_LEVEL=9
+sllim-env: $ make -j10
+```
 
 ## Future Work
 
-### Support for Files Without Bitcode
+### Security
 
-Currently, `sllim-ld` requires all linker inputs to have bitcode available, or
-else they will be omitted from the final link command, probably causing an
-error. This can be a problem in several situations:
+Instead of opening a port on 127.0.0.1, we should make `memodb-server` and the
+clients support Unix sockets for access control. Time to implement: ~1 week.
 
-- Projects that use separate assembly files (`.s` files), which can't currently
-  be compiled into bitcode. (Note that inline assembly in `.c` files already
-  works correctly, which covers most projects. Even projects that use separate
-  assembly files often have an option to disable them.)
-- C files that use GCC-only extensions, and therefore can't be compiled into
-  bitcode using Clang. (Clang supports all commonly used GCC extensions, but
-  not some rarely used ones such as nested functions.)
-- Projects that link against precompiled static libraries, which don't include
-  bitcode.
+### Configurability
 
-We have a plan for how to support these cases by analyzing the linker arguments
-and input files, possibly also using a custom linker plugin, but we haven't yet
-implemented it.
+There should be a way to configure SLLIM in more detail than just using
+`SLLIM\_LEVEL`. Our current plan is to let the developer use a custom Python
+script that overrides `sllim.configuration.Config`. Time to implement: a few
+weeks.
 
-### Advanced Linker Options
+### Effectiveness
 
-Similar to the previous section, `sllim-ld` lacks support for some linker
-options, such as symbol visibility lists that control which symbols are
-exported from a library. We plan to improve `sllim-ld` to make it support these
-options.
+We're interested in making SLLIM try multiple possible optimization sequences
+and choose the best result. It could either use brute force or some kind of
+optimization algorithm (like [Compiler Gym](https://compilergym.com/)). Time to
+implement (brute force): <1 week.
+
+We're interested in adding support for more types of optimization, such as
+"Function Merging by Sequence Alignment", TRIMMER (partial evaluation), Guided
+Linking, and so on. Some of these (like TRIMMER and Guided Linking) will need
+specific configuration for each project being optimized with SLLIM.
+
+### Correctness
+
+#### sllim
+
+The `sllim` command itself should generally be correct for all kinds of code,
+just like normal LLVM passes. But note that (depending on `SLLIM\_LEVEL`) it
+may force all code to be optimized, even if the developer tried to prevent it
+from being optimized. And note that smout can prevent backtraces from working
+normally.
+
+#### sllim-cc
+
+The `sllim-cc` command has to remove some options in order to make
+`-fembed-bitcode` to work; see the [sllim-cc
+source](experiments/sllim/bin/sllim-cc) for details. An alternative would be to
+use `-flto` instead of `-fembed-bitcode`, which may be compatible with more of
+the options, but might confuse build systems because the object files aren't in
+the usual format.
+
+#### sllim-ld
+
+Currently, `sllim-ld` works by running the linker command (with some inputs
+that have bitcode available and some that may not), extracting and optimizing
+bitcode from the result, and then running the linker command *again* with the
+optimized bitcode *in addition to the original inputs*. This means the same
+code is actually linked in twice; we use `-zmuldefs` to allow the duplicate
+definitions and `--gc-sections` to remove the extra, unoptimized definitions.
+This seems to work, but it's unsatisfying and will probably cause problems.
+
+There are a few options to do this more correctly:
+
+1. Process the linker command line options to figure out which inputs have
+   bitcode, so we can extract it and remove them from the linker command. This
+   would involve reimplementing part of the linker functionality (such as
+   finding libraries and perhaps parsing linker scripts) in a shell script.
+2. Implement a custom linker plugin. This would give us exactly the interface
+   we need. However, it would only work for GNU `ld` and `gold`, not `lld`, and
+   would make SLLIM slightly more difficult to install. Time to implement: 1–2
+   weeks.
+3. Extend the linkers with custom code. This would need to be done separately
+   for each linker, and it would be incompatible with any modified linkers
+   developers might be using. Time to implement: a few weeks per linker.
+
+### Speed
+
+SLLIM currently uses a lock to protect the MemoDB store, which means that only
+one `sllim` process can be active at once. All the code would actually work
+perfectly fine with multiple `sllim` processes connected to the same
+`memodb-server` instance; the lock only exists to simplify starting and
+stopping `memodb-server`. Time to implement: ~1 week.
+
+SLLIM effectively uses normal LTO, because it links everything into one bitcode
+file before optimizing it. For large projects such as libLLVM, just running the
+simplest optimizations on this file can be very slow. It would be nice to
+support ThinLTO as a faster alternative, even if only a subset of our
+optimizations work. Time to implement: several weeks, depending on how many
+optimizations need support.
+
+SLLIM's caching could be finer-grained; instead of caching the full `opt -Oz`
+invocation on a module, it could cache individual function passes on a
+per-function basis, for example. Time to implement: a few weeks.
+
+Smout is designed to support our semantic outlining work, which means it has to
+extract every outlining candidate into a new function *before* determining
+whether any equivalent candidates exist; if we decide to forget about semantic
+equivalence and just rely on syntactic equivalence, we could avoid extracting
+candidates and instead use some sort of graph equivalence searching algorithm,
+which would be much faster. Smout also spends a lot of time compiling each
+candidate to determine its code size, but we could heuristics to avoid doing
+this. Time to implement: several weeks or longer.
+
+### Usability
+
+It'd be nice to use a log file for all the messages printed by different parts
+of SLLIM, rather than using stdout/stderr.
 
 ### Ease of Installation
 

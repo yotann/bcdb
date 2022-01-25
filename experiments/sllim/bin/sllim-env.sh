@@ -39,13 +39,13 @@ if [ -L "/proc/$$/fd/2" ]; then
 fi
 
 # Find the path to the sllim scripts.
-SLLIM_PATH="$(realdir "$(dirname "$(command -v sllim-env)")")"
+SLLIM_PATH="$(realdir "$(dirname "$(command -v sllim-cc)")")"
 
 # Check that the directory containing our versions of "cc", "gcc", etc. is
 # available.
 SLLIM_ENV_PATH="$(dirname "$SLLIM_PATH")/libexec/sllim/env"
 if ! [ -d "$SLLIM_ENV_PATH" ]; then
-  echo "error: sllim-env install directory missing" >&2
+  echo "error: sllim-env.sh install directory missing" >&2
   echo "  (expected at $SLLIM_ENV_PATH)" >&2
   exit 1
 fi
