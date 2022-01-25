@@ -99,8 +99,8 @@ The `sllim-cc` and `sllim-c++` wrapper scripts can be used as drop-in
 replacements for `clang` and `clang++`. They work by invoking the original
 `clang`/`clang++`, adding options to generate LLVM bitcode and use `sllim-ld`
 and making some other tweaks. See the [sllim-cc
-source](../experiments/sllim/bin/sllim-cc) and [sllim-ld
-source](../experiments/sllim/bin/sllim-ld) for details.
+source](../../experiments/sllim/bin/sllim-cc) and [sllim-ld
+source](../../experiments/sllim/bin/sllim-ld) for details.
 
 The `sllim-ld` wrapper script can be used as a drop-in replacement for `ld`. It
 works by running the original `ld` normally to produce a program or shared
@@ -220,10 +220,10 @@ normally.
 
 The `sllim-cc` command has to remove some options in order to make
 `-fembed-bitcode` to work; see the [sllim-cc
-source](experiments/sllim/bin/sllim-cc) for details. An alternative would be to
-use `-flto` instead of `-fembed-bitcode`, which may be compatible with more of
-the options, but might confuse build systems because the object files aren't in
-the usual format.
+source](../../experiments/sllim/bin/sllim-cc) for details. An alternative would
+be to use `-flto` instead of `-fembed-bitcode`, which may be compatible with
+more of the options, but might confuse build systems because the object files
+aren't in the usual format.
 
 #### sllim-ld
 
