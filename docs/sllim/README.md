@@ -28,12 +28,13 @@ root@...:/#
 
 As an alternative, SLLIM can easily be installed on any Linux system after
 [installing Nix](https://nixos.org/download.html). You can use
-[sllim-ubuntu.docker](experiments/dockerfiles/sllim-ubuntu.docker) as a
+[sllim-ubuntu.docker](../experiments/dockerfiles/sllim-ubuntu.docker) as a
 starting point.
 
 **WARNING:** SLLIM will start a database server (`memodb-server`) on 127.0.0.1.
 There's no access control, so you need to trust every process running on
-127.0.0.1. This is only recommended in a container or VM for now.
+127.0.0.1. This is safe in a SLLIM-specific container or VM; other uses are a
+bad idea for now.
 
 ```shell
 $ git clone https://github.com/yotann/bcdb-private.git
@@ -55,10 +56,15 @@ root# sllim-env.sh
 SLLIM overrides added.
 sllim-env: root# make -j4 lz4
 compiling static library
+
+sllim-ld: optimizing lz4
+
 sllim-env: root# size lz4
   text    data     bss     dec     hex filename
 172907     940     104  173951   2a77f lz4
 ```
+
+The `optimizing lz4` line shows you that SLLIM is actually working.
 
 SLLIM is designed to work with any C/C++ code that can be built with Clang. In
 order to make it easy to use with existing projects and diverse build systems,
@@ -74,7 +80,8 @@ three ways are provided to invoke SLLIM:
 
 ### Option 1: Using `sllim` directly
 
-Not documented yet.
+Simply run `sllim input.bc -o output.o`. Note that the input is LLVM bitcode,
+while the output is an object file containing machine code.
 
 ### Option 2: Using `sllim-cc` etc.
 
@@ -92,8 +99,8 @@ The `sllim-cc` and `sllim-c++` wrapper scripts can be used as drop-in
 replacements for `clang` and `clang++`. They work by invoking the original
 `clang`/`clang++`, adding options to generate LLVM bitcode and use `sllim-ld`
 and making some other tweaks. See the [sllim-cc
-source](experiments/sllim/bin/sllim-cc) and [sllim-ld
-source](experiments/sllim/bin/sllim-ld) for details.
+source](../experiments/sllim/bin/sllim-cc) and [sllim-ld
+source](../experiments/sllim/bin/sllim-ld) for details.
 
 The `sllim-ld` wrapper script can be used as a drop-in replacement for `ld`. It
 works by running the original `ld` normally to produce a program or shared
@@ -131,40 +138,40 @@ errors as long as the configuration tool ignores them.
 
 ### Configuring SLLIM
 
-Currently, SLLIM is configured by setting the `SLLIM\_LEVEL` environment variable
-before using it. `SLLIM\_LEVEL` affects the `sllim` command, which is invoked
+Currently, SLLIM is configured by setting the `SLLIM_LEVEL` environment variable
+before using it. `SLLIM_LEVEL` affects the `sllim` command, which is invoked
 when linking an executable or shared library; it has no effect when compiling
 an object file. With most build systems, if you want to change the optimization
 level, you just need to remove the executables/libraries, change
-`SLLIM\_LEVEL`, and run `make` again.
+`SLLIM_LEVEL`, and run `make` again.
 
-Different size optimizations are enabled at different values of `SLLIM\_LEVEL`:
+Different size optimizations are enabled at different values of `SLLIM_LEVEL`:
 
-- `SLLIM\_LEVEL=0`: Avoid optimizations but still go through SLLIM; useful for
+- `SLLIM_LEVEL=0`: Avoid optimizations but still go through SLLIM; useful for
   testing or speed.
-- `SLLIM\_LEVEL=1`: Enable `StandardPass` (basically `opt -Oz`).
-- `SLLIM\_LEVEL=2`: Enable `ForceMinSizePass` (which enables optimization for
+- `SLLIM_LEVEL=1`: Enable `StandardPass` (basically `opt -Oz`).
+- `SLLIM_LEVEL=2`: Enable `ForceMinSizePass` (which enables optimization for
   all functions, even if they were compiled with `-O0`).
-- `SLLIM\_LEVEL=3`: Enable iterated machine outlining. LLVM already enables the
+- `SLLIM_LEVEL=3`: Enable iterated machine outlining. LLVM already enables the
   machine outliner by default for common targets, but [Uber
   added](https://ieeexplore.ieee.org/document/9370306) support for running this
   outliner multiple times in a row, getting additional benefits.
-- `SLLIM\_LEVEL=7`: Enable smout, our powerful (but slow) IR-level outliner.
-- `SLLIM\_LEVEL=8`: Make smout search more exhaustively for outlining candidates.
-- `SLLIM\_LEVEL=9`: Make smout compile all possible outlining candidates to
+- `SLLIM_LEVEL=7`: Enable smout, our powerful (but slow) IR-level outliner.
+- `SLLIM_LEVEL=8`: Make smout search more exhaustively for outlining candidates.
+- `SLLIM_LEVEL=9`: Make smout compile all possible outlining candidates to
   determine their actual effects on code size, making it much more accurate.
-- `SLLIM\_LEVEL=10`: Enable [Google's ML-based inlining
+- `SLLIM_LEVEL=10`: Enable [Google's ML-based inlining
   heuristics](https://github.com/google/ml-compiler-opt). These are supposed to
   help reduce code size, but in the few tests we've done we've observed them to
   *increase* code size, so they may be counterproductive.
 
-**NOTE:** when smout is enabled (`SLLIM\_LEVEL` 7 and up), optimization times
+**NOTE:** when smout is enabled (`SLLIM_LEVEL` 7 and up), optimization times
 are much longer because smout extracts and evaluates huge numbers of outlining
 candidates. This process is highly parallel, so it's recommended to use SLLIM
 on a machine with many cores (for example, 32 cores).
 
-You can use `SLLIM\_LEVEL=0` for configuration (building test programs) and a
-higher level for the actual code:
+You can use `SLLIM_LEVEL=0` for configuration (to speed up building test
+programs) and a higher level for the actual code:
 
 ```shell
 sllim-env: $ export SLLIM_LEVEL=0
@@ -183,7 +190,7 @@ clients support Unix sockets for access control. Time to implement: ~1 week.
 ### Configurability
 
 There should be a way to configure SLLIM in more detail than just using
-`SLLIM\_LEVEL`. Our current plan is to let the developer use a custom Python
+`SLLIM_LEVEL`. Our current plan is to let the developer use a custom Python
 script that overrides `sllim.configuration.Config`. Time to implement: a few
 weeks.
 
@@ -204,7 +211,7 @@ specific configuration for each project being optimized with SLLIM.
 #### sllim
 
 The `sllim` command itself should generally be correct for all kinds of code,
-just like normal LLVM passes. But note that (depending on `SLLIM\_LEVEL`) it
+just like normal LLVM passes. But note that (depending on `SLLIM_LEVEL`) it
 may force all code to be optimized, even if the developer tried to prevent it
 from being optimized. And note that smout can prevent backtraces from working
 normally.
