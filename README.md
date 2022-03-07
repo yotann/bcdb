@@ -67,6 +67,7 @@ make check
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
 - [Python](https://www.python.org/), at least 3.6.
+- [Boost](https://boost.org/), at least 3.75.
 - Optional dependencies:
   - [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
     Zstandard support (`ROCKSDB_LITE` is not supported).

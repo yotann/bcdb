@@ -1,4 +1,4 @@
-{ stdenv, lib, nix-gitignore, clang, cmake, libsodium, llvm, python3, sqlite,
+{ stdenv, lib, nix-gitignore, clang, cmake, libsodium, llvm, python3, sqlite, boost175,
 rocksdb ? null, nng ? null,
 sanitize ? false }:
 
@@ -42,7 +42,7 @@ in stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [ clang cmake python3 ];
-  buildInputs = [ libsodium llvm nng rocksdb sqlite ];
+  buildInputs = [ boost175 libsodium llvm nng rocksdb sqlite ];
 
   preConfigure = ''
     patchShebangs third_party/lit/lit.py

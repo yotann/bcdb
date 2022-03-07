@@ -54,6 +54,7 @@ endif()
 
 find_package(LibSodium REQUIRED)
 find_package(SQLite3 REQUIRED)
+find_package(Boost 1.75 REQUIRED)
 
 find_program(CLANG clang)
 find_program(CLANGXX clang++)

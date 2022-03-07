@@ -1,17 +1,22 @@
 #include <cstdlib>
 #include <ctime>
+#include <exception>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
 
+#include <boost/asio.hpp>
+#include <boost/assert/source_location.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/version.hpp>
+#include <boost/throw_exception.hpp>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
-#include <nng/nng.h>
-#include <nng/supplemental/http/http.h>
-#include <nng/supplemental/util/platform.h>
 
 #include "memodb/HTTP.h"
 #include "memodb/Request.h"
@@ -25,6 +30,10 @@ namespace cl = llvm::cl;
 using llvm::SmallVector;
 using llvm::StringRef;
 using llvm::Twine;
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace net = boost::asio;
+using tcp = boost::asio::ip::tcp;
 
 static cl::OptionCategory server_category("MemoDB Server options");
 
@@ -48,138 +57,115 @@ static llvm::StringRef GetStoreUri() {
   return StoreUriOrEmpty;
 }
 
-static void checkErr(int err) {
-  if (err)
-    llvm::report_fatal_error(nng_strerror(err));
+#if defined(BOOST_NO_EXCEPTIONS)
+
+void boost::throw_exception(std::exception const &e) {
+  llvm::report_fatal_error(e.what());
 }
+
+void boost::throw_exception(std::exception const &e,
+                            boost::source_location const &loc) {
+  throw_exception(e);
+}
+
+#endif // defined(BOOST_NO_EXCEPTIONS)
 
 static std::mutex stdout_mutex;
 
 static Server *g_server = nullptr;
 
-namespace {
-
-struct HTTPHandlerDeleter {
-  void operator()(nng_http_handler *handler) { nng_http_handler_free(handler); }
-};
-
-struct HTTPResponseDeleter {
-  void operator()(nng_http_res *res) { nng_http_res_free(res); }
-};
-
-struct HTTPServerDeleter {
-  void operator()(nng_http_server *server) { nng_http_server_release(server); }
-};
-
-struct URLDeleter {
-  void operator()(nng_url *url) { nng_url_free(url); }
-};
-
-}; // end anonymous namespace
-
-static std::unique_ptr<nng_url, URLDeleter> parse_url(const Twine &str) {
-  SmallVector<char, 0> buffer;
-  nng_url *result;
-  checkErr(
-      nng_url_parse(&result, str.toNullTerminatedStringRef(buffer).data()));
-  return std::unique_ptr<nng_url, URLDeleter>(result);
+static StringRef makeStringRef(beast::string_view value) {
+  return StringRef(value.data(), value.size());
 }
 
-static std::unique_ptr<nng_http_server, HTTPServerDeleter>
-http_server_hold(nng_url *url) {
-  nng_http_server *result;
-  checkErr(nng_http_server_hold(&result, url));
-  return std::unique_ptr<nng_http_server, HTTPServerDeleter>(result);
-}
-
-static std::unique_ptr<nng_http_handler, HTTPHandlerDeleter>
-http_handler_alloc(const Twine &path, void (*func)(nng_aio *)) {
-  nng_http_handler *result;
-  SmallVector<char, 0> buffer;
-  auto path_str = path.toNullTerminatedStringRef(buffer);
-  checkErr(nng_http_handler_alloc(&result, path_str.data(), func));
-  return std::unique_ptr<nng_http_handler, HTTPHandlerDeleter>(result);
+static beast::string_view makeStringView(llvm::StringRef value) {
+  return beast::string_view(value.data(), value.size());
 }
 
 namespace {
-struct NNGRequest : public HTTPRequest,
-                    public std::enable_shared_from_this<NNGRequest> {
-  nng_http_req *req;
-  std::unique_ptr<nng_http_res, HTTPResponseDeleter> res;
-  nng_aio *http_aio;
-
-  NNGRequest(nng_http_req *req, nng_aio *http_aio)
-      : HTTPRequest(nng_http_req_get_method(req),
-                    URI::parse(nng_http_req_get_uri(req))),
-        req(req), http_aio(http_aio) {
-    nng_http_res *res_tmp;
-    checkErr(nng_http_res_alloc(&res_tmp));
-    res.reset(res_tmp);
+class http_connection;
+class http_request : public HTTPRequest {
+public:
+  http_request(std::shared_ptr<http_connection> connection,
+               http::request<http::string_body> &request,
+               http::response<http::string_body> &response)
+      : HTTPRequest(makeStringRef(request.method_string()),
+                    URI::parse(makeStringRef(request.target()))),
+        connection(std::move(connection)), request(request),
+        response(response) {
+    response.version(request.version());
   }
 
-  ~NNGRequest() override {}
+  ~http_request() override {}
 
   std::optional<llvm::StringRef>
   getHeader(const llvm::Twine &key) const override {
-    SmallVector<char, 0> buffer;
-    auto key_str = key.toNullTerminatedStringRef(buffer);
-    auto result = nng_http_req_get_header(req, key_str.data());
-    if (!result)
+    SmallVector<char, 64> key_buffer;
+    auto iter = request.find(makeStringView(key.toStringRef(key_buffer)));
+    if (iter == request.end())
       return std::nullopt;
-    return result;
+    return makeStringRef(iter->value());
   }
 
-  llvm::StringRef getBody() const override {
-    void *body;
-    size_t size;
-    nng_http_req_get_data(req, &body, &size);
-    return StringRef(reinterpret_cast<const char *>(body), size);
-  }
+  llvm::StringRef getBody() const override { return request.body(); }
 
-  void sendStatus(std::uint16_t status) override {
-    sent_status = status;
-    checkErr(nng_http_res_set_status(res.get(), status));
-  }
+  void sendStatus(std::uint16_t status) override { response.result(status); }
 
   void sendHeader(llvm::StringRef key, const llvm::Twine &value) override {
-    SmallVector<char, 64> key_buffer, value_buffer;
-    auto key_str = Twine(key).toNullTerminatedStringRef(key_buffer);
-    auto value_str = value.toNullTerminatedStringRef(value_buffer);
-    checkErr(
-        nng_http_res_add_header(res.get(), key_str.data(), value_str.data()));
+    SmallVector<char, 64> value_buffer;
+    auto value_str = value.toStringRef(value_buffer);
+    response.insert(makeStringView(key), makeStringView(value_str));
   }
 
-  void sendBody(const llvm::Twine &body) override {
-    SmallVector<char, 0> buffer;
-    auto body_str = body.toStringRef(buffer);
-    checkErr(
-        nng_http_res_copy_data(res.get(), body_str.data(), body_str.size()));
-    writeLog(body_str.size());
-    actuallySend();
+  void sendBody(const llvm::Twine &body) override;
+  void sendEmptyBody() override;
+
+private:
+  std::shared_ptr<http_connection> connection;
+  http::request<http::string_body> &request;
+  http::response<http::string_body> &response;
+};
+} // end anonymous namespace
+
+namespace {
+class http_connection : public std::enable_shared_from_this<http_connection> {
+public:
+  http_connection(tcp::socket socket) : socket(std::move(socket)) {}
+
+  void start() { accept_request(); }
+
+private:
+  friend class http_request;
+  tcp::socket socket;
+  beast::flat_buffer buffer{8192};
+  http::request<http::string_body> request;
+  http::response<http::string_body> response;
+  std::optional<http_request> wrapped_request;
+
+  void accept_request() {
+    auto self = shared_from_this();
+    http::async_read(socket, buffer, request,
+                     [self](beast::error_code ec, std::size_t) {
+                       if (!ec)
+                         self->process_request();
+                     });
   }
 
-  void sendEmptyBody() override {
-    sendHeader("Content-Length", "0");
-    writeLog(0);
-    actuallySend();
+  void process_request() {
+    wrapped_request.emplace(shared_from_this(), request, response);
+    g_server->handleRequest(*wrapped_request);
   }
 
-  void actuallySend() {
-    assert(!responded);
-    nng_aio_set_output(http_aio, 0, res.release());
-    nng_aio_finish(http_aio, 0);
-    responded = true;
-  }
-
-  void writeLog(size_t body_size) {
+  void writeLog() {
     // https://en.wikipedia.org/wiki/Common_Log_Format
 
     // There are so many successful requests, writing the log is actually a
     // bottleneck. So let's only log failures.
-    if (sent_status >= 200 && sent_status <= 299)
+    if (response.result_int() >= 200 && response.result_int() <= 299)
       return;
 
-    StringRef ip_address = "-"; // TODO: NNG doesn't seem to expose this.
+    auto ip_address = socket.remote_endpoint().address().to_string();
+    auto body_size = response.body().size();
 
     // TODO: ensure the locale is set correctly.
     char time_buffer[32] = "";
@@ -187,27 +173,46 @@ struct NNGRequest : public HTTPRequest,
     std::strftime(time_buffer, sizeof(time_buffer), "%d/%b/%Y:%H:%M:%S %z",
                   std::localtime(&time));
 
-    SmallVector<char, 256> buffer;
-    auto line =
-        (ip_address + " - - [" + time_buffer + "] \"" +
-         nng_http_req_get_method(req) + " " + nng_http_req_get_uri(req) + " " +
-         nng_http_req_get_version(req) + "\" " +
-         Twine(nng_http_res_get_status(res.get())) + " " +
-         (body_size ? Twine(body_size) : Twine("-")))
-            .toStringRef(buffer);
-
     std::lock_guard lock(stdout_mutex);
-    llvm::outs() << line << "\n";
+    std::cout << ip_address << " - - [" << time_buffer << "] \""
+              << request.method_string() << " " << request.target() << " HTTP/"
+              << (request.version() / 10) << "." << (request.version() % 10)
+              << "\" " << response.result_int() << " " << body_size << "\r\n";
   }
 
-  std::uint16_t sent_status = 0;
+  void sendResponse() {
+    auto self = shared_from_this();
+    wrapped_request->responded = true;
+    wrapped_request.reset();
+    response.content_length(response.body().size());
+    writeLog();
+    self->request = {};
+    http::async_write(socket, response,
+                      [self](beast::error_code ec, std::size_t) {
+                        self->response = {};
+                        if (!ec)
+                          self->accept_request();
+                      });
+  }
 };
 } // end anonymous namespace
 
-static void httpHandler(nng_aio *aio) {
-  auto nng_req = reinterpret_cast<nng_http_req *>(nng_aio_get_input(aio, 0));
-  NNGRequest req(nng_req, aio);
-  g_server->handleRequest(req);
+void http_request::sendBody(const llvm::Twine &body) {
+  response.body() = body.str();
+  connection->sendResponse();
+}
+
+void http_request::sendEmptyBody() {
+  response.body().clear();
+  connection->sendResponse();
+}
+
+static void http_server(tcp::acceptor &acceptor, tcp::socket &socket) {
+  acceptor.async_accept(socket, [&](beast::error_code ec) {
+    if (!ec)
+      std::make_shared<http_connection>(std::move(socket))->start();
+    http_server(acceptor, socket);
+  });
 }
 
 int main(int argc, char **argv) {
@@ -220,23 +225,24 @@ int main(int argc, char **argv) {
   auto store = Store::open(GetStoreUri());
   Server server(*store);
   g_server = &server;
-  auto url = parse_url(listen_url);
-  auto http_server = http_server_hold(url.get());
 
-  auto handler = http_handler_alloc("/", httpHandler);
-  // Accept unlimited amounts of data.
-  checkErr(nng_http_handler_collect_body(handler.get(), true,
-                                         static_cast<size_t>(-1)));
-  checkErr(nng_http_handler_set_method(handler.get(), nullptr));
-  checkErr(nng_http_handler_set_tree(handler.get()));
-  checkErr(nng_http_server_add_handler(http_server.get(), handler.release()));
+  auto uri_or_none = URI::parse(listen_url);
+  if (!uri_or_none) {
+    llvm::errs() << "Invalid URL: " << listen_url << "\n";
+    llvm::errs() << "Try http://127.0.0.1:8000/\n";
+    return 1;
+  }
+  auto const address = net::ip::make_address(uri_or_none->host);
+  unsigned short port = static_cast<unsigned short>(uri_or_none->port);
+  net::io_context ioc{1}; // may call boost::throw_exception
+  tcp::acceptor acceptor{ioc, {address, port}};
+  tcp::socket socket{ioc};
+  http_server(acceptor, socket);
 
-  checkErr(nng_http_server_start(http_server.get()));
-
+  // We print this message *after* opening the store (which can take a long
+  // time, if database logs need to be replayed).
   llvm::errs() << "Server started!\n";
 
-  while (true)
-    nng_msleep(1000);
-
+  ioc.run();
   return 0;
 }
