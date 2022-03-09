@@ -1,17 +1,20 @@
 #include "memodb_internal.h"
 
-#if BCDB_WITH_NNG
-
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <semaphore.h>
 #include <thread>
 #include <variant>
 #include <vector>
 
+#include <boost/asio/connect.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/version.hpp>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
@@ -19,9 +22,6 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/raw_ostream.h>
-#include <nng/nng.h>
-#include <nng/supplemental/http/http.h>
-#include <nng/supplemental/util/platform.h>
 
 #include "memodb/CID.h"
 #include "memodb/Evaluator.h"
@@ -30,6 +30,10 @@
 #include "memodb/URI.h"
 
 using namespace memodb;
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace net = boost::asio;
+using tcp = net::ip::tcp;
 using llvm::ArrayRef;
 using llvm::cantFail;
 using llvm::DenseMap;
@@ -38,73 +42,6 @@ using llvm::report_fatal_error;
 using llvm::SmallVector;
 using llvm::StringRef;
 using llvm::Twine;
-
-namespace {
-
-struct AioDeleter {
-  void operator()(nng_aio *aio) { nng_aio_free(aio); }
-};
-
-struct HTTPClientDeleter {
-  void operator()(nng_http_client *client) { nng_http_client_free(client); }
-};
-
-struct HTTPConnCloser {
-  void operator()(nng_http_conn *conn) { nng_http_conn_close(conn); }
-};
-
-struct HTTPRequestDeleter {
-  void operator()(nng_http_req *req) { nng_http_req_free(req); }
-};
-
-struct HTTPResponseDeleter {
-  void operator()(nng_http_res *res) { nng_http_res_free(res); }
-};
-
-struct URLDeleter {
-  void operator()(nng_url *url) { nng_url_free(url); }
-};
-
-}; // end anonymous namespace
-
-static void checkErr(int err) {
-  if (err)
-    llvm::report_fatal_error(nng_strerror(err));
-}
-
-static std::unique_ptr<nng_url, URLDeleter> url_parse(const Twine &str) {
-  SmallVector<char, 256> buffer;
-  nng_url *result;
-  checkErr(
-      nng_url_parse(&result, str.toNullTerminatedStringRef(buffer).data()));
-  return std::unique_ptr<nng_url, URLDeleter>(result);
-}
-
-static std::unique_ptr<nng_aio, AioDeleter> aio_alloc() {
-  nng_aio *result;
-  checkErr(nng_aio_alloc(&result, nullptr, nullptr));
-  return std::unique_ptr<nng_aio, AioDeleter>(result);
-}
-
-static std::unique_ptr<nng_http_client, HTTPClientDeleter>
-http_client_alloc(nng_url *url) {
-  nng_http_client *result;
-  checkErr(nng_http_client_alloc(&result, url));
-  return std::unique_ptr<nng_http_client, HTTPClientDeleter>(result);
-}
-
-static std::unique_ptr<nng_http_req, HTTPRequestDeleter>
-http_req_alloc(const nng_url *url) {
-  nng_http_req *result;
-  checkErr(nng_http_req_alloc(&result, url));
-  return std::unique_ptr<nng_http_req, HTTPRequestDeleter>(result);
-}
-
-static std::unique_ptr<nng_http_res, HTTPResponseDeleter> http_res_alloc() {
-  nng_http_res *result;
-  checkErr(nng_http_res_alloc(&result));
-  return std::unique_ptr<nng_http_res, HTTPResponseDeleter>(result);
-}
 
 namespace {
 struct Response {
@@ -138,59 +75,61 @@ private:
   friend struct AsyncRequest;
   friend class ClientEvaluator;
 
-  std::unique_ptr<nng_http_req, HTTPRequestDeleter>
+  http::request<http::vector_body<std::uint8_t>>
   buildRequest(const Twine &method, const Twine &path,
                const std::optional<Node> &body = std::nullopt);
-  Response getResponse(nng_http_res *res);
+  Response getResponse(http::response<http::vector_body<std::uint8_t>> &res);
   Response request(const Twine &method, const Twine &path,
                    const std::optional<Node> &body = std::nullopt);
 
-  // The base server URI, without a trailing slash;
-  std::string base_uri;
+  // The base server URI.
+  URI base_uri;
+
+  net::io_context ioc;
 
   // Get the current thread's HTTP connection, creating a new one if necessary.
-  nng_http_conn *getConn();
+  beast::tcp_stream &getConn();
 
   // Used by each thread to look up its own HTTP connection.
   // TODO: entries in this map are never removed, even when the HTTPStore is
   // destroyed, which could cause memory leaks.
-  static thread_local DenseMap<HTTPStore *, nng_http_conn *> thread_connections;
-
-  // Used to make new connections to the server.
-  std::unique_ptr<nng_http_client, HTTPClientDeleter> client;
+  static thread_local DenseMap<HTTPStore *, beast::tcp_stream *>
+      thread_connections;
 
   // Closes all connections in the destructor.
-  std::vector<std::unique_ptr<nng_http_conn, HTTPConnCloser>> open_connections =
-      {};
+  std::vector<std::unique_ptr<beast::tcp_stream>> open_connections = {};
 
   // Protects access to open_connections and client.
   std::mutex mutex;
 };
 } // end anonymous namespace
 
-thread_local DenseMap<HTTPStore *, nng_http_conn *>
-    HTTPStore::thread_connections = DenseMap<HTTPStore *, nng_http_conn *>();
+thread_local DenseMap<HTTPStore *, beast::tcp_stream *>
+    HTTPStore::thread_connections =
+        DenseMap<HTTPStore *, beast::tcp_stream *>();
 
-nng_http_conn *HTTPStore::getConn() {
-  nng_http_conn *&result = thread_connections[this];
+beast::tcp_stream &HTTPStore::getConn() {
+  beast::tcp_stream *&result = thread_connections[this];
   if (!result) {
-    auto aio = aio_alloc();
+    tcp::resolver resolver(ioc);
+    auto const port_name = llvm::Twine(base_uri.port).str();
+    auto const resolved = resolver.resolve(base_uri.host, port_name);
+    auto stream = std::make_unique<beast::tcp_stream>(ioc);
+    stream->connect(resolved);
     const std::lock_guard<std::mutex> lock(mutex);
-    nng_http_client_connect(client.get(), aio.get());
-    nng_aio_wait(aio.get());
-    checkErr(nng_aio_result(aio.get()));
-    result = static_cast<nng_http_conn *>(nng_aio_get_output(aio.get(), 0));
-    open_connections.emplace_back(result);
+    open_connections.emplace_back(std::move(stream));
+    result = open_connections.back().get();
   }
-  return result;
+  return *result;
 }
 
 void HTTPStore::open(StringRef uri, bool create_if_missing) {
-  base_uri = uri.str();
-  if (!base_uri.empty() && base_uri.back() == '/')
-    base_uri.pop_back();
-  auto url = url_parse(uri);
-  client = http_client_alloc(url.get());
+  auto uri_or_none = URI::parse(uri);
+  if (!uri_or_none)
+    report_fatal_error("invalid HTTP URL");
+  base_uri = std::move(*uri_or_none);
+  if (!base_uri.path_segments.empty())
+    report_fatal_error("HTTP URL must have an empty path");
   getConn();
 }
 
@@ -300,37 +239,37 @@ void HTTPStore::call_invalidate(llvm::StringRef name) {
     response.raiseError();
 }
 
-std::unique_ptr<nng_http_req, HTTPRequestDeleter>
+http::request<http::vector_body<std::uint8_t>>
 HTTPStore::buildRequest(const Twine &method, const Twine &path,
                         const std::optional<Node> &body) {
-  auto url = url_parse(base_uri + path);
-  auto req = http_req_alloc(url.get());
   SmallVector<char, 128> buffer;
-  checkErr(nng_http_req_set_method(
-      req.get(), method.toNullTerminatedStringRef(buffer).data()));
-  checkErr(nng_http_req_set_uri(req.get(),
-                                path.toNullTerminatedStringRef(buffer).data()));
-  checkErr(nng_http_req_set_header(req.get(), "Accept", "application/cbor"));
+  auto method_verb = http::string_to_verb(method.toStringRef(buffer));
+  if (method_verb == http::verb::unknown)
+    report_fatal_error("invalid HTTP method");
+
+  auto target = path.toStringRef(buffer);
+  http::request<http::vector_body<std::uint8_t>> request(method_verb, target,
+                                                         11);
+  request.set(http::field::accept, "application/cbor");
+  request.set(http::field::host, base_uri.host);
+
   if (body) {
-    auto bytes = body->saveAsCBOR();
-    checkErr(
-        nng_http_req_set_header(req.get(), "Content-Type", "application/cbor"));
-    checkErr(nng_http_req_copy_data(req.get(), bytes.data(), bytes.size()));
+    request.body() = body->saveAsCBOR();
+    request.set(http::field::content_type, "application/cbor");
+    request.prepare_payload();
   }
-  return req;
+
+  return request;
 }
 
-Response HTTPStore::getResponse(nng_http_res *res) {
+Response
+HTTPStore::getResponse(http::response<http::vector_body<std::uint8_t>> &res) {
   Response response;
-  response.status = nng_http_res_get_status(res);
-  const char *location = nng_http_res_get_header(res, "Location");
-  if (location)
-    response.location = location;
-  void *res_data;
-  size_t res_size;
-  nng_http_res_get_data(res, &res_data, &res_size);
-  const char *content_type = nng_http_res_get_header(res, "Content-Type");
-  if (content_type && StringRef(content_type) == "application/cbor")
+  response.status = res.result_int();
+  response.location = res[http::field::location];
+  void *res_data = res.body().data();
+  size_t res_size = res.body().size();
+  if (res[http::field::content_type] == "application/cbor")
     response.body = cantFail(Node::loadFromCBOR(
         *this, ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(res_data),
                                  res_size)));
@@ -342,13 +281,13 @@ Response HTTPStore::getResponse(nng_http_res *res) {
 
 Response HTTPStore::request(const Twine &method, const Twine &path,
                             const std::optional<Node> &body) {
-  auto res = http_res_alloc();
-  auto aio = aio_alloc();
+  auto &stream = getConn();
   auto req = buildRequest(method, path, body);
-  nng_http_conn_transact(getConn(), req.get(), res.get(), aio.get());
-  nng_aio_wait(aio.get());
-  checkErr(nng_aio_result(aio.get()));
-  return getResponse(res.get());
+  http::write(stream, req);
+  beast::flat_buffer buffer;
+  http::response<http::vector_body<std::uint8_t>> res;
+  http::read(stream, buffer, res);
+  return getResponse(res);
 }
 
 void Response::raiseError() {
@@ -361,10 +300,6 @@ std::unique_ptr<Store> memodb_http_open(llvm::StringRef path,
   store->open(path, create_if_missing);
   return store;
 }
-
-// TODO: deadlock is possible if all workers are waiting for subtasks to
-// complete. Fix it by starting new threads when the existing ones are waiting
-// for Futures.
 
 namespace {
 class ClientEvaluator : public Evaluator {
@@ -383,7 +318,7 @@ private:
   std::optional<Link> tryEvaluate(const Call &call,
                                   bool inc_started_if_success);
   Link evaluateDeferred(const Call &call, bool work_while_waiting);
-  bool workOnce(nng_aio *aio);
+  bool workOnce();
 
   std::unique_ptr<HTTPStore> store;
   llvm::StringMap<std::function<NodeOrCID(Evaluator &, const Call &)>> funcs;
@@ -392,15 +327,13 @@ private:
   std::mutex worker_info_cid_mutex;
 
   std::vector<std::thread> threads;
-  std::vector<std::unique_ptr<nng_aio, AioDeleter>> thread_aios;
   std::atomic<bool> work_done = false;
 
   // These counters only increase, never decrease.
   std::atomic<unsigned> num_requested = 0, num_started = 0, num_finished = 0;
   std::mutex stderr_mutex;
 
-  void workerThreadImpl(nng_aio *aio);
-
+  void workerThreadImpl();
   void printProgress();
 };
 } // end anonymous namespace
@@ -409,11 +342,8 @@ ClientEvaluator::ClientEvaluator(std::unique_ptr<HTTPStore> store,
                                  unsigned num_threads)
     : store(std::move(store)) {
   threads.reserve(num_threads);
-  thread_aios.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i) {
-    thread_aios.emplace_back(aio_alloc());
-    threads.emplace_back(&ClientEvaluator::workerThreadImpl, this,
-                         thread_aios.back().get());
+    threads.emplace_back(&ClientEvaluator::workerThreadImpl, this);
   }
 }
 
@@ -466,8 +396,8 @@ Link ClientEvaluator::evaluate(const Call &call, bool work_while_waiting) {
 
 Link ClientEvaluator::evaluateDeferred(const Call &call,
                                        bool work_while_waiting) {
+  using namespace std::chrono_literals;
   ++num_started;
-  auto aio = aio_alloc();
   while (true) {
     auto result = tryEvaluate(call, false);
     if (result)
@@ -479,8 +409,8 @@ Link ClientEvaluator::evaluateDeferred(const Call &call,
     //
     // XXX: This can cause stack depth to grow arbitrarily large. If that turns
     // out to be a problem, we may need to change the design.
-    if (!(work_while_waiting && workOnce(aio.get())))
-      nng_msleep(1000); // TODO: exponential backoff
+    if (!(work_while_waiting && workOnce()))
+      std::this_thread::sleep_for(1000ms); // TODO: exponential backoff
   }
 }
 
@@ -528,7 +458,7 @@ void ClientEvaluator::printProgress() {
                << " -> " << finished;
 }
 
-bool ClientEvaluator::workOnce(nng_aio *aio) {
+bool ClientEvaluator::workOnce() {
   std::unique_lock lock(worker_info_cid_mutex);
   auto cid = worker_info_cid;
   lock.unlock();
@@ -536,14 +466,7 @@ bool ClientEvaluator::workOnce(nng_aio *aio) {
     // No funcs registered yet, so we can't do anything.
     return false;
   }
-  auto res = http_res_alloc();
-  auto req = store->buildRequest("POST", "/worker", Node(*store, *cid));
-  nng_http_conn_transact(store->getConn(), req.get(), res.get(), aio);
-  nng_aio_wait(aio);
-  if (nng_aio_result(aio) == NNG_ECANCELED)
-    return false;
-  checkErr(nng_aio_result(aio));
-  auto response = store->getResponse(res.get());
+  auto response = store->request("POST", "/worker", Node(*store, *cid));
   if (response.status < 200 || response.status > 299)
     response.raiseError();
   if (response.body.is_null()) {
@@ -573,12 +496,14 @@ bool ClientEvaluator::workOnce(nng_aio *aio) {
   return true;
 }
 
-void ClientEvaluator::workerThreadImpl(nng_aio *aio) {
+void ClientEvaluator::workerThreadImpl() {
+  using namespace std::chrono_literals;
   llvm::PrettyStackTraceString stack_printer("Worker thread (client process)");
-  nng_msleep(1000); // Give the program time to call registerFunc().
+  std::this_thread::sleep_for(
+      1000ms); // Give the program time to call registerFunc().
   while (!work_done) {
-    if (!workOnce(aio))
-      nng_msleep(1000); // TODO: exponential backoff
+    if (!workOnce())
+      std::this_thread::sleep_for(1000ms); // TODO: exponential backoff
   }
 }
 
@@ -588,26 +513,3 @@ std::unique_ptr<Evaluator> memodb::createClientEvaluator(llvm::StringRef path,
   store->open(path, false);
   return std::make_unique<ClientEvaluator>(std::move(store), num_threads);
 }
-
-#else // BCDB_WITH_NNG
-
-#include <memory>
-
-#include <llvm/ADT/StringRef.h>
-#include <llvm/Support/Error.h>
-
-using namespace memodb;
-
-std::unique_ptr<Store> memodb_http_open(llvm::StringRef path,
-                                        bool create_if_missing) {
-  llvm::report_fatal_error(
-      "MemoDB was compiled without HTTP support (requires NNG)");
-}
-
-std::unique_ptr<Evaluator> memodb::createClientEvaluator(llvm::StringRef path,
-                                                         unsigned num_threads) {
-  llvm::report_fatal_error(
-      "MemoDB was compiled without HTTP support (requires NNG)");
-}
-
-#endif // BCDB_WITH_NNG

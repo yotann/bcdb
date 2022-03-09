@@ -57,30 +57,9 @@ static llvm::StringRef GetStoreUri() {
   return StoreUriOrEmpty;
 }
 
-#if defined(BOOST_NO_EXCEPTIONS)
-
-void boost::throw_exception(std::exception const &e) {
-  llvm::report_fatal_error(e.what());
-}
-
-void boost::throw_exception(std::exception const &e,
-                            boost::source_location const &loc) {
-  throw_exception(e);
-}
-
-#endif // defined(BOOST_NO_EXCEPTIONS)
-
 static std::mutex stdout_mutex;
 
 static Server *g_server = nullptr;
-
-static StringRef makeStringRef(beast::string_view value) {
-  return StringRef(value.data(), value.size());
-}
-
-static beast::string_view makeStringView(llvm::StringRef value) {
-  return beast::string_view(value.data(), value.size());
-}
 
 namespace {
 class http_connection;
@@ -89,8 +68,7 @@ public:
   http_request(std::shared_ptr<http_connection> connection,
                http::request<http::string_body> &request,
                http::response<http::string_body> &response)
-      : HTTPRequest(makeStringRef(request.method_string()),
-                    URI::parse(makeStringRef(request.target()))),
+      : HTTPRequest(request.method_string(), URI::parse(request.target())),
         connection(std::move(connection)), request(request),
         response(response) {
     response.version(request.version());
@@ -101,10 +79,10 @@ public:
   std::optional<llvm::StringRef>
   getHeader(const llvm::Twine &key) const override {
     SmallVector<char, 64> key_buffer;
-    auto iter = request.find(makeStringView(key.toStringRef(key_buffer)));
+    auto iter = request.find(key.toStringRef(key_buffer));
     if (iter == request.end())
       return std::nullopt;
-    return makeStringRef(iter->value());
+    return iter->value();
   }
 
   llvm::StringRef getBody() const override { return request.body(); }
@@ -113,8 +91,7 @@ public:
 
   void sendHeader(llvm::StringRef key, const llvm::Twine &value) override {
     SmallVector<char, 64> value_buffer;
-    auto value_str = value.toStringRef(value_buffer);
-    response.insert(makeStringView(key), makeStringView(value_str));
+    response.insert(key, value.toStringRef(value_buffer));
   }
 
   void sendBody(const llvm::Twine &body) override;

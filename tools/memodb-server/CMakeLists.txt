@@ -6,7 +6,5 @@ add_llvm_tool(memodb-server
 )
 target_link_libraries(memodb-server PRIVATE
 	libmemodb
-)
-target_include_directories(memodb-server PRIVATE
-	${Boost_INCLUDE_DIRS}
+	Boost::Beast
 )

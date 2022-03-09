@@ -9,6 +9,5 @@ if(ENABLE_SMOUT)
   target_link_libraries(smout PRIVATE
     libbcdb
     liboutlining
-    nng::nng
   )
 endif(ENABLE_SMOUT)

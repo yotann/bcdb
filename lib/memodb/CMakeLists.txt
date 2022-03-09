@@ -25,13 +25,10 @@ add_llvm_library(libmemodb
   URI.cpp
 )
 target_link_libraries(libmemodb PRIVATE
+  Boost::Beast
   Sodium::LibSodium
   SQLite::SQLite3
 )
-if(WITH_NNG)
-  target_link_libraries(libmemodb PRIVATE nng::nng)
-  add_compile_definitions(BCDB_WITH_NNG=1)
-endif(WITH_NNG)
 if(WITH_ROCKSDB)
   target_link_libraries(libmemodb PRIVATE RocksDB::rocksdb)
   add_compile_definitions(BCDB_WITH_ROCKSDB=1)

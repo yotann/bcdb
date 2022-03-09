@@ -57,22 +57,25 @@ make check
 - C++ compiler with C++17 support.
 - [LLVM](https://llvm.org/) version 10 through 13 (development versions up to
   14 may work, but this is not guaranteed)
-  - When working on the BCDB code, you should make sure LLVM is built with
-    assertions enabled.
+  - LLVM must be built with exception handling support. Official packages may
+    have this disabled, so you'll need to build LLVM yourself with `cmake
+    -DLLVM_ENABLE_EH=ON` (or use Nix).
   - LLVM's `FileCheck` and `not` programs must be installed as well. Some
     packages (including some of LLVM's official packages) exclude these
     programs or split them off into a separate package.
+  - When working on the BCDB code, you should make sure LLVM is built with
+    assertions enabled (`cmake -DLLVM_ENABLE_ASSERTIONS=ON`).
 - [Clang](https://clang.llvm.org/), same version as LLVM.
+  - Clang doesn't need exception handling or assertions, so you can use an
+    official Clang package.
 - [CMake](https://cmake.org/), at least version 3.13.
 - [Libsodium](https://libsodium.org/)
 - [SQLite](https://sqlite.org/)
 - [Python](https://www.python.org/), at least 3.6.
-- [Boost](https://boost.org/), at least 3.75.
+- [Boost](https://boost.org/), at least 1.75.
 - Optional dependencies:
   - [RocksDB](https://rocksdb.org/), preferably at least 6.19, with LZ4 and
     Zstandard support (`ROCKSDB_LITE` is not supported).
-  - [nng](https://github.com/nanomsg/nng), tested with 1.4, for distributed
-    processing.
 
 ### Building dependencies automatically with Nix
 

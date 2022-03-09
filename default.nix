@@ -44,6 +44,14 @@ let
     '';
   });
 
+  ehLLVM = llvm: llvm.overrideAttrs (o: {
+    cmakeFlags = o.cmakeFlags ++ [
+      "-DLLVM_ENABLE_EH=ON"
+      "-DLLVM_ENABLE_RTTI=ON"
+    ];
+    doCheck = false;
+  });
+
   assertLLVM = llvm: llvm.overrideAttrs (o: {
     cmakeFlags = o.cmakeFlags ++ [
       "-DLLVM_ENABLE_ASSERTIONS=ON"
@@ -75,29 +83,24 @@ in rec {
 
   # BCDB with various versions of LLVM (assertions enabled)
   bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
-    inherit nng;
     llvm = llvm10-assert;
     clang = pkgs.clang_10;
   };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
-    inherit nng;
     llvm = llvm11-assert;
     clang = pkgs.clang_11;
   };
   bcdb-llvm12 = pkgs.callPackage ./nix/bcdb {
-    inherit nng;
     llvm = llvm12-assert;
     clang = pkgs.clang_12;
   };
   bcdb-llvm13 = pkgs.callPackage ./nix/bcdb {
-    inherit nng;
     llvm = llvm13-assert;
     clang = pkgs.llvmPackages_13.clang;
   };
 
   # BCDB and LLVM with debugging info, intended for local development
   bcdb-llvm13debug = pkgs.callPackage ./nix/bcdb {
-    inherit nng;
     llvm = llvm13-debug;
     clang = pkgs.llvmPackages_13.clang;
   };
@@ -105,21 +108,20 @@ in rec {
   # Build with Clang instead of GCC (may produce different warnings/errors).
   # Also use ASAN and UBSAN to catch leaks and undefined behavior.
   bcdb-clang-sanitize = pkgs.callPackage ./nix/bcdb {
-    inherit nng;
-    inherit (pkgs.llvmPackages_13) stdenv llvm clang;
+    llvm = llvm13-assert;
+    inherit (pkgs.llvmPackages_13) stdenv clang;
     sanitize = true;
   };
 
   # Test whether BCDB works without these optional libraries
-  bcdb-without-optional-deps = bcdb.override { nng = null; rocksdb = null; };
+  bcdb-without-optional-deps = bcdb.override { rocksdb = null; };
 
   # Dependencies of BCDB
-  llvm10-assert = assertLLVM pkgs.llvmPackages_10.libllvm;
-  llvm11-assert = assertLLVM pkgs.llvmPackages_11.libllvm;
-  llvm12-assert = assertLLVM pkgs.llvmPackages_12.libllvm;
-  llvm13-assert = assertLLVM (mlLLVM pkgs.llvmPackages_13.libllvm);
-  llvm13-debug = debugLLVM (mlLLVM pkgs.llvmPackages_13.libllvm);
-  nng = pkgs.callPackage ./nix/nng {};
+  llvm10-assert = assertLLVM (ehLLVM pkgs.llvmPackages_10.libllvm);
+  llvm11-assert = assertLLVM (ehLLVM pkgs.llvmPackages_11.libllvm);
+  llvm12-assert = assertLLVM (ehLLVM pkgs.llvmPackages_12.libllvm);
+  llvm13-assert = assertLLVM (mlLLVM (ehLLVM pkgs.llvmPackages_13.libllvm));
+  llvm13-debug = debugLLVM (mlLLVM (ehLLVM pkgs.llvmPackages_13.libllvm));
 
   inherit tensorflow mlLLVMModel;
 

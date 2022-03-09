@@ -42,6 +42,10 @@ elseif( NOT (${LLVM_PACKAGE_VERSION} VERSION_LESS 14.0) )
 endif()
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+if(NOT LLVM_ENABLE_EH)
+	message(FATAL_ERROR "LLVM must be built with exception handling enabled (LLVM_ENABLE_EH=ON). You may need to build it manually (or use Nix).")
+endif()
+
 include(FindPythonInterp)
 if( NOT PYTHONINTERP_FOUND )
   message(FATAL_ERROR
@@ -56,22 +60,17 @@ find_package(LibSodium REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Boost 1.75 REQUIRED)
 
+add_library(Boost::Beast INTERFACE IMPORTED)
+target_include_directories(Boost::Beast SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
+target_compile_definitions(Boost::Beast INTERFACE BOOST_BEAST_USE_STD_STRING_VIEW)
+
 find_program(CLANG clang)
 find_program(CLANGXX clang++)
 if(NOT CLANG OR NOT CLANGXX)
   message(FATAL_ERROR "Clang is required, but missing")
 endif()
 
-find_package(Threads) # needed by nng
-find_package(nng QUIET)
-if(Threads_FOUND AND nng_FOUND)
-  set(WITH_NNG ON)
-  set(ENABLE_SMOUT ON)
-else(Threads_FOUND AND nng_FOUND)
-  message(WARNING "Could not find nng library; disabling smout.")
-  set(WITH_NNG OFF)
-  set(ENABLE_SMOUT OFF)
-endif(Threads_FOUND AND nng_FOUND)
+set(ENABLE_SMOUT ON)
 
 find_package(RocksDB QUIET)
 if(RocksDB_FOUND)

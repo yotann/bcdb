@@ -29,18 +29,12 @@ static void printVersion(llvm::raw_ostream &os) {
 #ifndef NDEBUG
   os << " assertions";
 #endif
-#if BCDB_WITH_NNG
-  os << " NNG";
-#endif
 #if BCDB_WITH_ROCKSDB
   os << " RocksDB";
 #endif
   os << "\n  disabled features:";
 #ifdef NDEBUG
   os << " assertions";
-#endif
-#if !BCDB_WITH_NNG
-  os << " NNG";
 #endif
 #if !BCDB_WITH_ROCKSDB
   os << " RocksDB";
