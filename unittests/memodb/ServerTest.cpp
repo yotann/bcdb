@@ -79,8 +79,11 @@ TEST(ServerTest, GetCIDRefs) {
       .WillOnce(Return(std::vector<Name>{Name(Head("hi"))}));
   Server server(store);
   MockRequest request(Request::Method::GET, "/cid/uAXEAB2Zjb29raWU/users");
-  EXPECT_CALL(request, sendContentURIs({*URI::parse("/head/hi")},
-                                       Request::CacheControl::Mutable));
+  EXPECT_CALL(
+      request,
+      sendContentURIs(Property(&ArrayRef<URI>::vec,
+                               UnorderedElementsAre(*URI::parse("/head/hi"))),
+                      Request::CacheControl::Mutable));
   server.handleRequest(request);
 }
 
