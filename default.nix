@@ -82,10 +82,6 @@ in rec {
   bcdb-debug = bcdb-llvm13debug;
 
   # BCDB with various versions of LLVM (assertions enabled)
-  bcdb-llvm10 = pkgs.callPackage ./nix/bcdb {
-    llvm = llvm10-assert;
-    clang = pkgs.clang_10;
-  };
   bcdb-llvm11 = pkgs.callPackage ./nix/bcdb {
     llvm = llvm11-assert;
     clang = pkgs.clang_11;
@@ -117,7 +113,6 @@ in rec {
   bcdb-without-optional-deps = bcdb.override { rocksdb = null; };
 
   # Dependencies of BCDB
-  llvm10-assert = assertLLVM (ehLLVM pkgs.llvmPackages_10.libllvm);
   llvm11-assert = assertLLVM (ehLLVM pkgs.llvmPackages_11.libllvm);
   llvm12-assert = assertLLVM (ehLLVM pkgs.llvmPackages_12.libllvm);
   llvm13-assert = assertLLVM (mlLLVM (ehLLVM pkgs.llvmPackages_13.libllvm));

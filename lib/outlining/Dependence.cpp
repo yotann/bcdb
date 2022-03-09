@@ -700,7 +700,6 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::umul_with_overflow:
     case Intrinsic::usub_sat:
     case Intrinsic::usub_with_overflow:
-#if LLVM_VERSION_MAJOR >= 11
     case Intrinsic::experimental_constrained_fmuladd:
     case Intrinsic::experimental_constrained_roundeven:
     case Intrinsic::roundeven:
@@ -719,7 +718,6 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::vp_udiv:
     case Intrinsic::vp_urem:
     case Intrinsic::vp_xor:
-#endif
 #if LLVM_VERSION_MAJOR >= 12
     case Intrinsic::abs:
     case Intrinsic::fptosi_sat:
@@ -753,10 +751,8 @@ void OutliningDependenceResults::analyzeInstruction(Instruction *I) {
     case Intrinsic::lifetime_end:
     case Intrinsic::trap:
     case Intrinsic::vacopy:
-#if LLVM_VERSION_MAJOR >= 11
     case Intrinsic::expect_with_probability:
     case Intrinsic::memcpy_inline:
-#endif
       // Should be safe to outline.
       break;
 

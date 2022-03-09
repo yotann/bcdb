@@ -5,11 +5,6 @@
 
 #include <llvm/Config/llvm-config.h>
 
-#if LLVM_VERSION_MAJOR < 11
-#define hasPassPointeeByValueAttr hasByValOrInAllocaAttr
-#define isPassPointeeByValueArgument isByValOrInAllocaArgument
-#endif
-
 #if defined(LLVM_IR_METADATA_H) && defined(LLVM_IR_MODULE_H)
 namespace bcdb {
 static inline void eraseModuleFlag(llvm::Module &M, llvm::StringRef Key) {

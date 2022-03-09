@@ -69,16 +69,6 @@ struct SizingStreamer : public MCStreamer {
       : MCStreamer(context), sizes(sizes), mce(mce), sti(sti),
         uses_eh_frame(uses_eh_frame) {}
 
-#if LLVM_VERSION_MAJOR < 11
-#define emitCFIStartProcImpl EmitCFIStartProcImpl
-#define emitCommonSymbol EmitCommonSymbol
-#define emitCVLocDirective EmitCVLocDirective
-#define emitDwarfLocDirective EmitDwarfLocDirective
-#define emitInstruction EmitInstruction
-#define emitSymbolAttribute EmitSymbolAttribute
-#define emitZerofill EmitZerofill
-#endif
-
   // Must implement (pure virtual function).
   bool emitSymbolAttribute(MCSymbol *, MCSymbolAttr) override {
     return false; // not supported

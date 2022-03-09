@@ -202,10 +202,8 @@ static Node getTypeName(const Type *type) {
     return static_cast<int>(Primitive::PPC_FP128);
   case Type::X86_MMXTyID:
     return static_cast<int>(Primitive::X86_MMX);
-#if LLVM_VERSION_MAJOR >= 11
   case Type::BFloatTyID:
     return static_cast<int>(Primitive::BFloat);
-#endif
 #if LLVM_VERSION_MAJOR >= 12
   case Type::X86_AMXTyID:
     return static_cast<int>(Primitive::X86_AMX);
@@ -224,7 +222,6 @@ static Node getTypeName(const Type *type) {
                 {static_cast<int>(Derived::Array), std::move(subtypes),
                  type->getArrayNumElements()});
 
-#if LLVM_VERSION_MAJOR >= 11
   case Type::FixedVectorTyID:
     return Node(node_list_arg,
                 {static_cast<int>(Derived::FixedVector), std::move(subtypes),
@@ -234,12 +231,6 @@ static Node getTypeName(const Type *type) {
     return Node(node_list_arg,
                 {static_cast<int>(Derived::ScalableVector), std::move(subtypes),
                  cast<ScalableVectorType>(type)->getMinNumElements()});
-#else
-  case Type::VectorTyID:
-    return Node(node_list_arg,
-                {static_cast<int>(Derived::FixedVector), std::move(subtypes),
-                 cast<VectorType>(type)->getNumElements()});
-#endif
 
   case Type::StructTyID:
     if (cast<StructType>(type)->isOpaque())

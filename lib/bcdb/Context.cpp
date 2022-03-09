@@ -74,7 +74,6 @@ static const std::array KNOWN_MD_KINDS = {
     "misexpect",
 };
 
-#if LLVM_VERSION_MAJOR >= 11
 static const std::array KNOWN_BUNDLE_TAGS = {
     // Fixed tags already added by LLVMContext.
     "deopt",
@@ -89,7 +88,6 @@ static const std::array KNOWN_BUNDLE_TAGS = {
     "align",
     "ExplicitUse",
 };
-#endif
 
 static const std::array KNOWN_SYNC_SCOPES = {
     // Fixed names already added by LLVMContext.
@@ -116,10 +114,8 @@ Context::Context() {
   // bundle tags and sync scope names.
   for (const auto &kind : KNOWN_MD_KINDS)
     context.getMDKindID(kind);
-#if LLVM_VERSION_MAJOR >= 11
   for (const auto &tag : KNOWN_BUNDLE_TAGS)
     context.getOrInsertBundleTag(tag);
-#endif
   for (const auto &ssn : KNOWN_SYNC_SCOPES)
     context.getOrInsertSyncScopeID(ssn);
 }
@@ -141,11 +137,9 @@ void Context::checkWarnings(const LLVMContext &context) {
   context.getMDKindNames(vec);
   checkVec(vec, KNOWN_MD_KINDS, "MD kind");
 
-#if LLVM_VERSION_MAJOR >= 11
   vec.clear();
   context.getOperandBundleTags(vec);
   checkVec(vec, KNOWN_BUNDLE_TAGS, "operand bundle");
-#endif
 
   vec.clear();
   context.getSyncScopeNames(vec);

@@ -453,10 +453,8 @@ template <class AliasAnalysisType> class ClobberWalker {
 #if LLVM_VERSION_MAJOR >= 12
     auto UpwardDefsBegin = upward_defs_begin({Phi, Paths[PriorNode].Loc}, DT,
                                              &PerformedPhiTranslation);
-#elif LLVM_VERSION_MAJOR >= 11
-    auto UpwardDefsBegin = upward_defs_begin({Phi, Paths[PriorNode].Loc}, DT);
 #else
-    auto UpwardDefsBegin = upward_defs_begin({Phi, Paths[PriorNode].Loc});
+    auto UpwardDefsBegin = upward_defs_begin({Phi, Paths[PriorNode].Loc}, DT);
 #endif
     auto UpwardDefs = make_range(UpwardDefsBegin, upward_defs_end());
     for (const MemoryAccessPair &P : UpwardDefs) {

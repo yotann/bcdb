@@ -128,18 +128,12 @@ Type *NeededTypeMap::getMember(Type *Ty) {
   case Type::ArrayTyID:
     return *Entry = ArrayType::get(ElementTypes[0],
                                    cast<ArrayType>(Ty)->getNumElements());
-#if LLVM_VERSION_MAJOR >= 11
   case Type::FixedVectorTyID:
     return *Entry =
                FixedVectorType::get(ElementTypes[0], cast<FixedVectorType>(Ty));
   case Type::ScalableVectorTyID:
     return *Entry = ScalableVectorType::get(ElementTypes[0],
                                             cast<ScalableVectorType>(Ty));
-#else
-  case Type::VectorTyID:
-    return *Entry = VectorType::get(ElementTypes[0],
-                                    cast<VectorType>(Ty)->getNumElements());
-#endif
   case Type::PointerTyID:
     return *Entry = PointerType::get(ElementTypes[0],
                                      cast<PointerType>(Ty)->getAddressSpace());
@@ -332,11 +326,7 @@ Value *DeclMaterializer::materialize(Value *V) {
         GlobalValue::ExternalLinkage, /*init*/ nullptr, SGVar->getName(),
         /*insertbefore*/ nullptr, SGVar->getThreadLocalMode(),
         SGVar->getType()->getAddressSpace());
-#if LLVM_VERSION_MAJOR >= 11
     DGVar->setAlignment(SGVar->getAlign());
-#else
-    DGVar->setAlignment(SGVar->getAlignment());
-#endif
     DGVar->copyAttributesFrom(SGVar);
     NewGV = DGVar;
   } else if (auto *SF = dyn_cast<Function>(SGV)) {

@@ -43,7 +43,6 @@ static void printVersion(llvm::raw_ostream &os) {
 }
 
 InitTool::InitTool(int &argc, char **&argv) {
-#if LLVM_VERSION_MAJOR >= 11
   llvm::setBugReportMsg(
       R"(
 Fatal error! This is probably either a bug in BCDB, or you are using it incorrectly.
@@ -51,7 +50,6 @@ When you share this error, please include all parts of the error message.
 See docs/memodb/debugging.md for debugging suggestions.
 
 )");
-#endif
 
   llvm::cl::SetVersionPrinter(printVersion);
 
