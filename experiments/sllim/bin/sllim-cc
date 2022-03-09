@@ -120,7 +120,8 @@ CC="${SLLIM_CLANG-clang}"
 # not to change it because we might accidentally set SLLIM_LD=sllim-ld, causing
 # an infinite loop.
 if [ -z "${SLLIM_LD+set}" ]; then
-  export SLLIM_LD="$("$CC" -print-prog-name=ld)"
+  SLLIM_LD="$("$CC" -print-prog-name=ld)"
+  export SLLIM_LD
 fi
 
 RC=0

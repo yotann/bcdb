@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>

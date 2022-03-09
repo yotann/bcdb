@@ -5,7 +5,6 @@
 #include "TestingSupport.h"
 #include "memodb/CID.h"
 #include "memodb/Node.h"
-#include "memodb/Request.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 

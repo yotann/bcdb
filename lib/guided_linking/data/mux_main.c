@@ -27,9 +27,7 @@ static void do_fini(void) {
     (*ptr)();
 }
 
-static void do_fini_on_exit(int rc, void *opaque) {
-  do_fini();
-}
+static void do_fini_on_exit(int rc, void *opaque) { do_fini(); }
 
 static void try_main(int argc, char *argv[], char *envp[]) {
   const char *name = basename(argv[0]);

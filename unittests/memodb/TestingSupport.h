@@ -2,6 +2,7 @@
 #define MEMODB_TESTINGSUPPORT_H
 
 #include <iostream>
+#include <string>
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_os_ostream.h>

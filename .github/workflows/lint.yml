@@ -35,3 +35,6 @@ jobs:
 
           # Not worthwhile for ad hoc scripts.
           VALIDATE_PYTHON_MYPY: false
+
+          # Lots of nonsense about Node.js
+          VALIDATE_TEXTLINT: false

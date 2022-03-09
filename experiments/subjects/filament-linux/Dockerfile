@@ -18,7 +18,7 @@ RUN curl -L https://apt.kitware.com/keys/kitware-archive-latest.asc | \
 
 RUN curl -L https://github.com/google/filament/archive/refs/tags/v1.12.6.tar.gz | tar -xvzf -
 
-ADD bitcode-flags.patch bitcode-flags.patch
+COPY bitcode-flags.patch bitcode-flags.patch
 
 RUN cd filament-1.12.6 && \
     sed -i -e 's/env python/env python3/' third_party/spirv-tools/utils/*.py && \

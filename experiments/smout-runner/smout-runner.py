@@ -2,17 +2,15 @@
 #! nix-shell -i python -p "python3.withPackages (ps: [ps.aiohttp ps.cbor2 ps.hydra ps.joblib])"
 
 import asyncio
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import hydra
 from hydra.core.config_store import ConfigStore
-from omegaconf import OmegaConf
-
 from memodb import *
-
+from omegaconf import OmegaConf
 
 log = logging.getLogger(__name__)
 

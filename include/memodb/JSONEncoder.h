@@ -15,20 +15,20 @@ class JSONEncoder : public NodeVisitor {
 public:
   JSONEncoder(llvm::raw_ostream &os);
   virtual ~JSONEncoder();
-  virtual void visitNode(const Node &value) override;
-  virtual void visitNull() override;
-  virtual void visitBoolean(bool value) override;
-  virtual void visitUInt64(std::uint64_t value) override;
-  virtual void visitInt64(std::int64_t value) override;
-  virtual void visitFloat(double value) override;
-  virtual void visitString(llvm::StringRef value) override;
-  virtual void visitBytes(BytesRef value) override;
-  virtual void visitLink(const Link &value) override;
-  virtual void startList(const Node::List &value) override;
-  virtual void endList() override;
-  virtual void startMap(const Node::Map &value) override;
-  virtual void visitKey(llvm::StringRef value) override;
-  virtual void endMap() override;
+  void visitNode(const Node &value) override;
+  void visitNull() override;
+  void visitBoolean(bool value) override;
+  void visitUInt64(std::uint64_t value) override;
+  void visitInt64(std::int64_t value) override;
+  void visitFloat(double value) override;
+  void visitString(llvm::StringRef value) override;
+  void visitBytes(BytesRef value) override;
+  void visitLink(const Link &value) override;
+  void startList(const Node::List &value) override;
+  void endList() override;
+  void startMap(const Node::Map &value) override;
+  void visitKey(llvm::StringRef value) override;
+  void endMap() override;
 
 protected:
   llvm::raw_ostream &os;

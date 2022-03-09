@@ -50,16 +50,16 @@ public:
   void encodeHead(int major_type, std::uint64_t argument,
                   int force_additional = 0);
 
-  virtual void visitNull() override;
-  virtual void visitBoolean(bool value) override;
-  virtual void visitUInt64(std::uint64_t value) override;
-  virtual void visitInt64(std::int64_t value) override;
-  virtual void visitFloat(double value) override;
-  virtual void visitString(llvm::StringRef value) override;
-  virtual void visitBytes(BytesRef value) override;
-  virtual void visitLink(const Link &value) override;
-  virtual void startList(const Node::List &value) override;
-  virtual void startMap(const Node::Map &value) override;
+  void visitNull() override;
+  void visitBoolean(bool value) override;
+  void visitUInt64(std::uint64_t value) override;
+  void visitInt64(std::int64_t value) override;
+  void visitFloat(double value) override;
+  void visitString(llvm::StringRef value) override;
+  void visitBytes(BytesRef value) override;
+  void visitLink(const Link &value) override;
+  void startList(const Node::List &value) override;
+  void startMap(const Node::Map &value) override;
 
 protected:
   std::vector<std::uint8_t> &out;

@@ -8,7 +8,6 @@ import urllib.parse
 import aiohttp
 import cbor2
 
-
 __all__ = ["Multibase", "Name", "CID", "Head", "Call", "Link", "Store"]
 
 

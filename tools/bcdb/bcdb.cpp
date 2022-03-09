@@ -57,7 +57,7 @@ static cl::opt<std::string> AddName("name", cl::desc("Name of the new head"),
                                     cl::sub(AddCommand));
 
 static cl::opt<bool> AddNoHead("no-head", cl::desc("Don't add a named head"),
-                                    cl::sub(AddCommand));
+                               cl::sub(AddCommand));
 
 static int Add() {
   ExitOnError Err("bcdb add: ");

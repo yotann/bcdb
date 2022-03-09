@@ -1,13 +1,12 @@
 import argparse
 import asyncio
-from asyncio.subprocess import PIPE
 import fcntl
-from pathlib import Path
 import os
 import sys
+from asyncio.subprocess import PIPE
+from pathlib import Path
 
-from . import configuration
-from . import memodb
+from . import configuration, memodb
 
 parser = argparse.ArgumentParser(description="Optimize LLVM bitcode for size.")
 parser.add_argument(
