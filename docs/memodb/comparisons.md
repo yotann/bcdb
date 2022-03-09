@@ -110,15 +110,22 @@ to implement it in the future. (For instance, redirects are never used.)
 
 ## Networking server libraries
 
-One point of difficulty is that MemoDB needs to work even with exceptions and RTTI disabled.
-That's because some official LLVM builds have them disabled, which means
-in order to use templates like `llvm::cl::opt` we need to have them disabled too.
-This rules out a lot of interesting libraries like Boost.Beast.
+One point of difficulty is that official LLVM packages are built with
+exceptions disabled. In order to use templates like `llvm::cl::opt`, either we
+need to have exceptions disabled too, or we need users to build a custom
+version of LLVM with exceptions enabled.
 
-We also need the ability to respond asynchronously to requests, in case a
-client requests a func evaluation and we're waiting for a distributed worker to
-perform it. We also need to set per-request timeouts so can give up at the
-appropriate time.
+### Boost.Beast + Boost.Asio
+
+- ✔️ Widely available.
+- ✔️ Well documented.
+- ✔️ Supports HTTP/1 and WebSockets.
+- ✔️ Supports TCP, Unix sockets, in-process communication, etc.
+- ✔️ Includes general asynchronous I/O features.
+- ✔️ Should work well with Boost.Fiber etc.
+- ✔️ Optional support for TLS (using OpenSSL).
+- :x: Requires RTTI and exceptions (maybe Boost.Beast could be patched to use
+  Boost.ThrowException?)
 
 ### NNG
 
