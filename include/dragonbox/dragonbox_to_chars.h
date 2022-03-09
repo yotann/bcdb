@@ -1,4 +1,4 @@
-// Copyright 2020-2021 Junekey Jeon
+// Copyright 2020-2022 Junekey Jeon
 //
 // The contents of this file may be used under the terms of
 // the Apache License v2.0 with LLVM Exceptions.
@@ -15,8 +15,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.
 
-#ifndef JKJ_DRAGONBOX_TO_CHARS
-#define JKJ_DRAGONBOX_TO_CHARS
+#ifndef JKJ_HEADER_DRAGONBOX_TO_CHARS
+#define JKJ_HEADER_DRAGONBOX_TO_CHARS
 
 #include "dragonbox/dragonbox.h"
 
@@ -25,6 +25,47 @@ namespace jkj::dragonbox {
         template <class Float, class FloatTraits>
         extern char* to_chars(typename FloatTraits::carrier_uint significand, int exponent,
                               char* buffer) noexcept;
+
+        // Avoid needless ABI overhead incurred by tag dispatch.
+        template <class PolicyHolder, class Float, class FloatTraits>
+        char* to_chars_n_impl(float_bits<Float, FloatTraits> br, char* buffer) noexcept {
+            auto const exponent_bits = br.extract_exponent_bits();
+            auto const s = br.remove_exponent_bits(exponent_bits);
+
+            if (br.is_finite(exponent_bits)) {
+                if (s.is_negative()) {
+                    *buffer = '-';
+                    ++buffer;
+                }
+                if (br.is_nonzero()) {
+                    auto result = to_decimal<Float, FloatTraits>(
+                        s, exponent_bits, policy::sign::ignore, policy::trailing_zero::remove,
+                        typename PolicyHolder::decimal_to_binary_rounding_policy{},
+                        typename PolicyHolder::binary_to_decimal_rounding_policy{},
+                        typename PolicyHolder::cache_policy{});
+                    return to_chars_detail::to_chars<Float, FloatTraits>(result.significand,
+                                                                         result.exponent, buffer);
+                }
+                else {
+                    std::memcpy(buffer, "0E0", 3);
+                    return buffer + 3;
+                }
+            }
+            else {
+                if (s.has_all_zero_significand_bits()) {
+                    if (s.is_negative()) {
+                        *buffer = '-';
+                        ++buffer;
+                    }
+                    std::memcpy(buffer, "Infinity", 8);
+                    return buffer + 8;
+                }
+                else {
+                    std::memcpy(buffer, "NaN", 3);
+                    return buffer + 3;
+                }
+            }
+        }
     }
 
     // Returns the next-to-end position
@@ -39,56 +80,8 @@ namespace jkj::dragonbox {
                                    base_default_pair<cache::base, cache::full>>{},
             policies...));
 
-        auto const br = float_bits<Float, FloatTraits>(x);
-        auto const exponent_bits = br.extract_exponent_bits();
-        auto const s = br.remove_exponent_bits(exponent_bits);
-
-        if (br.is_finite(exponent_bits)) {
-            if (s.is_negative()) {
-                *buffer = '-';
-                ++buffer;
-            }
-            if (br.is_nonzero()) {
-                auto result = to_decimal<Float, FloatTraits>(
-                    s, exponent_bits, policy::sign::ignore,
-                    [] {
-                        // For binary32, trailing zero removal procedure is very fast, so it's
-                        // better to do it in to_decimal rather than in to_chars.
-                        if constexpr (std::is_same_v<typename FloatTraits::format,
-                                                     ieee754_binary32>) {
-                            return policy::trailing_zero::remove;
-                        }
-                        // For binary64, the additional cost is too big, so it's better to do it in
-                        // to_chars.
-                        else {
-                            return policy::trailing_zero::ignore;
-                        }
-                    }(),
-                    typename policy_holder::decimal_to_binary_rounding_policy{},
-                    typename policy_holder::binary_to_decimal_rounding_policy{},
-                    typename policy_holder::cache_policy{});
-                return to_chars_detail::to_chars<Float, FloatTraits>(result.significand,
-                                                                     result.exponent, buffer);
-            }
-            else {
-                std::memcpy(buffer, "0E0", 3);
-                return buffer + 3;
-            }
-        }
-        else {
-            if (s.has_all_zero_significand_bits()) {
-                if (s.is_negative()) {
-                    *buffer = '-';
-                    ++buffer;
-                }
-                std::memcpy(buffer, "Infinity", 8);
-                return buffer + 8;
-            }
-            else {
-                std::memcpy(buffer, "NaN", 3);
-                return buffer + 3;
-            }
-        }
+        return to_chars_detail::to_chars_n_impl<policy_holder>(float_bits<Float, FloatTraits>(x),
+                                                               buffer);
     }
 
     // Null-terminate and bypass the return value of fp_to_chars_n
@@ -99,7 +92,7 @@ namespace jkj::dragonbox {
         return ptr;
     }
 
-    // Maximum required buffer size
+    // Maximum required buffer size (excluding null-terminator)
     template <class FloatFormat>
     inline constexpr std::size_t max_output_string_length =
         std::is_same_v<FloatFormat, ieee754_binary32>
