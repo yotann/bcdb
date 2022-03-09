@@ -54,11 +54,14 @@ make check
 
 ### Dependencies
 
+Building BCDB without Nix is not officially supported. If you want to try it
+anyway, you'll need to install these dependencies first:
+
 - C++ compiler with C++17 support.
 - [LLVM](https://llvm.org/) version 10 through 13 (development versions up to
   14 may work, but this is not guaranteed)
-  - LLVM must be built with exception handling support. Official packages may
-    have this disabled, so you'll need to build LLVM yourself with `cmake
+	- LLVM must be built with exception handling support. Official packages have
+	  this disabled, so you'll need to build LLVM yourself with `cmake
     -DLLVM_ENABLE_EH=ON` (or use Nix).
   - LLVM's `FileCheck` and `not` programs must be installed as well. Some
     packages (including some of LLVM's official packages) exclude these
