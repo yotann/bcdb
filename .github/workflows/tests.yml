@@ -1,3 +1,4 @@
+---
 name: Tests
 
 on: [push, pull_request]
@@ -7,29 +8,29 @@ jobs:
     strategy:
       matrix:
         variant:
-        - bcdb-llvm11
-        - bcdb-llvm12
-        - bcdb-llvm13
-        - bcdb-clang-sanitize
-        - bcdb-without-optional-deps
+          - bcdb-llvm11
+          - bcdb-llvm12
+          - bcdb-llvm13
+          - bcdb-clang-sanitize
+          - bcdb-without-optional-deps
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-    - uses: cachix/install-nix-action@v16
-    - uses: cachix/cachix-action@v10
-      with:
-        name: bcdb
-        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-    - run: nix-build -A ${{ matrix.variant }}
-    - name: Slack Notification
-      if: failure()
-      uses: lazy-actions/slatify@v3.0.0
-      with:
-        job_name: '*Nix Test*'
-        commit: true
-        type: ${{ job.status }}
-        url: ${{ secrets.SLACK_WEBHOOK }}
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: cachix/install-nix-action@v16
+      - uses: cachix/cachix-action@v10
+        with:
+          name: bcdb
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+      - run: nix-build -A ${{ matrix.variant }}
+      - name: Slack Notification
+        if: failure()
+        uses: lazy-actions/slatify@v3.0.0
+        with:
+          job_name: '*Nix Test*'
+          commit: true
+          type: ${{ job.status }}
+          url: ${{ secrets.SLACK_WEBHOOK }}
+          token: ${{ secrets.GITHUB_TOKEN }}
