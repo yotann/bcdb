@@ -70,24 +70,23 @@ namespace internal {
 
 namespace {
 
-TEST(JoinAsTupleTest, JoinsEmptyTuple) {
-  EXPECT_EQ("", JoinAsTuple(Strings()));
+TEST(JoinAsKeyValueTupleTest, JoinsEmptyTuple) {
+  EXPECT_EQ("", JoinAsKeyValueTuple({}, Strings()));
 }
 
-TEST(JoinAsTupleTest, JoinsOneTuple) {
-  const char* fields[] = {"1"};
-  EXPECT_EQ("1", JoinAsTuple(Strings(fields, fields + 1)));
+TEST(JoinAsKeyValueTupleTest, JoinsOneTuple) {
+  EXPECT_EQ("(a: 1)", JoinAsKeyValueTuple({"a"}, {"1"}));
 }
 
-TEST(JoinAsTupleTest, JoinsTwoTuple) {
-  const char* fields[] = {"1", "a"};
-  EXPECT_EQ("(1, a)", JoinAsTuple(Strings(fields, fields + 2)));
+TEST(JoinAsKeyValueTupleTest, JoinsTwoTuple) {
+  EXPECT_EQ("(a: 1, b: 2)", JoinAsKeyValueTuple({"a", "b"}, {"1", "2"}));
 }
 
-TEST(JoinAsTupleTest, JoinsTenTuple) {
-  const char* fields[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
-  EXPECT_EQ("(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)",
-            JoinAsTuple(Strings(fields, fields + 10)));
+TEST(JoinAsKeyValueTupleTest, JoinsTenTuple) {
+  EXPECT_EQ(
+      "(a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9, j: 10)",
+      JoinAsKeyValueTuple({"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+                          {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}));
 }
 
 TEST(ConvertIdentifierNameToWordsTest, WorksWhenNameContainsNoWord) {
@@ -138,6 +137,12 @@ TEST(GetRawPointerTest, WorksForRawPointers) {
   EXPECT_TRUE(nullptr == GetRawPointer(p));
   int n = 1;
   EXPECT_EQ(&n, GetRawPointer(&n));
+}
+
+TEST(GetRawPointerTest, WorksForStdReferenceWrapper) {
+  int n = 1;
+  EXPECT_EQ(&n, GetRawPointer(std::ref(n)));
+  EXPECT_EQ(&n, GetRawPointer(std::cref(n)));
 }
 
 // Tests KindOf<T>.
@@ -394,7 +399,7 @@ TEST_F(LogIsVisibleTest, WorksWhenVerbosityIsWarning) {
 // and log severity.
 void TestLogWithSeverity(const std::string& verbosity, LogSeverity severity,
                          bool should_print) {
-  const std::string old_flag = GMOCK_FLAG(verbose);
+  const std::string old_flag = GMOCK_FLAG_GET(verbose);
   GMOCK_FLAG_SET(verbose, verbosity);
   CaptureStdout();
   Log(severity, "Test log.\n", 0);
@@ -413,7 +418,7 @@ void TestLogWithSeverity(const std::string& verbosity, LogSeverity severity,
 // Tests that when the stack_frames_to_skip parameter is negative,
 // Log() doesn't include the stack trace in the output.
 TEST(LogTest, NoStackTraceWhenStackFramesToSkipIsNegative) {
-  const std::string saved_flag = GMOCK_FLAG(verbose);
+  const std::string saved_flag = GMOCK_FLAG_GET(verbose);
   GMOCK_FLAG_SET(verbose, kInfoVerbosity);
   CaptureStdout();
   Log(kInfo, "Test log.\n", -1);
@@ -499,7 +504,7 @@ TEST(LogTest, OnlyWarningsArePrintedWhenVerbosityIsInvalid) {
 // Verifies that Log() behaves correctly for the given verbosity level
 // and log severity.
 std::string GrabOutput(void(*logger)(), const char* verbosity) {
-  const std::string saved_flag = GMOCK_FLAG(verbose);
+  const std::string saved_flag = GMOCK_FLAG_GET(verbose);
   GMOCK_FLAG_SET(verbose, verbosity);
   CaptureStdout();
   logger();
