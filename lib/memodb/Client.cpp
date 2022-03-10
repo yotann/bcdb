@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -15,6 +16,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/fiber/all.hpp>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
@@ -33,6 +35,8 @@ using namespace memodb;
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace net = boost::asio;
+namespace fibers = boost::fibers;
+namespace this_fiber = boost::this_fiber;
 using tcp = net::ip::tcp;
 using llvm::ArrayRef;
 using llvm::cantFail;
@@ -283,9 +287,13 @@ Response HTTPStore::request(const Twine &method, const Twine &path,
                             const std::optional<Node> &body) {
   auto &stream = getConn();
   auto req = buildRequest(method, path, body);
-  http::write(stream, req);
   beast::flat_buffer buffer;
   http::response<http::vector_body<std::uint8_t>> res;
+  // XXX: There must not be any fiber switches (fibers::mutex::lock(),
+  // this_fiber::sleep_for(), etc.) between the calls to http::write() and
+  // http::read(). We use 1 HTTP connection per thread, and this ensures that
+  // each thread makes only 1 HTTP request at a time.
+  http::write(stream, req);
   http::read(stream, buffer, res);
   return getResponse(res);
 }
@@ -302,6 +310,41 @@ std::unique_ptr<Store> memodb_http_open(llvm::StringRef path,
 }
 
 namespace {
+class CountingSemaphore {
+public:
+  explicit CountingSemaphore(unsigned desired) : count(desired) {}
+
+  void acquire() {
+    std::unique_lock lock(mutex);
+    cv.wait(lock, [this]() { return cancelled || count != 0; });
+    if (!cancelled)
+      count--;
+  }
+
+  void release(unsigned update = 1) {
+    {
+      auto lock = std::unique_lock(mutex);
+      count += update;
+    }
+    cv.notify_one();
+  }
+
+  void cancel() {
+    cancelled = true;
+    cv.notify_all();
+  }
+
+  bool isCancelled() const { return cancelled; }
+
+private:
+  std::atomic<bool> cancelled = false;
+  int count = 0;
+  fibers::mutex mutex;
+  fibers::condition_variable cv;
+};
+} // end anonymous namespace
+
+namespace {
 class ClientEvaluator : public Evaluator {
 public:
   ClientEvaluator(std::unique_ptr<HTTPStore> store, unsigned num_threads);
@@ -315,42 +358,43 @@ public:
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
 
 private:
+  void updateWorkerInfo();
   std::optional<Link> tryEvaluate(const Call &call,
                                   bool inc_started_if_success);
-  Link evaluateDeferred(const Call &call, bool work_while_waiting);
-  bool workOnce();
+  Link evaluateDeferred(const Call &call);
 
   std::unique_ptr<HTTPStore> store;
   llvm::StringMap<std::function<NodeOrCID(Evaluator &, const Call &)>> funcs;
-  std::mutex funcs_mutex;
-  std::optional<CID> worker_info_cid = std::nullopt;
-  std::mutex worker_info_cid_mutex;
+  bool funcs_changed = false;
+  fibers::mutex funcs_mutex;
+  std::optional<CID> worker_info_cid;
 
-  std::vector<std::thread> threads;
-  std::atomic<bool> work_done = false;
+  std::vector<std::thread> worker_threads;
+  CountingSemaphore work_semaphore;
 
   // These counters only increase, never decrease.
   std::atomic<unsigned> num_requested = 0, num_started = 0, num_finished = 0;
-  std::mutex stderr_mutex;
+  fibers::mutex stderr_mutex;
 
-  void workerThreadImpl();
+  void workerThreadImpl(unsigned num_threads);
   void printProgress();
 };
 } // end anonymous namespace
 
 ClientEvaluator::ClientEvaluator(std::unique_ptr<HTTPStore> store,
                                  unsigned num_threads)
-    : store(std::move(store)) {
-  threads.reserve(num_threads);
+    : store(std::move(store)), work_semaphore(num_threads) {
+  worker_threads.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i) {
-    threads.emplace_back(&ClientEvaluator::workerThreadImpl, this);
+    worker_threads.emplace_back(&ClientEvaluator::workerThreadImpl, this,
+                                num_threads);
   }
 }
 
 ClientEvaluator::~ClientEvaluator() {
-  work_done = true;
-  // FIXME: cancel in-progress requests from worker threads.
-  for (auto &thread : threads)
+  work_semaphore.cancel();
+  // FIXME: cancel in-progress requests from threads.
+  for (auto &thread : worker_threads)
     thread.join();
 }
 
@@ -391,27 +435,18 @@ Link ClientEvaluator::evaluate(const Call &call, bool work_while_waiting) {
     printProgress();
     llvm::errs() << " starting " << call << "\n";
   }
-  return evaluateDeferred(call, work_while_waiting);
+  return evaluateDeferred(call);
 }
 
-Link ClientEvaluator::evaluateDeferred(const Call &call,
-                                       bool work_while_waiting) {
+Link ClientEvaluator::evaluateDeferred(const Call &call) {
   using namespace std::chrono_literals;
   ++num_started;
-  while (true) {
-    auto result = tryEvaluate(call, false);
-    if (result)
-      return *result;
-
-    // Try to do some useful work while waiting for the call. This is
-    // especially important if we're the only client connected to the server,
-    // and all our threads are in evaluateDeferred().
-    //
-    // XXX: This can cause stack depth to grow arbitrarily large. If that turns
-    // out to be a problem, we may need to change the design.
-    if (!(work_while_waiting && workOnce()))
-      std::this_thread::sleep_for(1000ms); // TODO: exponential backoff
-  }
+  work_semaphore.release();
+  std::optional<Link> result;
+  while (!(result = tryEvaluate(call, false)))
+    this_fiber::sleep_for(1000ms); // TODO: exponential backoff
+  work_semaphore.acquire();
+  return *result;
 }
 
 Future ClientEvaluator::evaluateAsync(const Call &call,
@@ -427,9 +462,8 @@ Future ClientEvaluator::evaluateAsync(const Call &call,
     promise.set_value(*early_result);
     return makeFuture(promise.get_future().share());
   }
-  auto future =
-      std::async(std::launch::deferred, &ClientEvaluator::evaluateDeferred,
-                 this, call, work_while_waiting);
+  auto future = std::async(std::launch::deferred,
+                           &ClientEvaluator::evaluateDeferred, this, call);
   return makeFuture(future.share());
 }
 
@@ -439,14 +473,7 @@ void ClientEvaluator::registerFunc(
   std::unique_lock lock(funcs_mutex);
   assert(!funcs.count(name) && "duplicate func");
   funcs[name] = std::move(func);
-
-  Node worker_info(node_map_arg, {{"funcs", Node(node_list_arg)}});
-  for (const auto &item : funcs)
-    worker_info["funcs"].emplace_back(Node(utf8_string_arg, item.getKey()));
-
-  auto cid = store->put(worker_info);
-  lock = std::unique_lock(worker_info_cid_mutex);
-  worker_info_cid = cid;
+  funcs_changed = true;
 }
 
 void ClientEvaluator::printProgress() {
@@ -458,52 +485,69 @@ void ClientEvaluator::printProgress() {
                << " -> " << finished;
 }
 
-bool ClientEvaluator::workOnce() {
-  std::unique_lock lock(worker_info_cid_mutex);
-  auto cid = worker_info_cid;
-  lock.unlock();
-  if (!cid) {
-    // No funcs registered yet, so we can't do anything.
-    return false;
+void ClientEvaluator::updateWorkerInfo() {
+  std::unique_lock lock(funcs_mutex);
+  if (funcs_changed) {
+    Node worker_info(node_map_arg, {{"funcs", Node(node_list_arg)}});
+    for (const auto &item : funcs)
+      worker_info["funcs"].emplace_back(Node(utf8_string_arg, item.getKey()));
+    worker_info_cid = store->put(worker_info);
   }
-  auto response = store->request("POST", "/worker", Node(*store, *cid));
-  if (response.status < 200 || response.status > 299)
-    response.raiseError();
-  if (response.body.is_null()) {
-    // No jobs available.
-    return false;
-  }
-
-  Call call("", {});
-  call.Name = response.body["func"].as<std::string>();
-  for (const auto &arg : response.body["args"].list_range())
-    call.Args.emplace_back(arg.as<CID>());
-  lock = std::unique_lock(funcs_mutex);
-  auto &func = funcs[call.Name];
-  lock.unlock();
-
-  std::optional<PrettyStackTraceCall> stack_printer;
-  stack_printer.emplace(call);
-  Link result(*store, func(*this, call));
-  stack_printer.reset();
-
-  SmallVector<char, 256> buffer;
-  llvm::raw_svector_ostream os(buffer);
-  os << call;
-  response = store->request("PUT", os.str(), Node(*store, result.getCID()));
-  if (response.status != 201)
-    response.raiseError();
-  return true;
 }
 
-void ClientEvaluator::workerThreadImpl() {
+void ClientEvaluator::workerThreadImpl(unsigned num_threads) {
   using namespace std::chrono_literals;
-  llvm::PrettyStackTraceString stack_printer("Worker thread (client process)");
-  std::this_thread::sleep_for(
-      1000ms); // Give the program time to call registerFunc().
-  while (!work_done) {
-    if (!workOnce())
-      std::this_thread::sleep_for(1000ms); // TODO: exponential backoff
+
+  // work_stealing hangs if there's only 1 thread:
+  // https://github.com/boostorg/fiber/issues/217#issuecomment-1064516311
+  if (num_threads > 1)
+    fibers::use_scheduling_algorithm<fibers::algo::work_stealing>(num_threads);
+
+  while (true) {
+    work_semaphore.acquire();
+    if (work_semaphore.isCancelled())
+      return;
+
+    Response response;
+    while (true) {
+      updateWorkerInfo();
+      if (work_semaphore.isCancelled())
+        return;
+      if (worker_info_cid) {
+        response =
+            store->request("POST", "/worker", Node(*store, *worker_info_cid));
+        if (response.status < 200 || response.status > 299)
+          response.raiseError();
+      }
+      if (!response.body.is_null())
+        break;
+      // No jobs available, or worker_info_cid is nullopt (no funcs
+      // registered yet).
+      this_fiber::sleep_for(1000ms); // TODO: exponential backoff
+    }
+
+    Call call("", {});
+    call.Name = response.body["func"].as<std::string>();
+    for (const auto &arg : response.body["args"].list_range())
+      call.Args.emplace_back(arg.as<CID>());
+
+    fibers::fiber([this, call]() {
+      PrettyStackTraceCall stack_printer(call);
+      std::function<NodeOrCID(Evaluator &, const Call &)> *func;
+      {
+        std::unique_lock lock(funcs_mutex);
+        func = &funcs[call.Name];
+      }
+      Link result(*store, (*func)(*this, call));
+      SmallVector<char, 256> buffer;
+      llvm::raw_svector_ostream os(buffer);
+      os << call;
+      auto response =
+          store->request("PUT", os.str(), Node(*store, result.getCID()));
+      if (response.status != 201)
+        response.raiseError();
+      work_semaphore.release();
+    }).detach();
   }
 }
 

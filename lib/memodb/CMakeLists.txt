@@ -26,6 +26,7 @@ add_llvm_library(libmemodb
 )
 target_link_libraries(libmemodb PRIVATE
   Boost::Beast
+  Boost::fiber
   Sodium::LibSodium
   SQLite::SQLite3
 )

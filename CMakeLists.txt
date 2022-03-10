@@ -58,7 +58,7 @@ endif()
 
 find_package(LibSodium REQUIRED)
 find_package(SQLite3 REQUIRED)
-find_package(Boost 1.75 REQUIRED)
+find_package(Boost 1.75 REQUIRED COMPONENTS fiber)
 
 add_library(Boost::Beast INTERFACE IMPORTED)
 target_include_directories(Boost::Beast SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
