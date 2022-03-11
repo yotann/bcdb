@@ -192,16 +192,6 @@ void ThreadPoolEvaluator::printProgress() {
                << finished;
 }
 
-static NodeOrCID test_add(Evaluator &evaluator, Link lhs_node, Link rhs_node) {
-  int64_t lhs = lhs_node->as<int64_t>();
-  int64_t rhs = rhs_node->as<int64_t>();
-  return Node(lhs + rhs);
-}
-
-static void registerDefaultFuncs(Evaluator &evaluator) {
-  evaluator.registerFunc("test.add", test_add);
-}
-
 Evaluator::Evaluator() {}
 
 Evaluator::~Evaluator() {}
@@ -221,7 +211,8 @@ std::unique_ptr<Evaluator> Evaluator::createLocal(std::unique_ptr<Store> store,
 std::unique_ptr<Evaluator> Evaluator::create(llvm::StringRef uri,
                                              unsigned num_threads) {
   std::unique_ptr<Evaluator> result;
-  if (uri.startswith("http:") || uri.startswith("https:")) {
+  if (uri.startswith("http:") || uri.startswith("https:") ||
+      uri.startswith("tcp:") || uri.startswith("unix:")) {
     result = createClientEvaluator(uri, num_threads);
   } else {
     auto store = Store::open(uri);

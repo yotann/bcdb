@@ -143,6 +143,9 @@ private:
   }
 };
 
+// This is called by Evaluator::create().
+void registerDefaultFuncs(Evaluator &evaluator);
+
 class PrettyStackTraceCall : public llvm::PrettyStackTraceEntry {
   const Call &call;
   llvm::SmallVector<char, 16> old_thread_name;

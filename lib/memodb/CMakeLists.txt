@@ -11,6 +11,7 @@ add_llvm_library(libmemodb
   CID.cpp
   Client.cpp
   Evaluator.cpp
+  Funcs.cpp
   HTTP.cpp
   JSONEncoder.cpp
   Multibase.cpp

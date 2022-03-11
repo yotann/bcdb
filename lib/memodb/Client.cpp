@@ -567,7 +567,8 @@ void ClientEvaluator::workerThreadImpl(unsigned num_threads) {
       call.Args.emplace_back(arg.as<CID>());
 
     fibers::fiber([this, call]() {
-      PrettyStackTraceCall stack_printer(call);
+      // FIXME: doesn't work with fibers
+      // PrettyStackTraceCall stack_printer(call);
       std::function<NodeOrCID(Evaluator &, const Call &)> *func;
       {
         std::unique_lock lock(funcs_mutex);
