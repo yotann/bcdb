@@ -78,11 +78,11 @@ std::optional<URI> URI::parse(StringRef str, bool allow_dot_segments) {
   uri.fragment = percentDecode(fragment_ref);
 
   uri.rootless = true;
+  if (path_ref.startswith("/")) {
+    uri.rootless = false;
+    path_ref = path_ref.drop_front();
+  }
   if (!path_ref.empty()) {
-    if (path_ref.startswith("/")) {
-      uri.rootless = false;
-      path_ref = path_ref.drop_front();
-    }
     llvm::SmallVector<StringRef, 8> segments;
     path_ref.split(segments, '/');
     for (const auto &segment : segments) {

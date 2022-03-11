@@ -43,7 +43,8 @@ std::unique_ptr<Store> Store::open(llvm::StringRef uri,
     return memodb_car_open(uri, create_if_missing);
   } else if (uri.startswith("rocksdb:")) {
     return memodb_rocksdb_open(uri, create_if_missing);
-  } else if (uri.startswith("http:") || uri.startswith("https:")) {
+  } else if (uri.startswith("http:") || uri.startswith("https:") ||
+             uri.startswith("tcp:") || uri.startswith("unix:")) {
     return memodb_http_open(uri, create_if_missing);
   } else {
     llvm::report_fatal_error(llvm::Twine("unsupported store URI ") + uri);

@@ -108,6 +108,30 @@ TEST(URITest, ParseRootlessPath) {
   EXPECT_EQ(uri->query_params, Params({}));
 }
 
+TEST(URITest, ParseRootOnly) {
+  auto uri = URI::parse("http://127.0.0.1/");
+  EXPECT_TRUE(uri != std::nullopt);
+  EXPECT_EQ(uri->scheme, "http");
+  EXPECT_EQ(uri->host, "127.0.0.1");
+  EXPECT_EQ(uri->port, 0);
+  EXPECT_EQ(uri->fragment, "");
+  EXPECT_EQ(uri->rootless, false);
+  EXPECT_EQ(uri->path_segments, Segments({}));
+  EXPECT_EQ(uri->query_params, Params({}));
+}
+
+TEST(URITest, ParseDoubleSlash) {
+  auto uri = URI::parse("http://127.0.0.1//");
+  EXPECT_TRUE(uri != std::nullopt);
+  EXPECT_EQ(uri->scheme, "http");
+  EXPECT_EQ(uri->host, "127.0.0.1");
+  EXPECT_EQ(uri->port, 0);
+  EXPECT_EQ(uri->fragment, "");
+  EXPECT_EQ(uri->rootless, false);
+  EXPECT_EQ(uri->path_segments, Segments({"", ""}));
+  EXPECT_EQ(uri->query_params, Params({}));
+}
+
 TEST(URITest, ParsePercentNonHex) {
   auto uri = URI::parse("scheme://authority/%0gpath");
   EXPECT_EQ(uri, std::nullopt);
@@ -139,7 +163,39 @@ TEST(URITest, EncodeBasic) {
   uri.path_segments.push_back("path");
   uri.query_params.push_back("query");
   uri.fragment = "fragment";
+  uri.rootless = false;
   EXPECT_EQ("scheme://authority:80/path?query#fragment", uri.encode());
+}
+
+TEST(URITest, EncodeRootOnly) {
+  URI uri;
+  uri.scheme = "scheme";
+  uri.host = "authority";
+  uri.port = 80;
+  uri.query_params.push_back("query");
+  uri.fragment = "fragment";
+  uri.rootless = false;
+  EXPECT_EQ("scheme://authority:80/?query#fragment", uri.encode());
+}
+
+TEST(URITest, EncodeDoubleSlash) {
+  URI uri;
+  uri.scheme = "scheme";
+  uri.host = "authority";
+  uri.port = 80;
+  uri.path_segments.push_back("");
+  uri.path_segments.push_back("");
+  uri.query_params.push_back("query");
+  uri.fragment = "fragment";
+  uri.rootless = false;
+  EXPECT_EQ("scheme://authority:80//?query#fragment", uri.encode());
+}
+
+TEST(URITest, EncodeRootless) {
+  URI uri;
+  uri.path_segments.push_back("xyz");
+  uri.rootless = true;
+  EXPECT_EQ("xyz", uri.encode());
 }
 
 TEST(URITest, EncodeEscaped) {

@@ -13,6 +13,7 @@
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/local/stream_protocol.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
@@ -38,6 +39,7 @@ namespace net = boost::asio;
 namespace fibers = boost::fibers;
 namespace this_fiber = boost::this_fiber;
 using tcp = net::ip::tcp;
+namespace local = net::local;
 using llvm::ArrayRef;
 using llvm::cantFail;
 using llvm::DenseMap;
@@ -47,6 +49,9 @@ using llvm::SmallVector;
 using llvm::StringRef;
 using llvm::Twine;
 
+using BeastRequest = http::request<http::vector_body<std::uint8_t>>;
+using BeastResponse = http::response<http::vector_body<std::uint8_t>>;
+
 namespace {
 struct Response {
   unsigned status;
@@ -55,6 +60,34 @@ struct Response {
   std::string error;
 
   void raiseError();
+};
+} // end anonymous namespace
+
+namespace {
+class Connection {
+public:
+  virtual void write(const BeastRequest &req) = 0;
+
+  virtual void read(beast::flat_buffer &buffer, BeastResponse &res) = 0;
+};
+} // end anonymous namespace
+
+namespace {
+template <typename Protocol> class ProtocolConnection : public Connection {
+public:
+  template <typename Arg>
+  ProtocolConnection(net::io_context &ioc, Arg &&remote_endpoint)
+      : stream(ioc) {
+    stream.connect(remote_endpoint);
+  }
+
+  void write(const BeastRequest &req) override { http::write(stream, req); }
+
+  void read(beast::flat_buffer &buffer, BeastResponse &res) override {
+    http::read(stream, buffer, res);
+  }
+
+  beast::basic_stream<Protocol> stream;
 };
 } // end anonymous namespace
 
@@ -79,10 +112,9 @@ private:
   friend struct AsyncRequest;
   friend class ClientEvaluator;
 
-  http::request<http::vector_body<std::uint8_t>>
-  buildRequest(const Twine &method, const Twine &path,
-               const std::optional<Node> &body = std::nullopt);
-  Response getResponse(http::response<http::vector_body<std::uint8_t>> &res);
+  BeastRequest buildRequest(const Twine &method, const Twine &path,
+                            const std::optional<Node> &body = std::nullopt);
+  Response getResponse(BeastResponse &res);
   Response request(const Twine &method, const Twine &path,
                    const std::optional<Node> &body = std::nullopt);
 
@@ -92,34 +124,42 @@ private:
   net::io_context ioc;
 
   // Get the current thread's HTTP connection, creating a new one if necessary.
-  beast::tcp_stream &getConn();
+  Connection &getConn();
 
   // Used by each thread to look up its own HTTP connection.
   // TODO: entries in this map are never removed, even when the HTTPStore is
   // destroyed, which could cause memory leaks.
-  static thread_local DenseMap<HTTPStore *, beast::tcp_stream *>
-      thread_connections;
+  static thread_local DenseMap<HTTPStore *, Connection *> thread_connections;
 
   // Closes all connections in the destructor.
-  std::vector<std::unique_ptr<beast::tcp_stream>> open_connections = {};
+  std::vector<std::unique_ptr<Connection>> open_connections = {};
 
-  // Protects access to open_connections and client.
+  // Protects access to open_connections.
   std::mutex mutex;
 };
 } // end anonymous namespace
 
-thread_local DenseMap<HTTPStore *, beast::tcp_stream *>
-    HTTPStore::thread_connections =
-        DenseMap<HTTPStore *, beast::tcp_stream *>();
+thread_local DenseMap<HTTPStore *, Connection *> HTTPStore::thread_connections =
+    DenseMap<HTTPStore *, Connection *>();
 
-beast::tcp_stream &HTTPStore::getConn() {
-  beast::tcp_stream *&result = thread_connections[this];
+Connection &HTTPStore::getConn() {
+  Connection *&result = thread_connections[this];
   if (!result) {
-    tcp::resolver resolver(ioc);
-    auto const port_name = llvm::Twine(base_uri.port).str();
-    auto const resolved = resolver.resolve(base_uri.host, port_name);
-    auto stream = std::make_unique<beast::tcp_stream>(ioc);
-    stream->connect(resolved);
+    std::unique_ptr<Connection> stream;
+    if (base_uri.scheme == "http" || base_uri.scheme == "tcp") {
+      if (!base_uri.path_segments.empty())
+        report_fatal_error("HTTP URL must have an empty path");
+      tcp::resolver resolver(ioc);
+      auto const port_name = llvm::Twine(base_uri.port).str();
+      auto const resolved = resolver.resolve(base_uri.host, port_name);
+      stream = std::make_unique<ProtocolConnection<tcp>>(ioc, resolved);
+    } else if (base_uri.scheme == "unix") {
+      local::stream_protocol::endpoint endpoint(base_uri.getPathString());
+      stream = std::make_unique<ProtocolConnection<local::stream_protocol>>(
+          ioc, endpoint);
+    } else {
+      report_fatal_error("unsupported protocol in URL");
+    }
     const std::lock_guard<std::mutex> lock(mutex);
     open_connections.emplace_back(std::move(stream));
     result = open_connections.back().get();
@@ -132,8 +172,6 @@ void HTTPStore::open(StringRef uri, bool create_if_missing) {
   if (!uri_or_none)
     report_fatal_error("invalid HTTP URL");
   base_uri = std::move(*uri_or_none);
-  if (!base_uri.path_segments.empty())
-    report_fatal_error("HTTP URL must have an empty path");
   getConn();
 }
 
@@ -243,17 +281,15 @@ void HTTPStore::call_invalidate(llvm::StringRef name) {
     response.raiseError();
 }
 
-http::request<http::vector_body<std::uint8_t>>
-HTTPStore::buildRequest(const Twine &method, const Twine &path,
-                        const std::optional<Node> &body) {
+BeastRequest HTTPStore::buildRequest(const Twine &method, const Twine &path,
+                                     const std::optional<Node> &body) {
   SmallVector<char, 128> buffer;
   auto method_verb = http::string_to_verb(method.toStringRef(buffer));
   if (method_verb == http::verb::unknown)
     report_fatal_error("invalid HTTP method");
 
   auto target = path.toStringRef(buffer);
-  http::request<http::vector_body<std::uint8_t>> request(method_verb, target,
-                                                         11);
+  BeastRequest request(method_verb, target, 11);
   request.set(http::field::accept, "application/cbor");
   request.set(http::field::host, base_uri.host);
 
@@ -266,8 +302,7 @@ HTTPStore::buildRequest(const Twine &method, const Twine &path,
   return request;
 }
 
-Response
-HTTPStore::getResponse(http::response<http::vector_body<std::uint8_t>> &res) {
+Response HTTPStore::getResponse(BeastResponse &res) {
   Response response;
   response.status = res.result_int();
   response.location = res[http::field::location];
@@ -288,13 +323,13 @@ Response HTTPStore::request(const Twine &method, const Twine &path,
   auto &stream = getConn();
   auto req = buildRequest(method, path, body);
   beast::flat_buffer buffer;
-  http::response<http::vector_body<std::uint8_t>> res;
+  BeastResponse res;
   // XXX: There must not be any fiber switches (fibers::mutex::lock(),
   // this_fiber::sleep_for(), etc.) between the calls to http::write() and
   // http::read(). We use 1 HTTP connection per thread, and this ensures that
   // each thread makes only 1 HTTP request at a time.
-  http::write(stream, req);
-  http::read(stream, buffer, res);
+  stream.write(req);
+  stream.read(buffer, res);
   return getResponse(res);
 }
 
