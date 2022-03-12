@@ -124,9 +124,13 @@ Context::operator LLVMContext &() { return context; }
 
 void Context::checkWarnings(const LLVMContext &context) {
   auto checkVec = [](const auto &vec, const auto &known, const char *type) {
-    for (size_t i = 0; i < vec.size(); ++i) {
-      if (i >= known.size() || known[i] != vec[i]) {
-        errs() << "WARNING: unknown " << type << " \"" << vec[i]
+    for (const auto &actual : vec) {
+      bool found = false;
+      for (const auto &expected : known)
+        if (actual == expected)
+          found = true;
+      if (!found) {
+        errs() << "WARNING: unknown " << type << " \"" << actual
                << "\", may prevent deduplication\n";
         return;
       }
