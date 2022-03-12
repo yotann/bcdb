@@ -1,0 +1,4 @@
+RUN: %shelltest --with-store=client -t %t %s
+$ memodb evaluate /call/test.nqueens/uAXEAAQc,uAXEAAYA
+...
+uAXEAAhgo

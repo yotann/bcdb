@@ -1,0 +1,25 @@
+RUN: %shelltest --with-store=client -t %t %s
+$ llvm-as <<EOF | bcdb add -name a -
+define i32 @func(i32 %x, i32 %y) {
+  %z = add i32 %x, %y
+  ret i32 %z
+}
+EOF
+...
+$ not memodb get /call/myfunc/$(bcdb list-function-ids)
+error: Not Found
+Call not found in store.
+$ memodb set /call/myfunc/$(bcdb list-function-ids) /cid/$(bcdb list-function-ids)
+$ memodb get /call/myfunc/$(bcdb list-function-ids)
+...
+$ #$ memodb refs-to /cid/$(bcdb list-function-ids)
+$ #...
+$ #/call/myfunc/...
+$ #...
+$ memodb get /call/myfunc
+/call/myfunc/...
+$ memodb delete /call/myfunc
+deleted
+$ not memodb get /call/myfunc/$(bcdb list-function-ids)
+error: Not Found
+Call not found in store.

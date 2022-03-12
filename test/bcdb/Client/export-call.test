@@ -1,0 +1,17 @@
+RUN: %shelltest --with-store=client -t %t %s
+$ memodb set /call/primes/uAXEAAQU /cid/uAXEABoUCAwUHCw
+$ memodb set /call/primes/uAXEAAQY /cid/uAXEAB4YCAwUHCw0
+$ memodb set /call/add/uAXEAAQI,uAXEAAQI /cid/uAXEAAQQ
+$ memodb export > memodb.car
+exporting /call/add/uAXEAAQI,uAXEAAQI
+exporting /call/primes/uAXEAAQU
+exporting /call/primes/uAXEAAQY
+Exported with Root CID: ...
+$ memodb get --store=car:memodb.car /call
+/call/add
+/call/primes
+$ memodb get --store=car:memodb.car /call/primes
+/call/primes/uAXEAAQU
+/call/primes/uAXEAAQY
+$ memodb get --store=car:memodb.car /call/primes/uAXEAAQU
+/cid/uAXEABoUCAwUHCw

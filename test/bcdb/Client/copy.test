@@ -1,0 +1,5 @@
+RUN: %shelltest --with-store=client -t %t %s
+$ memodb set /head/x /cid/uAXEABGN4eXo
+$ memodb set /head/y /head/x
+$ memodb get /head/y
+/cid/uAXEABGN4eXo

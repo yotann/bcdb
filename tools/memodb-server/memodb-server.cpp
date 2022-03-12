@@ -233,20 +233,19 @@ static void serve(const typename Protocol::endpoint &local_endpoint) {
   net::io_context ioc{1};
   typename Protocol::acceptor acceptor{ioc, local_endpoint};
   asyncAccept<Protocol>(acceptor);
-  // We print this message *after* opening the store (which can take a long
-  // time, if database logs need to be replayed).
   llvm::errs() << "Server started!\n";
   ioc.run();
 }
 
 int main(int argc, char **argv) {
   InitTool X(argc, argv);
-
   cl::HideUnrelatedOptions(server_category);
   cl::ParseCommandLineOptions(argc, argv, "MemoDB Server");
 
-  llvm::ExitOnError Err("memodb-server: ");
+  // We open the store *before* printing anything or opening a socket. Opening
+  // the store can take a long time if database logs need to be replayed.
   auto store = Store::open(GetStoreUri());
+
   Server server(*store);
   g_server = &server;
 

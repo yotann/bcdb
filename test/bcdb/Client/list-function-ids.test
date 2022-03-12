@@ -1,0 +1,24 @@
+RUN: %shelltest --with-store=client -t %t %s
+$ llvm-as <<EOF | bcdb add -name a -
+define void @func() {
+  ret void
+}
+EOF
+/cid/...
+$ llvm-as <<EOF | bcdb add -name a -
+define void @func() {
+  ret void
+}
+EOF
+/cid/...
+$ llvm-as <<EOF | bcdb add -name b -
+define void @func() {
+  ret void
+}
+EOF
+/cid/...
+$ bcdb list-modules | sort
+a
+b
+$ bcdb list-function-ids | wc -l
+1

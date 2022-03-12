@@ -1,0 +1,16 @@
+RUN: %shelltest --with-store=client -t %t %s
+$ not memodb get /call/primes/uAXEAAQU
+error: Not Found
+Call not found in store.
+$ memodb set /call/primes/uAXEAAQU /cid/uAXEABoUCAwUHCw
+$ memodb get /call/primes/uAXEAAQU
+/cid/uAXEABoUCAwUHCw
+$ memodb get /call/primes
+/call/primes/uAXEAAQU
+$ memodb get /call
+/call/primes
+$ memodb delete /call/primes
+deleted
+$ not memodb get /call/primes/uAXEAAQU
+error: Not Found
+Call not found in store.

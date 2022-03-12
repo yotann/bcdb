@@ -17,6 +17,7 @@ config.substitutions.append(("%shlibdir", "@LLVM_SHLIB_OUTPUT_INTDIR@"))
 config.substitutions.append(("%shlibext", "@SHLIBEXT@"))
 config.substitutions.append(("%gltest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/test/gl-test.py"))
 config.substitutions.append(("%outliningtest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/test/outlining-test.py"))
+config.substitutions.append(("%shelltest", "@PYTHON_EXECUTABLE@ @CMAKE_SOURCE_DIR@/test/shelltest.py"))
 config.substitutions.append(("%outopt", "opt -enable-new-pm=0 -load @LLVM_SHLIB_OUTPUT_INTDIR@/BCDBOutliningPlugin@SHLIBEXT@"))
 
 # Add our newly-built tools to the path
