@@ -109,6 +109,7 @@ namespace {
 class ConnectionBase : public std::enable_shared_from_this<ConnectionBase> {
 public:
   ConnectionBase() {}
+  virtual ~ConnectionBase() {}
 
   void start() { readRequest(); }
 
@@ -188,6 +189,7 @@ namespace {
 template <typename Protocol> class Connection : public ConnectionBase {
 public:
   Connection(typename Protocol::socket socket) : socket(std::move(socket)) {}
+  ~Connection() override {}
 
 protected:
   void readRequest() override {

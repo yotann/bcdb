@@ -66,8 +66,8 @@ struct Response {
 namespace {
 class Connection {
 public:
+  virtual ~Connection() {}
   virtual void write(const BeastRequest &req) = 0;
-
   virtual void read(beast::flat_buffer &buffer, BeastResponse &res) = 0;
 };
 } // end anonymous namespace
@@ -80,6 +80,8 @@ public:
       : stream(ioc) {
     stream.connect(remote_endpoint);
   }
+
+  ~ProtocolConnection() override {}
 
   void write(const BeastRequest &req) override { http::write(stream, req); }
 
