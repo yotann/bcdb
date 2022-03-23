@@ -1,3 +1,7 @@
+// This file is based on the example code here:
+// https://www.boost.org/doc/libs/1_78_0/libs/beast/example/advanced/server/advanced_server.cpp
+
+#include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <exception>
@@ -5,18 +9,19 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <vector>
 
 #include <boost/asio.hpp>
 #include <boost/assert/source_location.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
-#include <boost/throw_exception.hpp>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/Threading.h>
 
 #include "memodb/HTTP.h"
 #include "memodb/Request.h"
@@ -27,6 +32,7 @@
 
 using namespace memodb;
 namespace cl = llvm::cl;
+using llvm::Optional;
 using llvm::SmallVector;
 using llvm::StringRef;
 using llvm::Twine;
@@ -48,6 +54,11 @@ static cl::opt<std::string> StoreUriOrEmpty(
     cl::init(std::string(llvm::StringRef(std::getenv("MEMODB_STORE")))),
     cl::cat(server_category));
 
+// Note: this doesn't affect the number of RocksDB threads.
+static cl::opt<std::string>
+    threads_option("j", cl::desc("Number of server threads, or \"all\""),
+                   cl::cat(server_category), cl::sub(*cl::AllSubCommands));
+
 static llvm::StringRef GetStoreUri() {
   if (StoreUriOrEmpty.empty()) {
     llvm::report_fatal_error(
@@ -60,22 +71,16 @@ static llvm::StringRef GetStoreUri() {
 
 static std::mutex g_stdout_mutex;
 
-static Server *g_server = nullptr;
-
 namespace {
-class ConnectionBase;
-class http_request : public HTTPRequest {
+template <class Send> class BeastHTTPRequest : public HTTPRequest {
 public:
-  http_request(std::shared_ptr<ConnectionBase> connection,
-               http::request<http::string_body> &request,
-               http::response<http::string_body> &response)
+  BeastHTTPRequest(Send &send, http::request<http::string_body> &&request)
       : HTTPRequest(request.method_string(), URI::parse(request.target())),
-        connection(std::move(connection)), request(request),
-        response(response) {
+        send(send), request(std::move(request)) {
     response.version(request.version());
   }
 
-  ~http_request() override {}
+  ~BeastHTTPRequest() override {}
 
   std::optional<llvm::StringRef>
   getHeader(const llvm::Twine &key) const override {
@@ -95,43 +100,168 @@ public:
     response.insert(key, value.toStringRef(value_buffer));
   }
 
-  void sendBody(const llvm::Twine &body) override;
-  void sendEmptyBody() override;
+  void sendBody(const llvm::Twine &body) override {
+    response.body() = body.str();
+    responded = true;
+    response.content_length(response.body().size());
+    send(std::move(response), request);
+  }
+
+  void sendEmptyBody() override { sendBody(""); }
 
 private:
-  std::shared_ptr<ConnectionBase> connection;
-  http::request<http::string_body> &request;
-  http::response<http::string_body> &response;
+  Send &send;
+  http::request<http::string_body> request;
+  http::response<http::string_body> response;
 };
 } // end anonymous namespace
 
+template <typename T>
+static void writeEndpoint(std::ostream &os, const T &endpoint) {
+  os << "-";
+}
+
+static void writeEndpoint(std::ostream &os, const tcp::endpoint &endpoint) {
+  os << endpoint.address();
+}
+
+template <class Send>
+static void handleRequest(Server &server,
+                          http::request<http::string_body> &&req, Send &send) {
+  // NOTE: Boost's example code uses "Send &&" instead of "Send &". This is
+  // incorrect because, if the Send (which is actually a HTTPSession::Queue) is
+  // moved into the BeastHTTPRequest, its contents will be deleted too soon.
+  BeastHTTPRequest request_class(send, std::move(req));
+  server.handleRequest(request_class);
+}
+
 namespace {
-class ConnectionBase : public std::enable_shared_from_this<ConnectionBase> {
+template <typename Protocol>
+class HTTPSession : public std::enable_shared_from_this<HTTPSession<Protocol>> {
+  class Queue {
+    enum {
+      // Maximum number of responses we will queue.
+      limit = 8
+    };
+
+    // The type-erased, saved work item.
+    struct Work {
+      virtual ~Work() = default;
+      virtual void operator()() = 0;
+    };
+
+    HTTPSession<Protocol> &self;
+    std::vector<std::unique_ptr<Work>> items;
+
+  public:
+    explicit Queue(HTTPSession<Protocol> &self) : self(self) {
+      static_assert(limit > 0, "Queue limit must be positive");
+      items.reserve(limit);
+    }
+
+    bool isFull() const { return items.size() >= limit; }
+
+    bool onWrite() {
+      assert(!items.empty());
+      auto const was_full = isFull();
+      items.erase(items.begin());
+      if (!items.empty())
+        (*items.front())();
+      return was_full;
+    }
+
+    void operator()(http::response<http::string_body> &&msg,
+                    const http::request<http::string_body> &req) {
+      struct WorkImpl : Work {
+        HTTPSession<Protocol> &self;
+        http::response<http::string_body> msg;
+
+        WorkImpl(HTTPSession<Protocol> &self,
+                 http::response<http::string_body> &&msg)
+            : self(self), msg(std::move(msg)) {}
+
+        void operator()() override {
+          auto self_local = self.shared_from_this();
+          bool close = msg.need_eof();
+          http::async_write(self.stream, msg,
+                            [self_local, close](beast::error_code ec,
+                                                std::size_t bytes_transferred) {
+                              self_local->onWrite(close, ec, bytes_transferred);
+                            });
+        }
+      };
+
+      self.writeLog(msg, req);
+      items.push_back(std::make_unique<WorkImpl>(self, std::move(msg)));
+
+      if (items.size() == 1)
+        (*items.front())();
+    }
+  };
+
+  beast::basic_stream<Protocol> stream;
+  beast::flat_buffer buffer;
+  Server &server;
+  Queue queue;
+
+  std::optional<http::request_parser<http::string_body>> parser;
+
 public:
-  ConnectionBase() {}
-  virtual ~ConnectionBase() {}
+  HTTPSession(typename Protocol::socket &&socket, Server &server)
+      : stream(std::move(socket)), server(server), queue(*this) {}
 
-  void start() { readRequest(); }
-
-protected:
-  friend class http_request;
-  template <typename Protocol> friend class Connection;
-  friend class local_connection;
-  beast::flat_buffer buffer{8192};
-  http::request<http::string_body> request;
-  http::response<http::string_body> response;
-  std::optional<http_request> wrapped_request;
-
-  virtual void readRequest() = 0;
-  virtual void writeRemoteAddress(std::ostream &os) const = 0;
-  virtual void writeResponse() = 0;
-
-  void processRequest() {
-    wrapped_request.emplace(shared_from_this(), request, response);
-    g_server->handleRequest(*wrapped_request);
+  void run() {
+    auto self = this->shared_from_this();
+    net::dispatch(stream.get_executor(), [self]() { self->doRead(); });
   }
 
-  void writeLog() {
+private:
+  void doRead() {
+    parser.emplace();
+    stream.expires_after(std::chrono::seconds(300));
+    auto self = this->shared_from_this();
+    http::async_read(
+        stream, buffer, *parser,
+        [self](beast::error_code ec, std::size_t bytes_transferred) {
+          self->onRead(ec, bytes_transferred);
+        });
+  }
+
+  void onRead(beast::error_code ec, std::size_t bytes_transferred) {
+    (void)bytes_transferred;
+    if (ec == http::error::end_of_stream)
+      return doClose();
+    if (ec) {
+      // Disabled because it prints "Connection reset by peer" frequently.
+      // std::cerr << "read: " << ec.message() << "\n";
+      return;
+    }
+    handleRequest(server, parser->release(), queue);
+    if (!queue.isFull())
+      doRead();
+  }
+
+  void onWrite(bool close, beast::error_code ec,
+               std::size_t bytes_transferred) {
+    (void)bytes_transferred;
+    if (ec) {
+      // Disabled because it prints "broken pipe" for every request.
+      // std::cerr << "write: " << ec.message() << "\n";
+      return;
+    }
+    if (close)
+      return doClose();
+    if (queue.onWrite())
+      doRead();
+  }
+
+  void doClose() {
+    beast::error_code ec;
+    stream.socket().shutdown(tcp::socket::shutdown_send, ec);
+  }
+
+  void writeLog(const http::response<http::string_body> &response,
+                const http::request<http::string_body> &request) {
     // https://en.wikipedia.org/wiki/Common_Log_Format
 
     // There are so many successful requests, writing the log is actually a
@@ -148,96 +278,54 @@ protected:
                   std::localtime(&time));
 
     std::lock_guard lock(g_stdout_mutex);
-    writeRemoteAddress(std::cout);
+    writeEndpoint(std::cout, stream.socket().local_endpoint());
     std::cout << " - - [" << time_buffer << "] \"" << request.method_string()
               << " " << request.target() << " HTTP/" << (request.version() / 10)
               << "." << (request.version() % 10) << "\" "
               << response.result_int() << " " << body_size << "\r\n";
   }
-
-  void sendResponse() {
-    wrapped_request->responded = true;
-    wrapped_request.reset();
-    response.content_length(response.body().size());
-    writeLog();
-    request = {};
-    writeResponse();
-  }
 };
-} // end anonymous namespace
-
-template <typename T>
-static void writeEndpoint(std::ostream &os, const T &endpoint) {
-  os << "-";
-}
-
-static void writeEndpoint(std::ostream &os, const tcp::endpoint &endpoint) {
-  os << endpoint.address();
-}
-
-void http_request::sendBody(const llvm::Twine &body) {
-  response.body() = body.str();
-  connection->sendResponse();
-}
-
-void http_request::sendEmptyBody() {
-  response.body().clear();
-  connection->sendResponse();
-}
+} // namespace
 
 namespace {
-template <typename Protocol> class Connection : public ConnectionBase {
+template <typename Protocol>
+class Listener : public std::enable_shared_from_this<Listener<Protocol>> {
+  net::io_context &ioc;
+  typename Protocol::acceptor acceptor;
+  Server &server;
+
 public:
-  Connection(typename Protocol::socket socket) : socket(std::move(socket)) {}
-  ~Connection() override {}
-
-protected:
-  void readRequest() override {
-    auto self = shared_from_this();
-    http::async_read(socket, buffer, request,
-                     [self](beast::error_code ec, std::size_t) {
-                       if (!ec)
-                         self->processRequest();
-                     });
+  Listener(net::io_context &ioc, typename Protocol::endpoint endpoint,
+           Server &server)
+      : ioc(ioc), acceptor(net::make_strand(ioc)), server(server) {
+    acceptor.open(endpoint.protocol());
+    acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.bind(endpoint);
+    acceptor.listen(net::socket_base::max_listen_connections);
   }
 
-  void writeRemoteAddress(std::ostream &os) const override {
-    writeEndpoint(os, socket.remote_endpoint());
-  }
-
-  void writeResponse() override {
-    auto self = shared_from_this();
-    http::async_write(socket, response,
-                      [self](beast::error_code ec, std::size_t) {
-                        self->response = {};
-                        if (!ec)
-                          self->readRequest();
-                      });
+  void run() {
+    auto self = this->shared_from_this();
+    net::dispatch(acceptor.get_executor(), [self]() { self->doAccept(); });
   }
 
 private:
-  typename Protocol::socket socket;
+  void doAccept() {
+    auto self = this->shared_from_this();
+    acceptor.async_accept(
+        net::make_strand(ioc),
+        [self](beast::error_code ec, typename Protocol::socket socket) {
+          self->onAccept(ec, std::move(socket));
+        });
+  }
+
+  void onAccept(beast::error_code ec, typename Protocol::socket socket) {
+    if (!ec)
+      std::make_shared<HTTPSession<Protocol>>(std::move(socket), server)->run();
+    doAccept();
+  }
 };
 } // end anonymous namespace
-
-template <typename Protocol>
-static void asyncAccept(typename Protocol::acceptor &acceptor) {
-  acceptor.async_accept(
-      [&](beast::error_code ec, typename Protocol::socket socket) {
-        if (!ec)
-          std::make_shared<Connection<Protocol>>(std::move(socket))->start();
-        asyncAccept<Protocol>(acceptor);
-      });
-}
-
-template <typename Protocol>
-static void serve(const typename Protocol::endpoint &local_endpoint) {
-  net::io_context ioc{1};
-  typename Protocol::acceptor acceptor{ioc, local_endpoint};
-  asyncAccept<Protocol>(acceptor);
-  llvm::errs() << "Server started!\n";
-  ioc.run();
-}
 
 int main(int argc, char **argv) {
   InitTool X(argc, argv);
@@ -248,27 +336,58 @@ int main(int argc, char **argv) {
   // the store can take a long time if database logs need to be replayed.
   auto store = Store::open(GetStoreUri());
 
+  // Create the protocol-agnostic Server instance.
   Server server(*store);
-  g_server = &server;
 
+  int thread_count;
+  Optional<llvm::ThreadPoolStrategy> strategy_or_none =
+      llvm::get_threadpool_strategy(threads_option);
+  if (!strategy_or_none)
+    llvm::report_fatal_error("invalid number of threads");
+  thread_count = strategy_or_none->compute_thread_count();
+  thread_count = std::max(thread_count, 1);
+  if (thread_count == 0)
+    llvm::report_fatal_error("invalid number of threads");
+
+  net::io_context ioc{thread_count};
+
+  // Create and launch a listening port.
   auto uri_or_none = URI::parse(listen_url);
   if (!uri_or_none) {
     llvm::errs() << "Invalid URL: " << listen_url << "\n";
     llvm::errs() << "Try http://127.0.0.1:8000/\n";
     return 1;
   }
-  net::io_context ioc{1};
   if (uri_or_none->scheme == "http" || uri_or_none->scheme == "tcp") {
     auto const address = net::ip::make_address(uri_or_none->host);
     unsigned short port = static_cast<unsigned short>(uri_or_none->port);
-    serve<tcp>({address, port});
+    std::make_shared<Listener<tcp>>(ioc, tcp::endpoint{address, port}, server)
+        ->run();
   } else if (uri_or_none->scheme == "unix") {
-    serve<local::stream_protocol>(uri_or_none->getPathString());
+    std::make_shared<Listener<local::stream_protocol>>(
+        ioc, uri_or_none->getPathString(), server)
+        ->run();
   } else {
     llvm::errs() << "Invalid scheme: " << uri_or_none->scheme << "\n";
     llvm::errs() << "Use http, tcp, or unix\n";
     return 1;
   }
+
+  // TODO: do we need to capture SIGINT/SIGTERM like the example code?
+
+  // Run the I/O service on the requested number of threads.
+  std::vector<std::thread> threads;
+  threads.reserve(thread_count - 1);
+  for (int i = 0; i < thread_count - 1; ++i) {
+    threads.emplace_back([&ioc] { ioc.run(); });
+  }
+  llvm::errs() << "Server started!\n";
+  ioc.run();
+
+  // It's impossible to get here because we never call ioc.stop().
+
+  for (auto &thread : threads)
+    thread.join();
 
   return 0;
 }
