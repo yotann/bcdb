@@ -218,7 +218,9 @@ public:
 private:
   void doRead() {
     parser.emplace();
-    stream.expires_after(std::chrono::seconds(300));
+    parser->body_limit({}); // disable request size limit
+    // Don't set an expiration time for the request (if the client is
+    // processing something, it may not send any requests for many minutes).
     auto self = this->shared_from_this();
     http::async_read(
         stream, buffer, *parser,
@@ -232,8 +234,7 @@ private:
     if (ec == http::error::end_of_stream)
       return doClose();
     if (ec) {
-      // Disabled because it prints "Connection reset by peer" frequently.
-      // std::cerr << "read: " << ec.message() << "\n";
+      std::cerr << "read: " << ec.message() << "\n";
       return;
     }
     handleRequest(server, parser->release(), queue);
@@ -245,8 +246,7 @@ private:
                std::size_t bytes_transferred) {
     (void)bytes_transferred;
     if (ec) {
-      // Disabled because it prints "broken pipe" for every request.
-      // std::cerr << "write: " << ec.message() << "\n";
+      std::cerr << "write: " << ec.message() << "\n";
       return;
     }
     if (close)
