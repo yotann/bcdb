@@ -29,35 +29,46 @@ public:
   // been assigned to a worker.
   std::deque<PendingCall *> unstarted_calls;
 
+  // The queue of calls we have assigned to workers that have timed out without
+  // receiving a response.
+  std::deque<PendingCall *> calls_to_retry;
+
   // The actual PendingCalls.
   std::map<Call, PendingCall> calls;
 
-  // Delete all PendingCalls from the start of unstarted_calls that have
-  // already completed. (These are calls for which a client has already
-  // submitted a result to us, even though we didn't assign them to a worker.)
-  void deleteSomeUnstartedCalls();
+  // Delete all PendingCalls from the start of unstarted_calls and
+  // calls_to_retry that have already been completed. (Either by a worker we
+  // previously assigned the call to and then timed out, or an unrelated worker
+  // that happens to have completed the call on its own.)
+  void deleteSomeFinishedCalls();
 };
 
 // Keeps track of a single call we need to evaluate. A PendingCall can be
-// deleted, and has a fixed location in memory. All member variables and
-// functions, except read access to call_group, are protected by
-// call_group->mutex.
+// deleted (by a thread that holds call_group->mutex), and has a fixed location
+// in memory. All member variables and functions, except read access to
+// call_group, are protected by call_group->mutex.
 class PendingCall {
 public:
   CallGroup *call_group;
   Call call;
 
-  // Whether the evaluation has been assigned to a worker.
-  bool started = false;
+  // Whether the evaluation is currently assigned to a worker. If false, this
+  // call is necessarily queued in CallGroup::unstarted_calls or
+  // CallGroup::calls_to_retry; if true, this call isn't in either queue.
+  bool assigned = false;
 
+  // The time when this job was assigned to a worker. Only valid if
+  // this->assigned is true.
   std::chrono::time_point<std::chrono::steady_clock> start_time;
-  unsigned minutes_to_report;
+
+  // The number of minutes to wait after assigning this job to a worker before
+  // timing out and requeuing it. Only used if this->assigned is true.
+  unsigned timeout_minutes;
 
   // Whether the evaluation has been completed.
   bool finished = false;
 
-  PendingCall(CallGroup *call_group, const Call &call)
-      : call_group(call_group), call(call) {}
+  PendingCall(CallGroup *call_group, const Call &call);
 
   // Delete this PendingCall from the parent CallGroup if possible.
   void deleteIfPossible();

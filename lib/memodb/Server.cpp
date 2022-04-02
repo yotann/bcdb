@@ -16,13 +16,16 @@
 #include "memodb/Request.h"
 #include "memodb/URI.h"
 
-static const unsigned DEFAULT_CALL_TIMEOUT = 600;
-
 using namespace memodb;
 using llvm::SmallVector;
 using llvm::StringRef;
 namespace chrono = std::chrono;
 using std::chrono::steady_clock;
+
+// Requeue a job if it has been assigned to a worker for this duration without
+// a response. The job's timeout will increase exponentially each time it is
+// requeued.
+static const unsigned INITIAL_TIMEOUT_MINUTES = 4;
 
 static bool isLegalUTF8(llvm::StringRef str) {
   auto source = reinterpret_cast<const llvm::UTF8 *>(str.data());
@@ -30,7 +33,7 @@ static bool isLegalUTF8(llvm::StringRef str) {
   return llvm::isLegalUTF8String(&source, sourceEnd);
 }
 
-void CallGroup::deleteSomeUnstartedCalls() {
+void CallGroup::deleteSomeFinishedCalls() {
   while (!unstarted_calls.empty()) {
     PendingCall *pending_call = unstarted_calls.front();
     if (!pending_call->finished)
@@ -38,13 +41,24 @@ void CallGroup::deleteSomeUnstartedCalls() {
     unstarted_calls.pop_front();
     calls.erase(pending_call->call);
   }
+  while (!calls_to_retry.empty()) {
+    PendingCall *pending_call = calls_to_retry.front();
+    if (!pending_call->finished)
+      break;
+    calls_to_retry.pop_front();
+    calls.erase(pending_call->call);
+  }
 }
 
+PendingCall::PendingCall(CallGroup *call_group, const Call &call)
+    : call_group(call_group), call(call),
+      timeout_minutes(INITIAL_TIMEOUT_MINUTES) {}
+
 void PendingCall::deleteIfPossible() {
-  if (started) {
+  if (assigned) {
     call_group->calls.erase(call);
   } else {
-    call_group->deleteSomeUnstartedCalls();
+    call_group->deleteSomeFinishedCalls();
   }
 }
 
@@ -229,7 +243,7 @@ void Server::handleRequestCall(Request &request,
     if (request.method != Request::Method::POST)
       return request.sendMethodNotAllowed("POST");
     // POST /call/.../.../evaluate
-    unsigned timeout = DEFAULT_CALL_TIMEOUT;
+    unsigned timeout = 600;
     auto body = request.getContentNode(store, Node(node_map_arg));
     if (!body)
       return;
@@ -358,12 +372,23 @@ void Server::handleRequestWorker(Request &request) {
   for (CallGroup *call_group : worker_group->call_groups) {
     // No deadlock: we don't hold any other mutexes.
     std::lock_guard<std::mutex> cg_lock(call_group->mutex);
-    // TODO: time out unstarted calls if nothing has requested them recently.
-    call_group->deleteSomeUnstartedCalls();
+    call_group->deleteSomeFinishedCalls();
     if (call_group->unstarted_calls.empty())
       continue;
     PendingCall *pending_call = call_group->unstarted_calls.front();
     call_group->unstarted_calls.pop_front();
+    sendCallToWorker(*pending_call, request);
+    return;
+  }
+
+  for (CallGroup *call_group : worker_group->call_groups) {
+    // No deadlock: we don't hold any other mutexes.
+    std::lock_guard<std::mutex> cg_lock(call_group->mutex);
+    call_group->deleteSomeFinishedCalls();
+    if (call_group->calls_to_retry.empty())
+      continue;
+    PendingCall *pending_call = call_group->calls_to_retry.front();
+    call_group->calls_to_retry.pop_front();
     sendCallToWorker(*pending_call, request);
     return;
   }
@@ -406,15 +431,20 @@ void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
   if (item.second) {
     // New PendingCall, add it to the queue.
     call_group.unstarted_calls.push_back(&pending_call);
-  } else if (pending_call.started) {
-    // Print a warning if the job was started many minutes ago. Maybe the
-    // worker crashed.
+  } else if (pending_call.assigned) {
+    // Print a warning and requeue the job if it was started many minutes ago.
+    // Maybe the worker crashed.
     auto minutes = chrono::floor<chrono::minutes>(steady_clock::now() -
                                                   pending_call.start_time);
-    if (minutes.count() >= pending_call.minutes_to_report) {
+    if (minutes.count() >= pending_call.timeout_minutes) {
       llvm::errs() << "Job in progress for " << minutes.count()
-                   << " minutes: " << pending_call.call << "\n";
-      pending_call.minutes_to_report *= 2;
+                   << " minutes: " << pending_call.call
+                   << "; queued for retry\n";
+      // Exponentially increase timeout, to limit overhead if the old worker is
+      // still running and this job is just really slow.
+      pending_call.timeout_minutes *= 2;
+      pending_call.assigned = false;
+      call_group.calls_to_retry.push_back(&pending_call);
     }
   }
 }
@@ -440,8 +470,6 @@ void Server::handleCallResult(const Call &call, Link result) {
 
 void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
   assert(!worker.responded);
-  // TODO: add "timeout" key
-  // TODO: add "uri" key
   Node node(node_map_arg,
             {
                 {"func", Node(utf8_string_arg, pending_call.call.Name)},
@@ -450,8 +478,6 @@ void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
   for (const CID &arg : pending_call.call.Args)
     node["args"].emplace_back(store, arg);
   worker.sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
-  pending_call.started = true;
+  pending_call.assigned = true;
   pending_call.start_time = steady_clock::now();
-  // Report long-running job after 4 minutes.
-  pending_call.minutes_to_report = 4;
 }
