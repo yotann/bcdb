@@ -243,20 +243,13 @@ void Server::handleRequestCall(Request &request,
     if (request.method != Request::Method::POST)
       return request.sendMethodNotAllowed("POST");
     // POST /call/.../.../evaluate
-    unsigned timeout = 600;
     auto body = request.getContentNode(store, Node(node_map_arg));
     if (!body)
       return;
     if (!body->is_map())
       return request.sendError(Request::Status::BadRequest, std::nullopt,
                                "Invalid body kind", std::nullopt);
-    if (body->count("timeout")) {
-      if (!(*body)["timeout"].is<unsigned>())
-        return request.sendError(Request::Status::BadRequest, std::nullopt,
-                                 "Invalid body field: timeout", std::nullopt);
-      timeout = (*body)["timeout"].as<unsigned>();
-    }
-    return handleEvaluateCall(request, std::move(*call), timeout);
+    return handleEvaluateCall(request, std::move(*call));
 
   } else if (args_str) {
     if (request.method != Request::Method::GET &&
@@ -351,10 +344,8 @@ void Server::handleRequestWorker(Request &request) {
                                "/problems/invalid-worker-info",
                                "Provided worker info is invalid", std::nullopt);
     worker_group = &worker_groups[key];
-    // No deadlock: worker_group.mutex is inaccessible to other threads (they
-    // could only reach it by going through worker_groups, but that's protected
-    // by Server::mutex, which we currently hold).
-    std::unique_lock wg_lock(worker_group->mutex);
+    // Other threads can't access this worker_group yet, because worker_groups
+    // is protected by our lock on Server::mutex. So it's safe to modify.
     for (const Node &func : (*info_or_null)["funcs"].list_range()) {
       if (!func.is<StringRef>())
         continue;
@@ -362,34 +353,35 @@ void Server::handleRequestWorker(Request &request) {
       CallGroup &call_group = call_groups[func.as<StringRef>()];
       worker_group->call_groups.emplace_back(&call_group);
     }
-    wg_lock.unlock();
     lock.unlock();
   } else {
     worker_group = &iter->getValue();
     lock.unlock();
   }
 
+  // Submit all possible unstarted_calls before we submit any jobs from
+  // calls_to_retry (which have already been assigned at least once).
   for (CallGroup *call_group : worker_group->call_groups) {
     // No deadlock: we don't hold any other mutexes.
-    std::lock_guard<std::mutex> cg_lock(call_group->mutex);
+    std::unique_lock<std::mutex> cg_lock(call_group->mutex);
     call_group->deleteSomeFinishedCalls();
     if (call_group->unstarted_calls.empty())
       continue;
     PendingCall *pending_call = call_group->unstarted_calls.front();
     call_group->unstarted_calls.pop_front();
-    sendCallToWorker(*pending_call, request);
+    sendCallToWorker(*pending_call, request, std::move(cg_lock));
     return;
   }
 
   for (CallGroup *call_group : worker_group->call_groups) {
     // No deadlock: we don't hold any other mutexes.
-    std::lock_guard<std::mutex> cg_lock(call_group->mutex);
+    std::unique_lock<std::mutex> cg_lock(call_group->mutex);
     call_group->deleteSomeFinishedCalls();
     if (call_group->calls_to_retry.empty())
       continue;
     PendingCall *pending_call = call_group->calls_to_retry.front();
     call_group->calls_to_retry.pop_front();
-    sendCallToWorker(*pending_call, request);
+    sendCallToWorker(*pending_call, request, std::move(cg_lock));
     return;
   }
 
@@ -398,7 +390,7 @@ void Server::handleRequestWorker(Request &request) {
                                  Request::CacheControl::Ephemeral);
 }
 
-void Server::handleEvaluateCall(Request &request, Call call, unsigned timeout) {
+void Server::handleEvaluateCall(Request &request, Call call) {
   // It's common for the result to already be in the store. Optimistically
   // check for that case before we bother locking any mutexes.
   auto result = store.resolveOptional(call);
@@ -468,7 +460,8 @@ void Server::handleCallResult(const Call &call, Link result) {
   pending_call.deleteIfPossible();
 }
 
-void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
+void Server::sendCallToWorker(PendingCall &pending_call, Request &worker,
+                              std::unique_lock<std::mutex> call_group_lock) {
   assert(!worker.responded);
   Node node(node_map_arg,
             {
@@ -477,7 +470,11 @@ void Server::sendCallToWorker(PendingCall &pending_call, Request &worker) {
             });
   for (const CID &arg : pending_call.call.Args)
     node["args"].emplace_back(store, arg);
-  worker.sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
   pending_call.assigned = true;
   pending_call.start_time = steady_clock::now();
+
+  // Unlock the mutex after we're done using pending_call, but before we call
+  // Request::sendContentNode (which may be expensive).
+  call_group_lock.unlock();
+  worker.sendContentNode(node, std::nullopt, Request::CacheControl::Ephemeral);
 }

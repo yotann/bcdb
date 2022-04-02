@@ -439,8 +439,6 @@ Store &ClientEvaluator::getStore() { return *store; }
 
 std::optional<Link> ClientEvaluator::tryEvaluate(const Call &call,
                                                  bool inc_started_if_success) {
-  // TODO: we need some way to set the timeout parameter.
-
   SmallVector<char, 256> buffer;
   llvm::raw_svector_ostream os(buffer);
   os << call << "/evaluate";

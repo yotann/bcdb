@@ -75,13 +75,11 @@ public:
 };
 
 // Keeps track of all workers with a single worker information CID. A
-// WorkerGroup is never deleted, and has a fixed location in memory. All member
-// variables and functions are protected by WorkerGroup::mutex, except
-// call_groups (which is read-only after creation).
+// WorkerGroup is never deleted, and has a fixed location in memory. There's no
+// mutex, which is okay because all fields are currently read-only after
+// creation.
 class WorkerGroup {
 public:
-  std::mutex mutex;
-
   // All the CallGroups for funcs that these workers can handle.
   llvm::SmallVector<CallGroup *, 0> call_groups;
 };
@@ -105,9 +103,10 @@ private:
                          std::optional<llvm::StringRef> args_str,
                          std::optional<llvm::StringRef> sub_str);
   void handleRequestWorker(Request &request);
-  void handleEvaluateCall(Request &request, Call call, unsigned timeout);
+  void handleEvaluateCall(Request &request, Call call);
   void handleCallResult(const Call &call, Link result);
-  void sendCallToWorker(PendingCall &pending_call, Request &worker);
+  void sendCallToWorker(PendingCall &pending_call, Request &worker,
+                        std::unique_lock<std::mutex> call_group_lock);
 
   Store &store;
 
