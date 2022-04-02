@@ -535,10 +535,16 @@ void ClientEvaluator::updateWorkerInfo() {
 void ClientEvaluator::workerThreadImpl(unsigned num_threads) {
   using namespace std::chrono_literals;
 
-  // work_stealing hangs if there's only 1 thread:
-  // https://github.com/boostorg/fiber/issues/217#issuecomment-1064516311
+  // work_stealing would be faster, but it busywaits if there's nothing to do,
+  // which is undesirable.
+  //
+  // TODO: is it worth writing our own work stealing algorithm that avoids
+  // busywaiting? Keeping track of priorities would also be nice; we could
+  // prioritize existing jobs over new ones, and potentially eliminate the need
+  // for work_semaphore.
   if (num_threads > 1)
-    fibers::use_scheduling_algorithm<fibers::algo::work_stealing>(num_threads);
+    fibers::use_scheduling_algorithm<fibers::algo::shared_work>(
+        /*suspend*/ true);
 
   while (true) {
     work_semaphore.acquire();
