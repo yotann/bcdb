@@ -110,11 +110,18 @@ include_directories(${LLVM_INCLUDE_DIR})
 
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/bcdb/include)
 include_directories(${PROJECT_SOURCE_DIR}/memodb/include)
 include_directories("${PROJECT_SOURCE_DIR}/third_party/dragonbox/include")
 
 add_custom_target(UnitTests)
 
+add_subdirectory(bcdb/lib)
+add_subdirectory(bcdb/tools/bc-align)
+add_subdirectory(bcdb/tools/bc-imitate)
+add_subdirectory(bcdb/tools/bc-join)
+add_subdirectory(bcdb/tools/bc-split)
+add_subdirectory(bcdb/tools/bcdb)
 add_subdirectory(lib)
 add_subdirectory(memodb/lib)
 add_subdirectory(memodb/tools/memodb)
