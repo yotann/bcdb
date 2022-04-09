@@ -1,4 +1,4 @@
-add_llvm_unittest(MemoDBTests
+add_unittest(UnitTests MemoDBTests
   CborLoadTest.cpp
   CborSaveTest.cpp
   CIDTest.cpp
@@ -13,5 +13,6 @@ add_llvm_unittest(MemoDBTests
 )
 
 target_link_libraries(MemoDBTests PRIVATE
+  gmock
   libmemodb
 )

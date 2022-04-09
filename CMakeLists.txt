@@ -110,9 +110,16 @@ include_directories(${LLVM_INCLUDE_DIR})
 
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/memodb/include)
 include_directories("${PROJECT_SOURCE_DIR}/third_party/dragonbox/include")
 
+add_custom_target(UnitTests)
+
 add_subdirectory(lib)
+add_subdirectory(memodb/lib)
+add_subdirectory(memodb/tools/memodb)
+add_subdirectory(memodb/tools/memodb-server)
+add_subdirectory(memodb/unittests)
 add_subdirectory(test)
 add_subdirectory(third_party)
 add_subdirectory(tools)
