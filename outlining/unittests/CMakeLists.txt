@@ -1,7 +1,8 @@
-add_llvm_unittest(OutliningTests
+add_unittest(UnitTests OutliningTests
   LinearProgramTest.cpp
 )
 
 target_link_libraries(OutliningTests PRIVATE
+  gmock
   liboutlining
 )
