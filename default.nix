@@ -120,7 +120,7 @@ in rec {
 
   inherit tensorflow mlLLVMModel;
 
-  sllim = pkgs.callPackage ./experiments/sllim {
+  sllim = pkgs.callPackage ./sllim {
     inherit bcdb;
     llvm = llvm13-assert;
   };
