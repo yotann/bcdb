@@ -1,5 +1,8 @@
 # Semantic Outlining
 
+**WORK IN PROGRESS:** this code is still under development and is not ready for
+use yet.
+
 ## Performing outlining manually
 
 These instructions assume you have built the BCDB and installed it in `PATH`.
@@ -28,9 +31,9 @@ nix-build -A pkgsBitcode.netpbm
 bc-imitate extract result*/bin/ppmtomitsu | opt -Oz --strip-debug > ppmtomitsu.bc
 ```
 
-See [nix/bitcode-overlay](../../nix/bitcode-overlay/README.md) for
-more instructions. The outliner doesn't support debugging info, and it doesn't
-make much sense to run it on an unoptimized program, so you should run `opt -Oz
+See [nix/bitcode-overlay](../nix/bitcode-overlay/README.md) for more
+instructions. The outliner doesn't support debugging info, and it doesn't make
+much sense to run it on an unoptimized program, so you should run `opt -Oz
 --strip-debug` if necessary.
 
 ### 3. Initialize the MemoDB store
@@ -274,11 +277,10 @@ different parts of the outlining process:
   `smout.greedy_solution_vN` to a module and gives the result to
   `smout.outlined_module_vN`.
 
-See [Funcs.h](../../include/outlining/Funcs.h) and
-[Funcs.cpp](../../lib/outlining/Funcs.cpp) for the actual code. And remember
-that all the func names have version numbers, which you can see in Funcs.cpp
-(for example, `smout.candidates` might actually be called
-`smout.candidates_v1`).
+See [Funcs.h](include/outlining/Funcs.h) and [Funcs.cpp](lib/Funcs.cpp) for the
+actual code. And remember that all the func names have version numbers, which
+you can see in Funcs.cpp (for example, `smout.candidates` might actually be
+called `smout.candidates_v1`).
 
 You can use `memodb get /call` to list all funcs that currently have results in
 MemoDB. You can use `memodb get /call/smout.greedy_solution` to see all the
@@ -296,5 +298,5 @@ delete all candidates from the set except one, and then apply
 `smout.outlined_module` to the new set, in order to find out what happens when
 you only outline one candidate.
 
-[MemoDB tutorial]: ../memodb/tutorial.md
-[REST API]: ../memodb/rest-api.md
+[MemoDB tutorial]: ../memodb/docs/tutorial.md
+[REST API]: ../memodb/docs/rest-api.md

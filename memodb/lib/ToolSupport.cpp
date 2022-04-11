@@ -22,7 +22,7 @@ bool memodb::OptionHasCategory(llvm::cl::Option &O,
 }
 
 static void printVersion(llvm::raw_ostream &os) {
-  os << "BCDB (https://github.com/yotann/bcdb-private):\n  ";
+  os << "BCDB (https://github.com/yotann/bcdb):\n  ";
   os << "revision " << REVISION_DESCRIPTION_FINAL << "\n  ";
   os << "using LLVM " << LLVM_VERSION_STRING << "\n  ";
   os << "enabled features:";

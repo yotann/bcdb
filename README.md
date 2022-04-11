@@ -1,22 +1,31 @@
 # The Bitcode Database _(bcdb)_
 
-[![Tests](https://github.com/yotann/bcdb-private/actions/workflows/tests.yml/badge.svg)](https://github.com/yotann/bcdb-private/actions/workflows/tests.yml)
-[![Lint](https://github.com/yotann/bcdb-private/actions/workflows/lint.yml/badge.svg)](https://github.com/yotann/bcdb-private/actions/workflows/lint.yml)
+[![Tests](https://github.com/yotann/bcdb/actions/workflows/tests.yml/badge.svg)](https://github.com/yotann/bcdb/actions/workflows/tests.yml)
+[![Lint](https://github.com/yotann/bcdb/actions/workflows/lint.yml/badge.svg)](https://github.com/yotann/bcdb/actions/workflows/lint.yml)
 [![Cachix cache](https://img.shields.io/badge/cachix-bcdb-blue.svg)](https://bcdb.cachix.org)
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
 
 A database and infrastructure for distributed processing of LLVM bitcode.
 
 The Bitcode Database (BCDB) is a research tool being developed as part of the
-[ALLVM Project](https://publish.illinois.edu/allvm-project/) at UIUC. Features:
+[ALLVM Project](https://publish.illinois.edu/allvm-project/) at UIUC. It has
+the following subprojects:
 
-- Stores huge amounts of LLVM bitcode in an SQLite or RocksDB database.
-- Automatically deduplicates bitcode at the function level.
-- Performs Guided Linking, which can optimize dynamically linked code as though
-  it were statically linked. See [`docs/guided_linking`](docs/guided_linking/)
-  for details and instructions.
-- Caches the results of analyses and optimizations.
-- Supports distributed computing for a code outlining optimization.
+- [MemoDB](./memodb): A content-addressable store and a memoizing distributed
+  processing framework backed by SQLite or RocksDB. It can cache the results of
+  various analyses and optimizations.
+- [BCDB proper](./bcdb): Builds on MemoDB to store massive amount of LLVM
+  bitcode and automatically deduplicate the bitcode at the function level. All
+  the other subprojects are build on BCDB.
+- [Guided Linking](./guided_linking): A tool that can optimize dynamically
+  linked code as though it were statically linked.
+- [Outlining](./outlining): A work-in-progress optimization to reduce code size
+  using outlining.
+- [SLLIM](./sllim): A easy-to-use tool to apply various code size optimizations
+  (including our outliner) to existing software without messing around with
+  build systems.
+- [Nix bitcode overlay](./nix/bitcode-overlay): Nix expressions to
+  automatically build lots of Linux packages in the form of LLVM bitcode.
 
 ## Table of Contents
 
@@ -111,15 +120,7 @@ cache, which includes prebuilt versions of LLVM. Simply install Cachix and run
 
 ## Usage
 
-- The BCDB proper: see [BCDB CLI](docs/bcdb/cli.md).
-- The Nixpkgs bitcode overlay: see [nix/bitcode-overlay](nix/bitcode-overlay/).
-- The guided linking experiments: see [nix/gl-experiments](nix/gl-experiments/).
-- Other subprojects: start from [docs/README.md](docs/README.md).
-
-## Design
-
-See [docs/README.md](docs/README.md) for more information about the design of
-each subproject.
+See the subproject subdirectories for usage instructions and more documentation.
 
 ## Maintainer
 
@@ -133,5 +134,5 @@ contact
 
 ## License
 
-Apache License 2.0 with LLVM Exceptions, copyright 2018–2021 Sean Bartell and
+Apache License 2.0 with LLVM Exceptions, copyright 2018–2022 Sean Bartell and
 other contributors. See license in [LICENSE.TXT](LICENSE.TXT).

@@ -2,7 +2,7 @@
 #
 # To use this file, run:
 #
-#   doxygen docs/Doxyfile
+#   doxygen Doxyfile
 #
 # from the main bcdb directory.
 
@@ -10,7 +10,7 @@ PROJECT_NAME           = "BCDB"
 #PROJECT_NUMBER         =
 PROJECT_BRIEF          = "The Bitcode Database"
 OUTPUT_DIRECTORY       = build/doxygen
-STRIP_FROM_INC_PATH    = include
+STRIP_FROM_INC_PATH    = bcdb/include memodb/include outlining/include
 JAVADOC_AUTOBRIEF      = YES
 QT_AUTOBRIEF           = YES
 
@@ -29,7 +29,7 @@ SORT_GROUP_NAMES       = NO
 WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = YES
 
-INPUT                  = include lib tools
+INPUT                  = bcdb guided_linking memodb outlining
 RECURSIVE              = YES
 USE_MDFILE_AS_MAINPAGE =
 

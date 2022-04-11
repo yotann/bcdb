@@ -23,4 +23,4 @@ semantically identical to the original module.
 
 See [BCDB CLI].
 
-[BCDB CLI]: ./cli.md
+[BCDB CLI]: ./docs/cli.md

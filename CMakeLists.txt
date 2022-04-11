@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.13)
 
 project(BCDB
   VERSION 0.1.0
-  HOMEPAGE_URL "https://github.com/yotann/bcdb-private"
+  HOMEPAGE_URL "https://github.com/yotann/bcdb"
   LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)

@@ -29,17 +29,17 @@ See the [MemoDB data model].
 
 - From the command line: use the `memodb` program. See the [Tutorial].
 - From C++: see the [C++ class list] and look through the header files. You can
-  also generate documentation by running `doxygen docs/Doxyfile` in the
-  top-level BCDB directory; documentation will go in `build/doxygen/html`.
+  also generate documentation by running `doxygen Doxyfile` in the top-level
+  BCDB directory; documentation will go in `build/doxygen/html`.
 - From other languages: see the [REST API documentation].
 
 ## Rationales
 
 See the [MemoDB data model] and [comparisons of protocols and libraries].
 
-[C++ class list]: ./classes.md
-[comparisons of protocols and libraries]: ./comparisons.md
-[debugging]: ./debugging.md
-[MemoDB data model]: ./data-model.md
-[REST API documentation]: ./rest-api.md
-[Tutorial]: ./tutorial.md
+[C++ class list]: ./docs/classes.md
+[comparisons of protocols and libraries]: ./docs/comparisons.md
+[debugging]: ./docs/debugging.md
+[MemoDB data model]: ./docs/data-model.md
+[REST API documentation]: ./docs/rest-api.md
+[Tutorial]: ./docs/tutorial.md

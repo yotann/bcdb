@@ -15,9 +15,9 @@ a plugin. See the links above to learn more about the technique.
 
 Our implementation of guided linking is integrated into the BCDB, as the
 command `bcdb gl`. The main body of the guided linking code is in
-[`lib/BCDB/GuidedLinker.cpp`](../../lib/BCDB/GuidedLinker.cpp). It's built on
-[`lib/BCDB/Merge.cpp`](../../lib/BCDB/Merge.cpp), which is used to merge
-modules together and handle symbol conflicts.
+[`lib/GuidedLinker.cpp`](../../lib/GuidedLinker.cpp). It's built on
+[`lib/Merge.cpp`](../../lib/Merge.cpp), which is used to merge modules together
+and handle symbol conflicts.
 
 ## Performing guided linking with Nix
 
@@ -25,7 +25,7 @@ The recommended way to use the tool is to install [Nix](https://nixos.org/) and
 use our Nix expressions, which automatically build Linux packages in bitcode
 form and apply guided linking. Simple builds can be set up with less than 10
 lines of code. For more details, see
-[nix/gl-experiments](../../nix/gl-experiments).
+[nix/gl-experiments](../nix/gl-experiments).
 
 ## Performing guided linking manually
 
@@ -33,8 +33,7 @@ These instructions assume you have built the BCDB and installed it in `PATH`.
 
 ### 1. Obtain bitcode for the desired package
 
-See [nix/bitcode-overlay](../../nix/bitcode-overlay/README.md) for
-instructions.
+See [nix/bitcode-overlay](../nix/bitcode-overlay/README.md) for instructions.
 
 ### 2. Initialize the BCDB file
 
