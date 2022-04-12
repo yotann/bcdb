@@ -33,7 +33,6 @@ the following subprojects:
   - [Dependencies](#dependencies)
   - [Building dependencies automatically with Nix](#building-dependencies-automatically-with-nix)
 - [Usage](#usage)
-- [Design](#design)
 - [Maintainer](#maintainer)
 - [License](#license)
 
