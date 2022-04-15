@@ -12,14 +12,14 @@ define void @f() {
 }
 
 ; DEFINE: declare void @g()
-; MODULE: @g = ifunc void (), i8* ()* @r
-; JOINED: @g = ifunc void (), i8* ()* @r
-@g = ifunc void (), i8* ()* @r
+; MODULE: @g = ifunc void (), void ()* ()* @r
+; JOINED: @g = ifunc void (), void ()* ()* @r
+@g = ifunc void (), void ()* ()* @r
 
 ; DEFINE: declare void @h()
-; MODULE: @h = weak hidden ifunc void (), i8* ()* @r
-; JOINED: @h = weak hidden ifunc void (), i8* ()* @r
-@h = weak hidden ifunc void (), i8* ()* @r
+; MODULE: @h = weak hidden ifunc void (), void ()* ()* @r
+; JOINED: @h = weak hidden ifunc void (), void ()* ()* @r
+@h = weak hidden ifunc void (), void ()* ()* @r
 
 ; DEFINE-NOT: @r
-declare i8* @r()
+declare void ()* @r()

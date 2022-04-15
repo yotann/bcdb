@@ -13,9 +13,13 @@
 #include <llvm/IR/Module.h>
 #include <llvm/MC/MCCodeEmitter.h>
 #include <llvm/MC/MCStreamer.h>
+#if LLVM_VERSION_MAJOR >= 14
+#include <llvm/MC/TargetRegistry.h>
+#else
+#include <llvm/Support/TargetRegistry.h>
+#endif
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/FormattedStream.h>
-#include <llvm/Support/TargetRegistry.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/Transforms/Utils/Cloning.h>
@@ -27,6 +31,7 @@
 
 using namespace bcdb;
 using namespace llvm;
+using llvm::Twine;
 
 namespace {
 // Prints a module with comments showing the size model results, for debugging.
@@ -165,7 +170,7 @@ SizeModelResults::SizeModelResults(Function &f) : f(f) {
   const Target *target =
       TargetRegistry::lookupTarget(cloned->getTargetTriple(), error);
   if (!target) {
-    report_fatal_error("Can't find target triple: " + error);
+    report_fatal_error("Can't find target triple: " + Twine(error));
   }
   TargetOptions options;
   std::unique_ptr<TargetMachine> target_machine(

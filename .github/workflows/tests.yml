@@ -11,6 +11,7 @@ jobs:
           - bcdb-llvm11
           - bcdb-llvm12
           - bcdb-llvm13
+          - bcdb-llvm14
           - bcdb-clang-sanitize
           - bcdb-without-optional-deps
     runs-on: ubuntu-latest

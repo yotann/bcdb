@@ -22,9 +22,17 @@ bcdb::FindGlobalReferences(GlobalValue *Root,
   SmallPtrSet<GlobalValue *, 8> Result;
   SmallVector<Value *, 8> Todo;
 
-  if (GlobalIndirectSymbol *GIS = dyn_cast<GlobalIndirectSymbol>(Root))
-    if (ForcedSameModule)
+  if (ForcedSameModule) {
+#if LLVM_VERSION_MAJOR >= 14
+    if (GlobalAlias *GA = dyn_cast<GlobalAlias>(Root))
+      ForcedSameModule->insert(GA->getAliaseeObject());
+    else if (GlobalIFunc *GIF = dyn_cast<GlobalIFunc>(Root))
+      ForcedSameModule->insert(GIF->getResolverFunction());
+#else
+    if (GlobalIndirectSymbol *GIS = dyn_cast<GlobalIndirectSymbol>(Root))
       ForcedSameModule->insert(GIS->getBaseObject());
+#endif
+  }
 
   // TODO: visit function/instruction metadata?
   for (auto &Op : Root->operands())

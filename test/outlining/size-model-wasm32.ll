@@ -1,6 +1,8 @@
+; REQUIRES: llvm14
+
 ; RUN: %outopt -size-model -analyze %s | FileCheck %s
 
-target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128-ni:1"
+target datalayout = "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20"
 target triple = "wasm32"
 
 ; CHECK: estimated call instruction size: 6 bytes
@@ -16,7 +18,7 @@ define i32 @collatz_len(i32 %0) {
 
 ; CHECK: 3:
 3:
-; CHECK-NEXT: %4 = {{.*}} ; 5 bytes
+; CHECK-NEXT: %4 = {{.*}} ; {{[0-9]+}} bytes
   %4 = icmp eq i32 %0, 1
 ; CHECK-NEXT: br i1 %4, {{.*}} ; 2 bytes
   br i1 %4, label %17, label %6
@@ -34,19 +36,19 @@ define i32 @collatz_len(i32 %0) {
   %7 = phi i32 [ %15, %6 ], [ 0, %3 ]
 ; CHECK-NEXT: %8 = {{.*}} ; 0 bytes
   %8 = phi i32 [ %14, %6 ], [ %0, %3 ]
-; CHECK-NEXT: %9 = {{.*}} ; 5 bytes
+; CHECK-NEXT: %9 = {{.*}} ; {{[0-9]+}} bytes
   %9 = and i32 %8, 1
 ; CHECK-NEXT: %10 = {{.*}} ; 0 bytes
   %10 = icmp eq i32 %9, 0
-; CHECK-NEXT: %11 = {{.*}} ; 5 bytes
+; CHECK-NEXT: %11 = {{.*}} ; {{[0-9]+}} bytes
   %11 = mul i32 %8, 3
 ; CHECK-NEXT: %12 = {{.*}} ; 1 bytes
   %12 = add i32 %11, 1
-; CHECK-NEXT: %13 = {{.*}} ; 5 bytes
+; CHECK-NEXT: %13 = {{.*}} ; {{[0-9]+}} bytes
   %13 = lshr i32 %8, 1
 ; CHECK-NEXT: %14 = {{.*}} ; 1 bytes
   %14 = select i1 %10, i32 %13, i32 %12
-; CHECK-NEXT: %15 = {{.*}} ; 7 bytes
+; CHECK-NEXT: %15 = {{.*}} ; {{[0-9]+}} bytes
   %15 = add i32 %7, 1
 ; CHECK-NEXT: %16 = {{.*}} ; 1 bytes
   %16 = icmp sgt i32 %14, 1

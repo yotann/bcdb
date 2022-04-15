@@ -28,7 +28,9 @@ class StandardPass(Pass):
     def add_default_params(self, config):
         if config.level >= 10:
             # TODO: in what situations is this actually an improvement?
-            self.add_param("enable-ml-inliner", "release")
+            # Disabled because we aren't currently building LLVM with
+            # TensorFlow support.
+            # self.add_param("enable-ml-inliner", "release")
 
     async def process(self, runner, params, link):
         args = ["-Oz"]

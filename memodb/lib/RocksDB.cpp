@@ -20,6 +20,7 @@
 #include "memodb/URI.h"
 
 using namespace memodb;
+using llvm::Twine;
 
 /*
  * Column families:
@@ -115,7 +116,7 @@ public:
 
 void RocksDBStore::checkStatus(const rocksdb::Status &Status) {
   if (!Status.ok())
-    llvm::report_fatal_error("RocksDB error: " + Status.ToString());
+    llvm::report_fatal_error("RocksDB error: " + Twine(Status.ToString()));
 }
 
 bool RocksDBStore::checkFound(const rocksdb::Status &Status) {

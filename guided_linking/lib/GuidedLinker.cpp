@@ -36,6 +36,7 @@ namespace {
 
 using namespace bcdb;
 using namespace llvm;
+using llvm::Twine;
 
 static cl::list<std::string> SpecialCaseFilename(
     "gl-symbol-list",
@@ -160,7 +161,7 @@ GLMerger::GLMerger(BCDB &bcdb, bool enable_weak_module)
   DefaultSymbolList =
       SpecialCaseList::create(LoadDefaultSymbolList().get(), Error);
   if (!Error.empty())
-    report_fatal_error(Error);
+    report_fatal_error(Twine(Error));
 
   EnableMustTail = true;
   EnableNameReuse = false;
@@ -765,6 +766,15 @@ static void fixBadTypeAttributes(CallBase &CB) {
   for (unsigned i = 0; i < CB.arg_size(); ++i) {
     for (Attribute attr : orig_attrs.getAttributes(i + 1)) {
       if (attr.isTypeAttribute()) {
+#if LLVM_VERSION_MAJOR >= 14
+        attrs = attrs.removeAttributeAtIndex(CB.getContext(), i + 1,
+                                             attr.getKindAsEnum());
+        attrs = attrs.addAttributeAtIndex(
+            CB.getContext(), i + 1,
+            Attribute::get(
+                CB.getContext(), attr.getKindAsEnum(),
+                CB.getArgOperand(i)->getType()->getPointerElementType()));
+#else
         attrs =
             attrs.removeAttribute(CB.getContext(), i + 1, attr.getKindAsEnum());
         attrs = attrs.addAttribute(
@@ -772,6 +782,7 @@ static void fixBadTypeAttributes(CallBase &CB) {
             Attribute::get(
                 CB.getContext(), attr.getKindAsEnum(),
                 CB.getArgOperand(i)->getType()->getPointerElementType()));
+#endif
       }
     }
   }

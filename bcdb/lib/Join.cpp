@@ -74,8 +74,13 @@ static AttributeList copyTypeAttributes(LLVMContext &C, AttributeList Source,
       if (attr.isTypeAttribute()) {
         Type *Ty = attr.getValueAsType();
         if (Ty) {
+#if LLVM_VERSION_MAJOR >= 14
+          Attrs = Attrs.removeAttributeAtIndex(C, i, attr.getKindAsEnum());
+          Attrs = Attrs.addAttributeAtIndex(C, i, attr);
+#else
           Attrs = Attrs.removeAttribute(C, i, attr.getKindAsEnum());
           Attrs = Attrs.addAttribute(C, i, attr);
+#endif
         }
       }
     }

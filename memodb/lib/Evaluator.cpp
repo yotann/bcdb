@@ -26,6 +26,7 @@
 #include "memodb_internal.h"
 
 using namespace memodb;
+using llvm::Twine;
 
 const Link &Future::get() {
   // The shared_future's state will be accessed from two places: this Future,
@@ -111,7 +112,7 @@ Link ThreadPoolEvaluator::evaluate(const Call &call, bool work_while_waiting) {
     return Link(getStore(), *cid_or_null);
   const auto func_iter = funcs.find(call.Name);
   if (func_iter == funcs.end())
-    llvm::report_fatal_error("No implementation of " + call.Name +
+    llvm::report_fatal_error("No implementation of " + Twine(call.Name) +
                              " available");
   PrettyStackTraceCall pretty_stack_trace(call);
   auto result = Link(getStore(), func_iter->getValue()(*this, call));

@@ -16,6 +16,7 @@
 #include "memodb/Store.h"
 
 using namespace memodb;
+using llvm::Twine;
 
 using std::int64_t;
 using std::uint64_t;
@@ -254,7 +255,7 @@ Node &Node::at(const llvm::StringRef &name) {
   auto &value = std::get<Map>(variant_);
   auto iter = value.find(name);
   if (iter == value.end())
-    llvm::report_fatal_error("Key \"" + std::string(name) + "\" not found");
+    llvm::report_fatal_error("Key \"" + name + "\" not found");
   return iter->value();
 }
 
@@ -262,7 +263,7 @@ const Node &Node::at(const llvm::StringRef &name) const {
   const auto &value = std::get<Map>(variant_);
   auto iter = value.find(name);
   if (iter == value.end())
-    llvm::report_fatal_error("Key \"" + std::string(name) + "\" not found");
+    llvm::report_fatal_error("Key \"" + name + "\" not found");
   return iter->value();
 }
 

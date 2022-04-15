@@ -162,7 +162,9 @@ Different size optimizations are enabled at different values of `SLLIM_LEVEL`:
 - `SLLIM_LEVEL=10`: Enable [Google's ML-based inlining
   heuristics](https://github.com/google/ml-compiler-opt). These are supposed to
   help reduce code size, but in the few tests we've done we've observed them to
-  *increase* code size, so they may be counterproductive.
+  *increase* code size, so they may be counterproductive. **Currently
+  disabled:** our Nix expressions don't build LLVM with the right version of
+  TensorFlow.
 
 **NOTE:** when smout is enabled (`SLLIM_LEVEL` 7 and up), optimization times
 are much longer because smout extracts and evaluates huge numbers of outlining

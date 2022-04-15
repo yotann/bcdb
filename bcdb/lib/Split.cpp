@@ -299,12 +299,21 @@ AttributeList DeclMaterializer::mapAttributeTypes(AttributeList Attrs) {
       if (attr.isTypeAttribute()) {
         Type *Ty = attr.getValueAsType();
         if (Ty) {
+#if LLVM_VERSION_MAJOR >= 14
+          Attrs = Attrs.removeAttributeAtIndex(DM.getContext(), i,
+                                               attr.getKindAsEnum());
+          Attrs = Attrs.addAttributeAtIndex(DM.getContext(), i,
+                                            Attribute::get(DM.getContext(),
+                                                           attr.getKindAsEnum(),
+                                                           TypeMap.get(Ty)));
+#else
           Attrs =
               Attrs.removeAttribute(DM.getContext(), i, attr.getKindAsEnum());
           Attrs = Attrs.addAttribute(DM.getContext(), i,
                                      Attribute::get(DM.getContext(),
                                                     attr.getKindAsEnum(),
                                                     TypeMap.get(Ty)));
+#endif
         }
       }
     }
