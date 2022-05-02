@@ -24,6 +24,8 @@ NodeOrCID extracted_caller(Evaluator &evaluator, Link func, Link callees);
 NodeOrCID outlined_module(Evaluator &evaluator, Link mod, Link solution);
 NodeOrCID optimized(Evaluator &evaluator, Link options, Link mod);
 NodeOrCID refinements_for_set(Evaluator &evaluator, Link options, Link members);
+NodeOrCID validatable_functions(Evaluator &evaluator, Link options,
+                                Link members);
 NodeOrCID refinements_for_group(Evaluator &evaluator, Link options,
                                 Link members);
 NodeOrCID grouped_refinements(Evaluator &evaluator, Link options, Link mod);
@@ -40,6 +42,7 @@ extern const char *extracted_caller_version;
 extern const char *outlined_module_version;
 extern const char *optimized_version;
 extern const char *refinements_for_set_version;
+extern const char *validatable_functions_version;
 extern const char *refinements_for_group_version;
 extern const char *grouped_refinements_version;
 

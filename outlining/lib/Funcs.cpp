@@ -18,6 +18,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/IPO/FunctionAttrs.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -62,9 +63,11 @@ const char *smout::extracted_caller_version = "smout.extracted_caller_v4";
 const char *smout::outlined_module_version = "smout.outlined_module_v0";
 const char *smout::optimized_version = "smout.optimized_v6";
 const char *smout::refinements_for_set_version = "smout.refinements_for_set_v0";
+const char *smout::validatable_functions_version =
+    "smout.validatable_functions_v0";
 const char *smout::refinements_for_group_version =
-    "smout.refinements_for_group_v2";
-const char *smout::grouped_refinements_version = "smout.grouped_refinements_v6";
+    "smout.refinements_for_group_v3";
+const char *smout::grouped_refinements_version = "smout.grouped_refinements_v7";
 
 static FunctionAnalysisManager makeFAM(const Node &options) {
   OutliningCandidatesOptions cand_opts;
@@ -76,15 +79,25 @@ static FunctionAnalysisManager makeFAM(const Node &options) {
       options.get_value_or<size_t>("max_nodes", cand_opts.max_nodes);
   cand_opts.min_caller_savings =
       options.get_value_or<int>("min_rough_caller_savings", 1);
+  auto aa_pipeline =
+      options.get_value_or<std::string>("aa_pipeline", "basic-aa");
 
-  FunctionAnalysisManager am;
+  PassBuilder pb;
+  FunctionAnalysisManager fam;
+
+  AAManager aa;
+  if (auto err = pb.parseAAPipeline(aa, aa_pipeline)) {
+    throw std::invalid_argument("invalid AA pipeline");
+  }
+  fam.registerPass([&] { return std::move(aa); });
+
   // TODO: Would it be faster to just register the analyses we need?
-  PassBuilder().registerFunctionAnalyses(am);
-  am.registerPass([] { return FalseMemorySSAAnalysis(); });
-  am.registerPass([=] { return OutliningCandidatesAnalysis(cand_opts); });
-  am.registerPass([] { return OutliningDependenceAnalysis(); });
-  am.registerPass([] { return SizeModelAnalysis(); });
-  return am;
+  pb.registerFunctionAnalyses(fam);
+  fam.registerPass([] { return FalseMemorySSAAnalysis(); });
+  fam.registerPass([=] { return OutliningCandidatesAnalysis(cand_opts); });
+  fam.registerPass([] { return OutliningDependenceAnalysis(); });
+  fam.registerPass([] { return SizeModelAnalysis(); });
+  return fam;
 }
 
 static void postprocessModule(Module &m) {
@@ -1377,6 +1390,34 @@ NodeOrCID smout::refinements_for_set(Evaluator &evaluator, Link options,
   return result;
 }
 
+NodeOrCID smout::validatable_functions(Evaluator &evaluator, Link options,
+                                       Link members) {
+  // Remove functions from members that we can't verify are equivalent to
+  // themselves (if we can't do that, we presumably can't verify them
+  // equivalent to any other functions, either). This can happen because Alive2
+  // doesn't support the function's metadata, etc.
+
+  Node options_verify = *options;
+  // verify_syntactic_eq forces Alive2 to go through the whole verification
+  // process, even though the Alive IR is identical, so we can find out whether
+  // the solver is able to handle this function.
+  options_verify["verify_syntactic_eq"] = true;
+  std::vector<Future> futures;
+  for (const Node &function : members->list_range()) {
+    CID cid = function.as<CID>();
+    futures.emplace_back(
+        evaluator.evaluateAsync("alive.tv_v2", options_verify, cid, cid));
+  }
+
+  Node result(node_list_arg);
+  for (std::size_t i = 0; i < members->size(); ++i) {
+    Future &future = futures[i];
+    if ((*future).at_or_null("valid") == true)
+      result.emplace_back((*members)[i]);
+  }
+  return result;
+}
+
 NodeOrCID smout::refinements_for_group(Evaluator &evaluator, Link options,
                                        Link members) {
   Node result = *members;
@@ -1399,8 +1440,10 @@ NodeOrCID smout::refinements_for_group(Evaluator &evaluator, Link options,
   Node set_node(node_list_arg);
   for (const CID &cid : unique)
     set_node.emplace_back(evaluator.getStore(), cid);
-  auto sets =
-      evaluator.evaluate(refinements_for_set_version, options, set_node);
+  auto validatable_functions =
+      evaluator.evaluate(validatable_functions_version, options, set_node);
+  auto sets = evaluator.evaluate(refinements_for_set_version, options,
+                                 validatable_functions);
 
   // Determine the best callee in each group.
   StringMap<CID> refined_callee;
@@ -1473,6 +1516,7 @@ void smout::registerFuncs(Evaluator &evaluator) {
   evaluator.registerFunc(outlined_module_version, &outlined_module);
   evaluator.registerFunc(optimized_version, &optimized);
   evaluator.registerFunc(refinements_for_set_version, &refinements_for_set);
+  evaluator.registerFunc(validatable_functions_version, &validatable_functions);
   evaluator.registerFunc(refinements_for_group_version, &refinements_for_group);
   evaluator.registerFunc(grouped_refinements_version, &grouped_refinements);
 }
