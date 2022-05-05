@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -174,6 +175,11 @@ void HTTPStore::open(StringRef uri, bool create_if_missing) {
   if (!uri_or_none)
     report_fatal_error("invalid HTTP URL");
   base_uri = std::move(*uri_or_none);
+
+  // Remove stale connection pointers in case a previous HTTPStore existed at
+  // the same address but was destroyed.
+  thread_connections.erase(this);
+
   getConn();
 }
 
@@ -381,6 +387,58 @@ private:
 };
 } // end anonymous namespace
 
+// Like std::shared_mutex, but for fibers (in particular, the thread that calls
+// unlock_shared() can be different from the thread that calls lock_shared()).
+namespace {
+class SharedMutex {
+public:
+  SharedMutex() {}
+  SharedMutex(const SharedMutex &) = delete;
+  void operator=(const SharedMutex &) = delete;
+
+  void lock() {
+    std::unique_lock lock(mutex);
+    exclusive_cv.wait(lock,
+                      [this]() { return !exclusive_held && !shared_count; });
+    exclusive_held = true;
+  }
+
+  void unlock() {
+    {
+      std::unique_lock lock(mutex);
+      assert(exclusive_held);
+      exclusive_held = false;
+    }
+    exclusive_cv.notify_one();
+    shared_cv.notify_all();
+  }
+
+  void lock_shared() {
+    std::unique_lock lock(mutex);
+    shared_cv.wait(lock, [this]() { return !exclusive_held; });
+    shared_count++;
+  }
+
+  void unlock_shared() {
+    {
+      std::unique_lock lock(mutex);
+      assert(!exclusive_held);
+      assert(shared_count > 0);
+      shared_count--;
+      if (shared_count)
+        return; // pointless to notify exclusive_cv
+    }
+    exclusive_cv.notify_one();
+  }
+
+private:
+  bool exclusive_held = false;
+  int shared_count = 0;
+  fibers::mutex mutex;
+  fibers::condition_variable exclusive_cv, shared_cv;
+};
+} // end anonymous namespace
+
 namespace {
 class ClientEvaluator : public Evaluator {
 public:
@@ -407,7 +465,14 @@ private:
   std::optional<CID> worker_info_cid;
 
   std::vector<std::thread> worker_threads;
+  // Used to limit the number of threads that run CPU-intensive code
+  // (evaluating functions from this->funcs) at once.
   CountingSemaphore work_semaphore;
+  // Used to ensure the ClientEvaluator isn't destroyed until all fibers
+  // referring to it have terminated. Each fiber holds a shared lock while it's
+  // running; it's impossible to acquire and exclusive lock until all shared
+  // locks are released.
+  SharedMutex work_shared_mutex;
 
   // These counters only increase, never decrease.
   std::atomic<unsigned> num_requested = 0, num_started = 0, num_finished = 0;
@@ -572,7 +637,13 @@ void ClientEvaluator::workerThreadImpl(unsigned num_threads) {
     for (const auto &arg : response.body["args"].list_range())
       call.Args.emplace_back(arg.as<CID>());
 
-    fibers::fiber([this, call]() {
+    // Prevent this ClientEvaluator from being destroyed while the fiber is
+    // running. We need to acquire the shared lock here, before the fiber
+    // starts, to ensure the ClientEvaluator isn't destroyed in the time
+    // between the creation of the fiber and its execution.
+    std::shared_lock shared_lock(work_shared_mutex);
+
+    fibers::fiber([this, call, shared_lock = std::move(shared_lock)]() {
       // FIXME: doesn't work with fibers
       // PrettyStackTraceCall stack_printer(call);
       std::function<NodeOrCID(Evaluator &, const Call &)> *func;
@@ -591,6 +662,12 @@ void ClientEvaluator::workerThreadImpl(unsigned num_threads) {
       work_semaphore.release();
     }).detach();
   }
+
+  // Prevent this thread from terminating until all fibers (across all threads)
+  // have terminated. The ClientEvaluator destructor will wait until this
+  // thread terminates. We do this here, rather than the destructor, to ensure
+  // there are threads available for any remaining fibers to be scheduled on.
+  std::unique_lock lock(work_shared_mutex);
 }
 
 std::unique_ptr<Evaluator> memodb::createClientEvaluator(llvm::StringRef path,
