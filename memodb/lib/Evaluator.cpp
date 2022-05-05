@@ -57,9 +57,8 @@ public:
   ThreadPoolEvaluator(std::unique_ptr<Store> store, unsigned num_threads = 0);
   ~ThreadPoolEvaluator() override;
   Store &getStore() override;
-  Link evaluate(const Call &call, bool work_while_waiting = true) override;
-  Future evaluateAsync(const Call &call,
-                       bool work_while_waiting = true) override;
+  Link evaluate(const Call &call) override;
+  Future evaluateAsync(const Call &call) override;
   void registerFunc(
       llvm::StringRef name,
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
@@ -106,7 +105,7 @@ ThreadPoolEvaluator::~ThreadPoolEvaluator() {
 
 Store &ThreadPoolEvaluator::getStore() { return *store; }
 
-Link ThreadPoolEvaluator::evaluate(const Call &call, bool work_while_waiting) {
+Link ThreadPoolEvaluator::evaluate(const Call &call) {
   auto cid_or_null = getStore().resolveOptional(call);
   if (cid_or_null)
     return Link(getStore(), *cid_or_null);
@@ -120,8 +119,7 @@ Link ThreadPoolEvaluator::evaluate(const Call &call, bool work_while_waiting) {
   return result;
 }
 
-Future ThreadPoolEvaluator::evaluateAsync(const Call &call,
-                                          bool work_while_waiting) {
+Future ThreadPoolEvaluator::evaluateAsync(const Call &call) {
   num_queued++;
   std::shared_future<Link> future =
       std::async(std::launch::deferred, &ThreadPoolEvaluator::evaluateDeferred,

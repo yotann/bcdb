@@ -445,9 +445,8 @@ public:
   ClientEvaluator(std::unique_ptr<HTTPStore> store, unsigned num_threads);
   ~ClientEvaluator() override;
   Store &getStore() override;
-  Link evaluate(const Call &call, bool work_while_waiting = true) override;
-  Future evaluateAsync(const Call &call,
-                       bool work_while_waiting = true) override;
+  Link evaluate(const Call &call) override;
+  Future evaluateAsync(const Call &call) override;
   void registerFunc(
       llvm::StringRef name,
       std::function<NodeOrCID(Evaluator &, const Call &)> func) override;
@@ -529,7 +528,7 @@ std::optional<Link> ClientEvaluator::tryEvaluate(const Call &call,
   return Link(*store, response.body.as<CID>());
 }
 
-Link ClientEvaluator::evaluate(const Call &call, bool work_while_waiting) {
+Link ClientEvaluator::evaluate(const Call &call) {
   ++num_requested;
   if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
     printProgress();
@@ -549,8 +548,7 @@ Link ClientEvaluator::evaluateDeferred(const Call &call) {
   return *result;
 }
 
-Future ClientEvaluator::evaluateAsync(const Call &call,
-                                      bool work_while_waiting) {
+Future ClientEvaluator::evaluateAsync(const Call &call) {
   ++num_requested;
   if (auto stderr_lock = std::unique_lock(stderr_mutex, std::try_to_lock)) {
     printProgress();
